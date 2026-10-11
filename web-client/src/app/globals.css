@@ -137,6 +137,14 @@ html[lang="ar"] body {
   font-family: var(--font-plex-arabic), ui-sans-serif, system-ui, sans-serif;
 }
 
+/*
+  Plus Jakarta Sans is used for Vietnamese throughout, matching Flutter LdTypography,
+  to ensure perfect Vietnamese diacritics and typography.
+*/
+html[lang="vi"] body {
+  font-family: var(--font-plus-jakarta), var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+}
+
 * {
   box-sizing: border-box;
 }

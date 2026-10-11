@@ -1,15 +1,14 @@
 import type { Metadata, Viewport } from "next";
-import { Space_Grotesk, IBM_Plex_Sans_Arabic } from "next/font/google";
+import { Space_Grotesk, IBM_Plex_Sans_Arabic, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { SessionProvider } from "@/lib/session";
 import { ToastHost } from "@/components/ui";
 
 /*
-  The same pairing the Flutter client uses.
-
-  Space Grotesk was designed for Latin and has no Arabic glyphs, so Arabic is
-  not this face with substituted letters: it is IBM Plex Sans Arabic, chosen to
-  sit beside it. Both are loaded here and one css rule switches on lang.
+  The same font scale the Flutter client uses (LdTypography).
+  - Plus Jakarta Sans: Vietnamese (vi)
+  - Space Grotesk: Latin / English (en)
+  - IBM Plex Sans Arabic: Arabic (ar)
 */
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -22,6 +21,13 @@ const plexArabic = IBM_Plex_Sans_Arabic({
   subsets: ["arabic"],
   weight: ["400", "600", "700"],
   variable: "--font-plex-arabic",
+  display: "swap",
+});
+
+const plusJakarta = Plus_Jakarta_Sans({
+  subsets: ["vietnamese", "latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-plus-jakarta",
   display: "swap",
 });
 
@@ -42,7 +48,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="vi" dir="ltr" data-theme="dark">
-      <body className={`${spaceGrotesk.variable} ${plexArabic.variable}`}>
+      <body className={`${spaceGrotesk.variable} ${plexArabic.variable} ${plusJakarta.variable}`}>
         <ThemeProvider>
           <SessionProvider>
             <ToastHost>{children}</ToastHost>

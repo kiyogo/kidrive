@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { Icon, type Glyph } from "@/components/Icon";
-import { Tappable, useToast } from "@/components/ui";
+import { Button, Dialog, Tappable, TextField, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { bytes, dateTime, relative } from "@/lib/format";
 import { useL10n } from "@/lib/l10n";
 import { categoryOf, isFolder, type NodeModel } from "@/lib/models";
-import { colorForCategory } from "@/lib/tokens";
+import { colorForCategory, folderSwatches } from "@/lib/tokens";
 import { forget, isKept, keep } from "@/lib/offline";
 
 /**
@@ -39,8 +39,13 @@ export function DetailsPane({
   const tone = colorForCategory(category);
   const [versions, setVersions] = useState<{ id: string; size_bytes: number; created_at: number }[]>([]);
   const [kept, setKept] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameName, setRenameName] = useState(node.name);
+  const [colorOpen, setColorOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => setKept(isKept(node.id)), [node.id]);
+  useEffect(() => setRenameName(node.name), [node.name]);
 
   // versions are a file's own history, so a folder has none to ask about
   useEffect(() => {
@@ -164,13 +169,18 @@ export function DetailsPane({
         <Action
           glyph="rename"
           label={t.actionRename}
-          onClick={async () => {
-            const name = window.prompt(t.actionRename, node.name);
-            if (!name || name === node.name) return;
-            await api.patch(Api.node(node.id), { name });
-            onChanged();
+          onClick={() => {
+            setRenameName(node.name);
+            setRenameOpen(true);
           }}
         />
+        {isFolder(node) && (
+          <Action
+            glyph="grid"
+            label={t.folderColor}
+            onClick={() => setColorOpen(true)}
+          />
+        )}
         <Action
           glyph="trash"
           label={t.confirmTrashTitle}
@@ -233,6 +243,109 @@ export function DetailsPane({
           </div>
         </div>
       )}
+
+      {/* Rename dialog */}
+      <Dialog open={renameOpen} onClose={() => setRenameOpen(false)} title={t.actionRename}>
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!renameName.trim() || renameName.trim() === node.name) {
+              setRenameOpen(false);
+              return;
+            }
+            setIsSubmitting(true);
+            try {
+              await api.patch(Api.node(node.id), { name: renameName.trim() });
+              setRenameOpen(false);
+              onChanged();
+            } catch (err) {
+              toast(err instanceof Error ? err.message : t.errorUnexpectedTitle, "error");
+            } finally {
+              setIsSubmitting(false);
+            }
+          }}
+          style={{ display: "flex", flexDirection: "column", gap: 20 }}
+        >
+          <TextField
+            autoFocus
+            value={renameName}
+            onChange={setRenameName}
+            label={t.renameTo}
+          />
+          <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+            <Button
+              label={t.actionCancel}
+              variant="quiet"
+              expand={false}
+              compact
+              onClick={() => setRenameOpen(false)}
+            />
+            <Button
+              label={t.actionSave}
+              variant="primary"
+              expand={false}
+              compact
+              busy={isSubmitting}
+              type="submit"
+            />
+          </div>
+        </form>
+      </Dialog>
+
+      {/* Folder color picker dialog */}
+      <Dialog
+        open={colorOpen}
+        onClose={() => setColorOpen(false)}
+        title={t.folderColor}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <div className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
+            {node.name}
+          </div>
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 12,
+            justifyContent: "center",
+            padding: "8px 0",
+          }}
+        >
+          {Object.entries(folderSwatches).map(([key, hex]) => {
+            const isSelected = (node.color || "neutral") === key;
+            return (
+              <Tappable
+                key={key}
+                onClick={async () => {
+                  setColorOpen(false);
+                  try {
+                    await api.patch(Api.node(node.id), { color: key });
+                    onChanged();
+                  } catch (err) {
+                    toast(err instanceof Error ? err.message : t.errorUnexpectedTitle, "error");
+                  }
+                }}
+                radius={22}
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: "50%",
+                  background: hex,
+                  border: `2px solid ${isSelected ? "var(--fg-primary)" : "transparent"}`,
+                  display: "grid",
+                  placeItems: "center",
+                  cursor: "pointer",
+                }}
+              >
+                {isSelected && (
+                  <Icon glyph="check" size={20} color="var(--bg-primary)" strokeWidth={2.4} />
+                )}
+              </Tappable>
+            );
+          })}
+        </div>
+      </Dialog>
     </aside>
   );
 }

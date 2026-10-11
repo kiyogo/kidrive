@@ -52,12 +52,14 @@ export function FilesBrowser({
   title,
   onOpenFolder,
   onPreview,
+  onSearch,
 }: {
   folderId: string;
   filter: "none" | "starred" | "recent" | "trash" | "shared";
   title: string;
   onOpenFolder: (node: NodeModel) => void;
   onPreview: (node: NodeModel) => void;
+  onSearch?: () => void;
 }) {
   const t = useL10n();
   const [nodes, setNodes] = useState<NodeModel[] | null>(null);
@@ -107,6 +109,52 @@ export function FilesBrowser({
       await api.patch(Api.node(renamingNode.id), { name: renameName.trim() });
       setRenamingNode(null);
       setRenameName("");
+      void load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const [recoloringNode, setRecoloringNode] = useState<NodeModel | null>(null);
+  const [movingNode, setMovingNode] = useState<NodeModel | null>(null);
+  const [targetFolders, setTargetFolders] = useState<{ id: string; name: string }[]>([]);
+
+  const openMoveDialog = async (node: NodeModel) => {
+    setMovingNode(node);
+    try {
+      const data = await api.get<{ nodes: NodeModel[] }>(Api.nodes, { parent_id: "" });
+      const folders = (data?.nodes ?? [])
+        .filter((n) => isFolder(n) && n.id !== node.id)
+        .map((n) => ({ id: n.id, name: n.name }));
+      setTargetFolders(folders);
+    } catch {
+      setTargetFolders([]);
+    }
+  };
+
+  const handleMove = async (targetParentId: string) => {
+    if (!movingNode) return;
+    setIsSubmitting(true);
+    try {
+      await api.patch(Api.node(movingNode.id), { parent_id: targetParentId });
+      toast(t.actionMove, "success");
+      setMovingNode(null);
+      void load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleRecolor = async (colorKey: string) => {
+    if (!recoloringNode) return;
+    setIsSubmitting(true);
+    try {
+      await api.patch(Api.node(recoloringNode.id), { color: colorKey });
+      setRecoloringNode(null);
       void load();
     } catch (e) {
       toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
@@ -320,7 +368,7 @@ export function FilesBrowser({
 
         {isMobile ? (
           <span style={{ display: "inline-flex", gap: 4 }}>
-            <UtilityButton glyph="search" title={t.search} onClick={() => setSearching((s) => !s)} />
+            <UtilityButton glyph="search" title={t.search} onClick={onSearch ?? (() => setSearching((s) => !s))} />
             <UtilityButton
               glyph="more"
               title={t.moreActions}
@@ -332,7 +380,7 @@ export function FilesBrowser({
              The wide field belongs to the desktop scaffold, and forcing it in
              here squeezes the folder name down to an ellipsis. */
           <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-            <UtilityButton glyph="search" title={t.search} onClick={() => setSearching((s) => !s)} />
+            <UtilityButton glyph="search" title={t.search} onClick={onSearch ?? (() => setSearching((s) => !s))} />
             <UtilityButton glyph="sort" title={t.sortBy} onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })} />
             <UtilityButton
               glyph={view === "grid" ? "list" : "grid"}
@@ -719,10 +767,11 @@ export function FilesBrowser({
                       ]
                     : []),
                   {
-                    label: menu.node.starred ? "Bỏ gắn sao" : "Gắn sao",
+                    label: menu.node.starred ? t.starred : t.starred,
                     glyph: (menu.node.starred ? "star-filled" : "star") as Glyph,
                     onClick: async () => {
-                      await api.post(Api.star(menu.node.id), { starred: !menu.node.starred });
+                      if (menu.node.starred) await api.del(Api.star(menu.node.id));
+                      else await api.post(Api.star(menu.node.id), {});
                       void load();
                     },
                   },
@@ -738,6 +787,20 @@ export function FilesBrowser({
                       setRenamingNode(menu.node);
                       setRenameName(menu.node.name);
                     },
+                  },
+                  ...(isFolder(menu.node)
+                    ? [
+                        {
+                          label: t.folderColor,
+                          glyph: "grid" as Glyph,
+                          onClick: () => setRecoloringNode(menu.node),
+                        },
+                      ]
+                    : []),
+                  {
+                    label: t.actionMove,
+                    glyph: "move" as Glyph,
+                    onClick: () => void openMoveDialog(menu.node),
                   },
                   {
                     label: t.confirmTrashTitle,
@@ -795,6 +858,116 @@ export function FilesBrowser({
             <Button label={t.actionSave} variant="primary" expand={false} compact busy={isSubmitting} type="submit" />
           </div>
         </form>
+      </Dialog>
+
+      {/* Folder recolor dialog */}
+      <Dialog
+        open={Boolean(recoloringNode)}
+        onClose={() => setRecoloringNode(null)}
+        title={t.folderColor}
+      >
+        {recoloringNode && (
+          <div>
+            <div style={{ marginBottom: 16 }}>
+              <div className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
+                {recoloringNode.name}
+              </div>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 12,
+                justifyContent: "center",
+                padding: "8px 0",
+              }}
+            >
+              {Object.entries(folderSwatches).map(([key, hex]) => {
+                const isSelected = (recoloringNode.color || "neutral") === key;
+                return (
+                  <Tappable
+                    key={key}
+                    onClick={() => void handleRecolor(key)}
+                    radius={22}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: "50%",
+                      background: hex,
+                      border: `2px solid ${isSelected ? "var(--fg-primary)" : "transparent"}`,
+                      display: "grid",
+                      placeItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {isSelected && (
+                      <Icon glyph="check" size={20} color="var(--bg-primary)" strokeWidth={2.4} />
+                    )}
+                  </Tappable>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </Dialog>
+
+      {/* Move dialog */}
+      <Dialog
+        open={Boolean(movingNode)}
+        onClose={() => setMovingNode(null)}
+        title={t.actionMove}
+      >
+        {movingNode && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
+              {movingNode.name}
+            </div>
+            <div style={{ maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+              <Tappable
+                onClick={() => void handleMove("")}
+                radius={8}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "10px 12px",
+                  border: "1px solid var(--stroke)",
+                  borderRadius: "var(--r-chip)",
+                }}
+              >
+                <Icon glyph="home" size={18} color="var(--accent)" />
+                <span className="t-body-md" style={{ flex: 1 }}>{t.navHome} (Root)</span>
+              </Tappable>
+              {targetFolders.map((f) => (
+                <Tappable
+                  key={f.id}
+                  onClick={() => void handleMove(f.id)}
+                  radius={8}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "10px 12px",
+                    border: "1px solid var(--stroke)",
+                    borderRadius: "var(--r-chip)",
+                  }}
+                >
+                  <Icon glyph="folder" size={18} color="var(--accent)" />
+                  <span className="t-body-md" style={{ flex: 1 }}>{f.name}</span>
+                </Tappable>
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <Button
+                label={t.actionCancel}
+                variant="quiet"
+                expand={false}
+                compact
+                onClick={() => setMovingNode(null)}
+              />
+            </div>
+          </div>
+        )}
       </Dialog>
     </div>
   );

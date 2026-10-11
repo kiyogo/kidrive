@@ -16,6 +16,7 @@ import { ActivityScreen, SettingsScreen, StorageScreen } from "@/components/sett
 import { GalleryScreen, TransfersScreen } from "@/components/gallery/Gallery";
 import { VideosScreen } from "@/components/gallery/VideosScreen";
 import { Preview } from "@/components/preview/Preview";
+import { SearchScreen } from "@/components/search/SearchScreen";
 import { Shell, type Section } from "@/components/Shell";
 import { Button, TextField } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -132,6 +133,15 @@ function Drive() {
         <VideosScreen onOpen={setPreview} />
       ) : section === "transfers" ? (
         <TransfersScreen />
+      ) : section === "search" ? (
+        <SearchScreen
+          onBack={() => setSection("files")}
+          onOpenFolder={(node) => {
+            setFolder([{ id: node.id, name: node.name }]);
+            setSection("files");
+          }}
+          onPreview={setPreview}
+        />
       ) : section in filterFor ? (
         <>
           {section === "files" && folder.length > 0 && (
@@ -144,6 +154,7 @@ function Drive() {
             title={titles[section]}
             onOpenFolder={(node) => setFolder((t) => [...t, { id: node.id, name: node.name }])}
             onPreview={setPreview}
+            onSearch={() => setSection("search")}
           />
         </>
       ) : null}
