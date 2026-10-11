@@ -79,6 +79,7 @@ function Drive() {
   const [folder, setFolder] = useState<{ id: string; name: string }[]>([]);
   const [preview, setPreview] = useState<{ node: NodeModel; nodes?: NodeModel[] } | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const [newFolderTrigger, setNewFolderTrigger] = useState(0);
 
   const openPreview = (node: NodeModel, nodes?: NodeModel[]) => {
     setPreview({ node, nodes });
@@ -124,6 +125,10 @@ function Drive() {
         if (s === "files") setFolder([]);
       }}
       onUpload={(files) => void pickFiles(files)}
+      onCreateFolder={() => {
+        if (section !== "files") setSection("files");
+        setNewFolderTrigger((n) => n + 1);
+      }}
     >
       {section === "settings" ? (
         <SettingsScreen />
@@ -147,20 +152,19 @@ function Drive() {
           onPreview={(n) => openPreview(n)}
         />
       ) : section in filterFor ? (
-        <>
-          {section === "files" && folder.length > 0 && (
-            <Breadcrumb trail={folder} onGo={(i) => setFolder(folder.slice(0, i + 1))} onRoot={() => setFolder([])} />
-          )}
-          <FilesBrowser
-            key={`${section}:${current.id}:${refresh}`}
-            folderId={section === "files" ? current.id : ""}
-            filter={filterFor[section]}
-            title={titles[section]}
-            onOpenFolder={(node) => setFolder((t) => [...t, { id: node.id, name: node.name }])}
-            onPreview={(n) => openPreview(n)}
-            onSearch={() => setSection("search")}
-          />
-        </>
+        <FilesBrowser
+          key={`${section}:${current.id}:${refresh}`}
+          folderId={section === "files" ? current.id : ""}
+          filter={filterFor[section]}
+          title={titles[section]}
+          trail={section === "files" ? folder : undefined}
+          onNavigateTrail={(i) => setFolder(folder.slice(0, i + 1))}
+          onRoot={() => setFolder([])}
+          createFolderTrigger={newFolderTrigger}
+          onOpenFolder={(node) => setFolder((t) => [...t, { id: node.id, name: node.name }])}
+          onPreview={(n) => openPreview(n)}
+          onSearch={() => setSection("search")}
+        />
       ) : null}
 
       {clashSheet}
@@ -175,51 +179,6 @@ function Drive() {
     </Shell>
   );
 }
-
-function Breadcrumb({
-  trail,
-  onGo,
-  onRoot,
-}: {
-  trail: { id: string; name: string }[];
-  onGo: (index: number) => void;
-  onRoot: () => void;
-}) {
-  const t = useL10n();
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "12px 20px 0",
-        flexWrap: "wrap",
-      }}
-      className="t-body-sm"
-    >
-      <button onClick={onRoot} style={btn}>
-        {t.myFiles}
-      </button>
-      {trail.map((c, i) => (
-        <span key={c.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span style={{ color: "var(--fg-muted)" }}>/</span>
-          <button onClick={() => onGo(i)} style={btn}>
-            {c.name}
-          </button>
-        </span>
-      ))}
-    </div>
-  );
-}
-
-const btn: React.CSSProperties = {
-  background: "none",
-  border: 0,
-  padding: 0,
-  font: "inherit",
-  color: "var(--accent)",
-  cursor: "pointer",
-};
 
 /* ------------------------------------------------------------------ gates */
 

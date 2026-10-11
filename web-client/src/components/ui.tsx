@@ -154,11 +154,71 @@ export function UtilityButton({
         alignItems: "center",
         justifyContent: "center",
         border: `1px solid ${active ? "var(--accent)" : "var(--stroke)"}`,
-        background: active ? "rgba(76,141,255,0.14)" : "transparent",
+        background: active ? "rgba(76,141,255,0.14)" : "var(--bg-elevated)",
         color: active ? "var(--accent)" : "var(--fg-primary)",
       }}
     >
       <Icon glyph={glyph} size={18} />
+    </Tappable>
+  );
+}
+
+export function RadioRow({
+  label,
+  subtitle,
+  selected,
+  onTap,
+  trailing,
+}: {
+  label: string;
+  subtitle?: string;
+  selected: boolean;
+  onTap: () => void;
+  trailing?: ReactNode;
+}) {
+  return (
+    <Tappable
+      onClick={onTap}
+      radius={14}
+      style={{
+        margin: "6px 0",
+        padding: "13px 14px",
+        background: selected ? "rgba(76, 141, 255, 0.1)" : "var(--bg-elevated)",
+        borderRadius: "var(--r-tile)",
+        border: `1px solid ${selected ? "var(--accent)" : "var(--stroke)"}`,
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        width: "100%",
+      }}
+    >
+      <span
+        style={{
+          width: 20,
+          height: 20,
+          borderRadius: 999,
+          border: `1.8px solid ${selected ? "var(--accent)" : "var(--stroke)"}`,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flex: "none",
+        }}
+      >
+        {selected && (
+          <span style={{ width: 9, height: 9, borderRadius: 999, background: "var(--accent)" }} />
+        )}
+      </span>
+      <span style={{ flex: 1, minWidth: 0, textAlign: "start" }}>
+        <span className="t-body-lg" style={{ display: "block", color: "var(--fg-primary)" }}>
+          {label}
+        </span>
+        {subtitle && (
+          <span className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 2, display: "block" }}>
+            {subtitle}
+          </span>
+        )}
+      </span>
+      {trailing}
     </Tappable>
   );
 }

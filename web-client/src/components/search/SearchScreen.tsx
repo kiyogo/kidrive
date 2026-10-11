@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { EmptyState, Spinner, Tappable } from "@/components/ui";
+import { categoryOfNode, FileTileIcon } from "@/components/files/FileTileIcon";
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { bytes, relative } from "@/lib/format";
 import { useL10n } from "@/lib/l10n";
-import { categoryOf, isFolder, type NodeModel } from "@/lib/models";
-import { colorForCategory } from "@/lib/tokens";
+import { isFolder, type NodeModel } from "@/lib/models";
 
 /**
  * Omnisearch screen, ported from features/search/pages/search_page.dart.
@@ -161,36 +161,57 @@ export function SearchScreen({
             message={t.emptySearchBody}
           />
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 900, margin: "0 auto" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 640, margin: "0 auto", width: "100%" }}>
             {results?.map((node) => {
               const folder = isFolder(node);
-              const category = categoryOf(node);
-              const tint = colorForCategory(category);
+              const category = categoryOfNode(node);
 
               return (
                 <Tappable
                   key={node.id}
                   onClick={() => (folder ? onOpenFolder(node) : onPreview(node))}
-                  radius={12}
+                  radius={14}
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: 14,
-                    padding: "12px 14px",
+                    gap: 12,
+                    padding: "9px 10px",
+                    margin: "2px 0",
                     background: "var(--bg-elevated)",
                     border: "1px solid var(--stroke)",
+                    borderRadius: "var(--r-tile)",
+                    width: "100%",
                   }}
                 >
-                  <Icon glyph={folder ? "folder" : "file"} size={22} color={tint} />
+                  <div
+                    style={{
+                      width: 42,
+                      height: 42,
+                      borderRadius: "var(--r-card)",
+                      background: "var(--bg-sunken)",
+                      border: "1px solid var(--stroke)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flex: "none",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <FileTileIcon
+                      category={category}
+                      size={24}
+                      folderColor={node.color}
+                    />
+                  </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="t-title-sm" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <div className="t-body-md" style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {node.name}
                     </div>
                     <div className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 2 }}>
-                      {folder ? "—" : bytes(node.size_bytes)} • {relative(node.updated_at)}
+                      {folder ? "—" : bytes(node.size_bytes)}  ·  {relative(node.updated_at)}
                     </div>
                   </div>
-                  {node.starred && <Icon glyph="star-filled" size={16} color="var(--accent)" />}
+                  {node.starred && <Icon glyph="star-filled" size={16} color="#E8935C" />}
                 </Tappable>
               );
             })}

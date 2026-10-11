@@ -75,16 +75,18 @@ export function Shell({
         <nav
           style={{
             position: "fixed",
-            insetInline: 12,
+            insetInline: 16,
             bottom: "calc(12px + env(safe-area-inset-bottom))",
             height: 68,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-around",
             background: "var(--bg-elevated)",
-            border: "1px solid var(--stroke)",
-            borderRadius: "var(--r-pill)",
+            border: "1.2px solid var(--stroke)",
+            borderRadius: 34,
+            boxShadow: "0 8px 28px rgba(0, 0, 0, 0.4)",
             zIndex: 500,
+            padding: "0 6px",
           }}
         >
           {compact.slice(0, 2).map((item) => (
@@ -94,16 +96,17 @@ export function Shell({
             onClick={() => setCreateSheetOpen(true)}
             radius={999}
             style={{
-              width: 52,
-              height: 52,
+              width: 50,
+              height: 50,
               background: "var(--accent)",
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
+              boxShadow: "0 4px 12px rgba(76, 141, 255, 0.38)",
             }}
             title={t.navCreate}
           >
-            <Icon glyph="plus" size={24} color="#FFFFFF" />
+            <Icon glyph="plus" size={24} color="#FFFFFF" strokeWidth={2.2} />
           </Tappable>
           {compact.slice(2).map((item) => (
             <BottomItem key={item.id} item={item} active={section === item.id} onClick={() => onNavigate(item.id)} />
@@ -112,6 +115,28 @@ export function Shell({
 
         <Sheet open={createSheetOpen} onClose={() => setCreateSheetOpen(false)} title={t.navCreate}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {onCreateFolder && (
+              <Tappable
+                onClick={() => {
+                  setCreateSheetOpen(false);
+                  onCreateFolder();
+                }}
+                radius={12}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                  padding: "16px 18px",
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--stroke)",
+                }}
+              >
+                <Icon glyph="folder" size={20} color="var(--accent)" />
+                <span className="t-body-md" style={{ fontWeight: 600 }}>
+                  {t.newFolder}
+                </span>
+              </Tappable>
+            )}
             <Tappable
               onClick={() => {
                 setCreateSheetOpen(false);
@@ -132,28 +157,6 @@ export function Shell({
                 {t.uploadFile}
               </span>
             </Tappable>
-            {onCreateFolder && (
-              <Tappable
-                onClick={() => {
-                  setCreateSheetOpen(false);
-                  onCreateFolder();
-                }}
-                radius={12}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 14,
-                  padding: "16px 18px",
-                  background: "var(--bg-elevated)",
-                  border: "1px solid var(--stroke)",
-                }}
-              >
-                <Icon glyph="folder-plus" size={20} color="var(--accent)" />
-                <span className="t-body-md" style={{ fontWeight: 600 }}>
-                  {t.newFolder}
-                </span>
-              </Tappable>
-            )}
           </div>
         </Sheet>
       </div>

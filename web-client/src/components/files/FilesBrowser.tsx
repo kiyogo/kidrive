@@ -51,6 +51,10 @@ export function FilesBrowser({
   folderId,
   filter,
   title,
+  trail,
+  onNavigateTrail,
+  onRoot,
+  createFolderTrigger,
   onOpenFolder,
   onPreview,
   onSearch,
@@ -58,6 +62,10 @@ export function FilesBrowser({
   folderId: string;
   filter: "none" | "starred" | "recent" | "trash" | "shared";
   title: string;
+  trail?: { id: string; name: string }[];
+  onNavigateTrail?: (index: number) => void;
+  onRoot?: () => void;
+  createFolderTrigger?: number;
   onOpenFolder: (node: NodeModel) => void;
   onPreview: (node: NodeModel) => void;
   onSearch?: () => void;
@@ -87,6 +95,13 @@ export function FilesBrowser({
   const [renamingNode, setRenamingNode] = useState<NodeModel | null>(null);
   const [renameName, setRenameName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (createFolderTrigger && createFolderTrigger > 0) {
+      setFolderName("");
+      setCreateFolderOpen(true);
+    }
+  }, [createFolderTrigger]);
 
   const handleCreateFolder = async () => {
     if (!folderName.trim()) return;
@@ -353,20 +368,80 @@ export function FilesBrowser({
         {/* the name keeps its width and the free space goes between it and the
             controls, so a folder name is never squeezed to an ellipsis while
             the toolbar has room to spare */}
-        <h1
-          className="t-title-lg"
-          style={{
-            margin: 0,
-            flex: "0 1 auto",
-            minWidth: 0,
-            maxWidth: "42%",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {title}
-        </h1>
+        <div style={{ flex: "1 1 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 6, overflow: "hidden" }}>
+          {isMobile && trail && trail.length > 0 && (
+            <Tappable
+              onClick={() => {
+                if (trail.length === 1) onRoot?.();
+                else onNavigateTrail?.(trail.length - 2);
+              }}
+              radius={22}
+              style={{ padding: 6, marginRight: 2, flex: "none" }}
+            >
+              <Icon glyph="chevron-left" size={20} />
+            </Tappable>
+          )}
+
+          {isDesktop && filter === "none" ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                overflowX: "auto",
+                whiteSpace: "nowrap",
+                padding: "4px 0",
+              }}
+            >
+              <Tappable
+                onClick={onRoot}
+                radius={10}
+                style={{
+                  padding: "4px 6px",
+                  color: trail && trail.length > 0 ? "var(--fg-secondary)" : "var(--fg-primary)",
+                  cursor: trail && trail.length > 0 ? "pointer" : "default",
+                }}
+              >
+                <span className={trail && trail.length > 0 ? "t-body-md" : "t-title-lg"}>
+                  {t.myFiles}
+                </span>
+              </Tappable>
+              {trail?.map((item, index) => {
+                const isLast = index === trail.length - 1;
+                return (
+                  <span key={item.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Icon glyph="chevron-right" size={14} color="var(--fg-muted)" />
+                    <Tappable
+                      onClick={() => (!isLast ? onNavigateTrail?.(index) : undefined)}
+                      radius={10}
+                      style={{
+                        padding: "4px 6px",
+                        color: isLast ? "var(--fg-primary)" : "var(--fg-secondary)",
+                        cursor: isLast ? "default" : "pointer",
+                      }}
+                    >
+                      <span className={isLast ? "t-title-sm" : "t-body-md"}>
+                        {item.name}
+                      </span>
+                    </Tappable>
+                  </span>
+                );
+              })}
+            </div>
+          ) : (
+            <h1
+              className="t-title-lg"
+              style={{
+                margin: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {title}
+            </h1>
+          )}
+        </div>
         <span style={{ flex: 1, minWidth: 16 }} />
 
         {isMobile ? (
@@ -1273,7 +1348,7 @@ function Tile({
  * on something shared with you.
  */
 function subtitleFor(node: NodeModel): string {
-  const join = (a: string, b: string) => [a, b].filter(Boolean).join(" · ");
+  const join = (a: string, b: string) => [a, b].filter(Boolean).join("  ·  ");
   const when = relative(node.updated_at);
   if (isFolder(node)) return node.owner ? join(node.owner.name, when) : when;
   const size = bytes(node.size_bytes);
@@ -1303,9 +1378,9 @@ function List({
   return (
     <div style={{ padding: "12px 16px 120px" }}>
       {nodes.map((node) => {
-        const category = categoryOf(node);
-        const tone = colorForCategory(category);
+        const cat = categoryOfNode(node);
         const selected = selection.has(node.id);
+        const selecting = selection.size > 0;
         return (
           <div
             key={node.id}
@@ -1326,18 +1401,36 @@ function List({
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 14,
-              padding: "10px 12px",
-              borderRadius: "var(--r-chip)",
+              gap: 12,
+              margin: "2px 0",
+              padding: "9px 10px",
+              borderRadius: "var(--r-tile)",
               border: `1px solid ${over === node.id || selected ? "var(--accent)" : "transparent"}`,
-              background: over === node.id || selected ? wash("#4C8DFF", 0.1) : "transparent",
+              background: over === node.id || selected ? "rgba(76, 141, 255, 0.1)" : "transparent",
               cursor: "pointer",
             }}
           >
+            {selecting && (
+              <span
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: 999,
+                  border: `1.6px solid ${selected ? "var(--accent)" : "var(--stroke)"}`,
+                  background: selected ? "var(--accent)" : "transparent",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flex: "none",
+                }}
+              >
+                {selected && <Icon glyph="check" size={14} color="#FFFFFF" strokeWidth={2.6} />}
+              </span>
+            )}
             <span
               style={{
-                width: 40,
-                height: 40,
+                width: 42,
+                height: 42,
                 flex: "none",
                 borderRadius: 10,
                 background: "var(--bg-elevated)",
@@ -1346,25 +1439,66 @@ function List({
                 alignItems: "center",
                 justifyContent: "center",
                 overflow: "hidden",
+                position: "relative",
               }}
             >
               {node.has_thumbnail ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={api.media(Api.thumbnail(node.id))} alt="" loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <img
+                  src={api.media(Api.thumbnail(node.id))}
+                  alt=""
+                  loading="lazy"
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
               ) : (
-                <Icon glyph={glyphForCategory[category] ?? "file"} size={19} color={tone} />
+                <FileTileIcon category={cat} size={36} folderColor={node.color} />
+              )}
+              {node.owner && (
+                <span style={{ position: "absolute", top: -2, left: -2 }}>
+                  <Avatar name={node.owner.name} seed={node.owner.avatar_seed} size={18} showBorder />
+                </span>
               )}
             </span>
             <span style={{ flex: 1, minWidth: 0 }}>
-              <span className="t-body-lg" style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {node.name}
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span
+                  className="t-body-lg"
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    color: "var(--fg-primary)",
+                  }}
+                >
+                  {node.name}
+                </span>
+                {node.starred && (
+                  <Icon glyph="star-filled" size={13} color="#E8935C" />
+                )}
+                {node.shared && (
+                  <Icon glyph="link" size={13} color="var(--accent)" />
+                )}
+                {kept.has(node.id) && (
+                  <Icon glyph="offline" size={13} color="var(--accent)" />
+                )}
               </span>
-              <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
+              <span className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 2, display: "block" }}>
                 {subtitleFor(node)}
               </span>
             </span>
-            {kept.has(node.id) && <Icon glyph="offline" size={16} color="var(--accent)" />}
-            {node.starred && <Icon glyph="star-filled" size={16} color="var(--accent)" />}
+            {!selecting && (
+              <Tappable
+                radius={18}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMenu({ x: e.clientX, y: e.clientY, node });
+                }}
+                style={{ padding: 8, color: "var(--fg-secondary)" }}
+                title="More"
+              >
+                <Icon glyph="more" size={18} />
+              </Tappable>
+            )}
           </div>
         );
       })}

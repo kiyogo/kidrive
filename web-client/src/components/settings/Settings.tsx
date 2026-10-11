@@ -7,9 +7,11 @@ import {
   Button,
   EmptyState,
   ListSkeleton,
+  RadioRow,
   Sheet,
   Tappable,
   TextField,
+  useDeviceClass,
   useToast,
 } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -60,45 +62,49 @@ export function SettingsScreen() {
   const t = useL10n();
   const { user, signOut, locale } = useSession();
   const { theme } = useTheme();
-  const [section, setSection] = useState<SectionId>("root");
+  const { isDesktop } = useDeviceClass();
+  const [mobileSection, setMobileSection] = useState<SectionId>("root");
+  const [desktopSection, setDesktopSection] = useState<SectionId>("account");
   const isAdmin = user?.role === "admin";
 
-  if (section !== "root") {
-    return <Detail section={section} onBack={() => setSection("root")} />;
-  }
+  const visibleSections = sections
+    .filter((s) => !s.adminOnly || isAdmin)
+    .filter((s) => s.id !== "two-factor" || !HIDE_TWO_FACTOR);
 
-  return (
-    <Page title={t.settings}>
-      {user && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            padding: 18,
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--stroke)",
-            borderRadius: "var(--r-card)",
-            marginBottom: 20,
-          }}
-        >
-          <Avatar name={user.display_name || user.username} />
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="t-title-sm" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {user.display_name || user.username}
-            </div>
-            <div className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-              {user.email || user.username} · {user.role === "admin" ? t.roleAdmin : t.roleMember}
+  if (!isDesktop) {
+    if (mobileSection !== "root") {
+      return <Detail section={mobileSection} onBack={() => setMobileSection("root")} />;
+    }
+
+    return (
+      <Page title={t.settings}>
+        {user && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              padding: 18,
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--stroke)",
+              borderRadius: "var(--r-card)",
+              marginBottom: 20,
+            }}
+          >
+            <Avatar name={user.display_name || user.username} />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div className="t-title-sm" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {user.display_name || user.username}
+              </div>
+              <div className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
+                {user.email || user.username} · {user.role === "admin" ? t.roleAdmin : t.roleMember}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {sections
-          .filter((s) => !s.adminOnly || isAdmin)
-          .filter((s) => s.id !== "two-factor" || !HIDE_TWO_FACTOR)
-          .map((s) => {
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {visibleSections.map((s) => {
             const value =
               s.id === "appearance"
                 ? theme === "system"
@@ -119,56 +125,172 @@ export function SettingsScreen() {
                 glyph={s.glyph}
                 label={t[s.key] as string}
                 value={value}
-                onClick={() => setSection(s.id)}
+                onClick={() => setMobileSection(s.id)}
               />
             );
           })}
-      </div>
+        </div>
 
-      <div style={{ marginTop: 24 }}>
-        <Button label={t.settingsSignOut} variant="danger" glyph="logout" onClick={() => void signOut()} />
+        <div style={{ marginTop: 24 }}>
+          <Button label={t.settingsSignOut} variant="danger" glyph="logout" onClick={() => void signOut()} />
+        </div>
+      </Page>
+    );
+  }
+
+  // Desktop view: LdDesktopScaffold with 64px header and LdMasterDetail
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: "100dvh" }}>
+      <header
+        style={{
+          height: 64,
+          padding: "0 16px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          borderBottom: "1px solid var(--stroke)",
+          background: "var(--bg-primary)",
+          flex: "none",
+        }}
+      >
+        <h1 className="t-title-lg" style={{ margin: 0 }}>
+          {t.settings}
+        </h1>
+        <Button
+          label={t.settingsSignOut}
+          glyph="logout"
+          variant="quiet"
+          compact
+          expand={false}
+          onClick={() => void signOut()}
+        />
+      </header>
+
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+        <aside
+          style={{
+            width: 220,
+            padding: 13,
+            borderRight: "1px solid var(--stroke)",
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            flex: "none",
+          }}
+        >
+          {visibleSections.map((s) => {
+            const isSelected = desktopSection === s.id;
+            return (
+              <Tappable
+                key={s.id}
+                onClick={() => setDesktopSection(s.id)}
+                radius={14}
+                style={{
+                  padding: "10px 12px",
+                  background: isSelected ? "rgba(76, 141, 255, 0.12)" : "transparent",
+                  borderRadius: "var(--r-tile)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  width: "100%",
+                  color: isSelected ? "var(--fg-primary)" : "var(--fg-secondary)",
+                  fontWeight: isSelected ? 600 : 400,
+                  cursor: "pointer",
+                }}
+              >
+                <Icon
+                  glyph={s.glyph}
+                  size={18}
+                  color={isSelected ? "var(--accent)" : "var(--fg-secondary)"}
+                />
+                <span className="t-body-md" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {t[s.key] as string}
+                </span>
+              </Tappable>
+            );
+          })}
+        </aside>
+
+        <main style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+          <div style={{ maxWidth: 640 }}>
+            <Detail section={desktopSection} embedded />
+          </div>
+        </main>
       </div>
-    </Page>
+    </div>
   );
 }
 
 /* ------------------------------------------------------------------ parts */
 
-function Page({ title, onBack, children }: { title: string; onBack?: () => void; children: React.ReactNode }) {
+function Page({
+  title,
+  onBack,
+  embedded,
+  children,
+}: {
+  title: string;
+  onBack?: () => void;
+  embedded?: boolean;
+  children: React.ReactNode;
+}) {
   const t = useL10n();
+  const { isDesktop } = useDeviceClass();
+
+  if (embedded && isDesktop) {
+    return <div style={{ maxWidth: 640 }}>{children}</div>;
+  }
+
   return (
-    <div style={{ minHeight: "100dvh" }}>
-      {/* the heading sits in the same column as the content, so the two are
-          not on different left edges */}
-      <header
-        style={{
-          position: "sticky",
-          top: 0,
-          background: "var(--bg-primary)",
-          zIndex: 60,
-          padding: "max(8px, env(safe-area-inset-top)) 16px 8px",
-        }}
-      >
-        <div
+    <div style={{ minHeight: isDesktop ? undefined : "100dvh" }}>
+      {isDesktop ? (
+        <header
           style={{
-            maxWidth: 760,
-            margin: "0 auto",
+            height: 64,
+            padding: "0 16px",
             display: "flex",
             alignItems: "center",
-            gap: 8,
+            borderBottom: "1px solid var(--stroke)",
+            background: "var(--bg-primary)",
+            marginBottom: 20,
           }}
         >
-          {onBack && (
-            <Tappable onClick={onBack} radius={999} style={{ padding: 8 }} title={t.actionBack}>
-              <Icon glyph="chevron-left" size={20} />
-            </Tappable>
-          )}
           <h1 className="t-title-lg" style={{ margin: 0 }}>
             {title}
           </h1>
-        </div>
-      </header>
-      <div style={{ padding: "8px 16px 120px", maxWidth: 760, margin: "0 auto" }}>{children}</div>
+        </header>
+      ) : (
+        <header
+          style={{
+            position: "sticky",
+            top: 0,
+            background: "var(--bg-primary)",
+            zIndex: 60,
+            padding: "max(8px, env(safe-area-inset-top)) 16px 8px",
+          }}
+        >
+          <div
+            style={{
+              maxWidth: 760,
+              margin: "0 auto",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            {onBack && (
+              <Tappable onClick={onBack} radius={999} style={{ padding: 8 }} title={t.actionBack}>
+                <Icon glyph="chevron-left" size={20} />
+              </Tappable>
+            )}
+            <h1 className="t-title-lg" style={{ margin: 0 }}>
+              {title}
+            </h1>
+          </div>
+        </header>
+      )}
+      <div style={{ padding: isDesktop ? "0 16px 80px" : "8px 16px 120px", maxWidth: 760, margin: "0 auto" }}>{children}</div>
     </div>
   );
 }
@@ -284,32 +406,40 @@ function SwitchRow({
 
 /* ---------------------------------------------------------------- details */
 
-function Detail({ section, onBack }: { section: SectionId; onBack: () => void }) {
+function Detail({
+  section,
+  onBack,
+  embedded,
+}: {
+  section: SectionId;
+  onBack?: () => void;
+  embedded?: boolean;
+}) {
   switch (section) {
     case "account":
-      return <AccountSection onBack={onBack} />;
+      return <AccountSection onBack={onBack} embedded={embedded} />;
     case "appearance":
-      return <AppearanceSection onBack={onBack} />;
+      return <AppearanceSection onBack={onBack} embedded={embedded} />;
     case "devices":
-      return <DevicesSection onBack={onBack} />;
+      return <DevicesSection onBack={onBack} embedded={embedded} />;
     case "users":
-      return <UsersSection onBack={onBack} />;
+      return <UsersSection onBack={onBack} embedded={embedded} />;
     case "server":
-      return <ServerSection onBack={onBack} />;
+      return <ServerSection onBack={onBack} embedded={embedded} />;
     case "language":
-      return <LanguageSection onBack={onBack} />;
+      return <LanguageSection onBack={onBack} embedded={embedded} />;
     case "downloads":
-      return <DownloadsSection onBack={onBack} />;
+      return <DownloadsSection onBack={onBack} embedded={embedded} />;
     case "two-factor":
       // the same screen the enrolment wall shows, so turning it on from
       // settings and being made to turn it on are one flow, not two
-      return <TwoFactorSetup required={false} onDone={onBack} onBack={onBack} />;
+      return <TwoFactorSetup required={false} onDone={onBack ?? (() => {})} onBack={onBack} />;
     default:
-      return <AboutSection onBack={onBack} />;
+      return <AboutSection onBack={onBack} embedded={embedded} />;
   }
 }
 
-function AccountSection({ onBack }: { onBack: () => void }) {
+function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
   const t = useL10n();
   const { user, refreshUser } = useSession();
   const toast = useToast();
@@ -347,7 +477,7 @@ function AccountSection({ onBack }: { onBack: () => void }) {
   };
 
   return (
-    <Page title={t.settingsAccount} onBack={onBack}>
+    <Page title={t.settingsAccount} onBack={onBack} embedded={embedded}>
       <div
         style={{
           display: "flex",
@@ -435,7 +565,7 @@ function AccountSection({ onBack }: { onBack: () => void }) {
   );
 }
 
-function DevicesSection({ onBack }: { onBack: () => void }) {
+function DevicesSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
   const t = useL10n();
   const [items, setItems] = useState<DeviceModel[] | null>(null);
   const toast = useToast();
@@ -455,7 +585,7 @@ function DevicesSection({ onBack }: { onBack: () => void }) {
   }, []);
 
   return (
-    <Page title={t.devices} onBack={onBack}>
+    <Page title={t.devices} onBack={onBack} embedded={embedded}>
       {items === null ? (
         <ListSkeleton rows={4} />
       ) : items.length === 0 ? (
@@ -522,7 +652,7 @@ function DevicesSection({ onBack }: { onBack: () => void }) {
   );
 }
 
-function UsersSection({ onBack }: { onBack: () => void }) {
+function UsersSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
   const t = useL10n();
   const [items, setItems] = useState<UserModel[] | null>(null);
   useEffect(() => {
@@ -537,7 +667,7 @@ function UsersSection({ onBack }: { onBack: () => void }) {
   }, []);
 
   return (
-    <Page title={t.settingsUsers} onBack={onBack}>
+    <Page title={t.settingsUsers} onBack={onBack} embedded={embedded}>
       {items === null ? (
         <ListSkeleton rows={4} />
       ) : items.length === 0 ? (
@@ -584,7 +714,7 @@ type ServerSettings = {
   allow_self_registration?: boolean;
 };
 
-function ServerSection({ onBack }: { onBack: () => void }) {
+function ServerSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
   const t = useL10n();
   const toast = useToast();
   const [current, setCurrent] = useState<ServerSettings | null>(null);
@@ -616,14 +746,14 @@ function ServerSection({ onBack }: { onBack: () => void }) {
 
   if (!current) {
     return (
-      <Page title={t.settingsServer} onBack={onBack}>
+      <Page title={t.settingsServer} onBack={onBack} embedded={embedded}>
         <ListSkeleton rows={4} />
       </Page>
     );
   }
 
   return (
-    <Page title={t.settingsServer} onBack={onBack}>
+    <Page title={t.settingsServer} onBack={onBack} embedded={embedded}>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <SwitchRow
           glyph="device"
@@ -673,48 +803,60 @@ function ServerSection({ onBack }: { onBack: () => void }) {
   );
 }
 
-function AppearanceSection({ onBack }: { onBack: () => void }) {
+function AppearanceSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
   const t = useL10n();
+  const { theme, setTheme } = useTheme();
   return (
-    <Page title={t.settingsAppearance} onBack={onBack}>
-      <p className="t-body-sm" style={{ color: "var(--fg-secondary)", margin: "0 0 16px" }}>
-        {t.themeSubtitle}
-      </p>
-      <ThemeToggle />
-    </Page>
-  );
-}
-
-function LanguageSection({ onBack }: { onBack: () => void }) {
-  const t = useL10n();
-  const { locale, setLocale } = useSession();
-  return (
-    <Page title={t.settingsLanguage} onBack={onBack}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <Row
-          glyph="globe"
-          label={t.languageVietnamese}
-          value={locale === "vi" ? t.actionDone : ""}
-          onClick={() => setLocale("vi")}
+    <Page title={t.settingsAppearance} onBack={onBack} embedded={embedded}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <RadioRow
+          label={t.themeSystem}
+          subtitle={t.themeSubtitle}
+          selected={theme === "system"}
+          onTap={() => setTheme("system")}
         />
-        <Row
-          glyph="globe"
-          label={t.languageEnglish}
-          value={locale === "en" ? t.actionDone : ""}
-          onClick={() => setLocale("en")}
+        <RadioRow
+          label={t.themeLight}
+          selected={theme === "light"}
+          onTap={() => setTheme("light")}
         />
-        <Row
-          glyph="globe"
-          label={t.languageArabic}
-          value={locale === "ar" ? t.actionDone : ""}
-          onClick={() => setLocale("ar")}
+        <RadioRow
+          label={t.themeDark}
+          selected={theme === "dark"}
+          onTap={() => setTheme("dark")}
         />
       </div>
     </Page>
   );
 }
 
-function AboutSection({ onBack }: { onBack: () => void }) {
+function LanguageSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
+  const t = useL10n();
+  const { locale, setLocale } = useSession();
+  return (
+    <Page title={t.settingsLanguage} onBack={onBack} embedded={embedded}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <RadioRow
+          label={t.languageEnglish}
+          selected={locale === "en"}
+          onTap={() => setLocale("en")}
+        />
+        <RadioRow
+          label={t.languageVietnamese}
+          selected={locale === "vi"}
+          onTap={() => setLocale("vi")}
+        />
+        <RadioRow
+          label={t.languageArabic}
+          selected={locale === "ar"}
+          onTap={() => setLocale("ar")}
+        />
+      </div>
+    </Page>
+  );
+}
+
+function AboutSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
   const t = useL10n();
   const [status, setStatus] = useState<Record<string, unknown> | null>(null);
   const { server } = useSession();
@@ -730,7 +872,7 @@ function AboutSection({ onBack }: { onBack: () => void }) {
   }, []);
 
   return (
-    <Page title={t.settingsAbout} onBack={onBack}>
+    <Page title={t.settingsAbout} onBack={onBack} embedded={embedded}>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <Row glyph="info" label={t.appName} value={String(status?.server_name ?? "")} />
         <Row glyph="server" label={t.serverNameLabel} value={server.replace(/^https?:\/\//, "")} />
@@ -748,7 +890,7 @@ function AboutSection({ onBack }: { onBack: () => void }) {
  * Deliberately separate from the server storage screen: this number is about
  * the browser in front of you and has nothing to do with the server's disks.
  */
-function DownloadsSection({ onBack }: { onBack: () => void }) {
+function DownloadsSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
   const t = useL10n();
   const toast = useToast();
   const [data, setData] = useState<OfflineUsage | null>(null);
@@ -766,14 +908,14 @@ function DownloadsSection({ onBack }: { onBack: () => void }) {
 
   if (!data) {
     return (
-      <Page title={t.offlineDownloadsTitle} onBack={onBack}>
+      <Page title={t.offlineDownloadsTitle} onBack={onBack} embedded={embedded}>
         <ListSkeleton rows={3} />
       </Page>
     );
   }
 
   return (
-    <Page title={t.offlineDownloadsTitle} onBack={onBack}>
+    <Page title={t.offlineDownloadsTitle} onBack={onBack} embedded={embedded}>
       <p className="t-body-sm" style={{ color: "var(--fg-secondary)", margin: "0 0 20px" }}>
         {t.offlineDownloadsBody}
       </p>
@@ -958,8 +1100,9 @@ export function StorageScreen() {
           }}
         >
           <div className="t-title-sm" style={{ marginBottom: 12 }}>
-            {bytes(user.quota_bytes_used)} used
-            {user.quota_bytes ? ` of ${bytes(user.quota_bytes)}` : ""}
+            {user.quota_bytes
+              ? t.storageUsedOf({ used: bytes(user.quota_bytes_used), total: bytes(user.quota_bytes) })
+              : t.sidebarStorageUsed({ used: bytes(user.quota_bytes_used) })}
           </div>
           <div style={{ height: 8, borderRadius: 999, background: "var(--bg-sunken)", overflow: "hidden" }}>
             <div
@@ -978,7 +1121,7 @@ export function StorageScreen() {
       ) : items.length === 0 ? (
         <EmptyState glyph="storage" title={t.storage} message={t.storageTotal} />
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {items.map((l) => (
             <div
               key={l.id}
@@ -986,20 +1129,35 @@ export function StorageScreen() {
                 display: "flex",
                 alignItems: "center",
                 gap: 14,
-                padding: "14px 16px",
+                padding: "16px 18px",
                 background: "var(--bg-elevated)",
-                border: "1px solid var(--stroke)",
+                border: `1px solid ${l.online ? "var(--stroke)" : "#EE7759"}`,
                 borderRadius: "var(--r-card)",
               }}
             >
-              <Icon glyph="storage" size={19} color={l.online ? "var(--accent)" : "var(--fg-muted)"} />
+              <Icon glyph="storage" size={20} color={l.online ? "var(--accent)" : "#EE7759"} />
               <span style={{ flex: 1, minWidth: 0 }}>
-                <span className="t-body-lg" style={{ display: "block" }}>
-                  {l.name} {l.is_default && <span style={{ color: "var(--fg-secondary)" }}>· default</span>}
+                <span className="t-body-lg" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</span>
+                  {l.is_default && (
+                    <span
+                      style={{
+                        padding: "2px 8px",
+                        borderRadius: 9,
+                        background: "rgba(76, 141, 255, 0.12)",
+                        color: "var(--accent)",
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {t.storageDefault}
+                    </span>
+                  )}
                 </span>
-                <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-                  {l.online ? "Online" : "Offline"}
-                  {l.free_bytes ? ` · ${bytes(l.free_bytes)} free` : ""}
+                <span className="t-body-sm" style={{ color: l.online ? "var(--fg-secondary)" : "#EE7759", display: "block", marginTop: 2 }}>
+                  {l.online
+                    ? (l.free_bytes ? t.libraryFreeSpace({ free: bytes(l.free_bytes) }) : "")
+                    : t.storageOffline}
                 </span>
               </span>
             </div>
