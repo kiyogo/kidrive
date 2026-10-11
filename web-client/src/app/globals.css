@@ -306,8 +306,25 @@ body {
   }
 }
 
-/* focus, visible only for keyboard users so a mouse click does not ring */
-:focus-visible {
+/* inputs never use floating browser outline rings; they highlight their 1px border like Flutter LdTextField */
+input,
+textarea,
+select {
+  outline: none !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none !important;
+  border-color: var(--accent) !important;
+}
+
+/* focus, visible only for keyboard users on non-form elements */
+:focus-visible:not(input):not(textarea):not(select) {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

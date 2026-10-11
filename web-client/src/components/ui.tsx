@@ -249,6 +249,7 @@ export function TextField({
   dir?: "ltr" | "rtl";
 }) {
   const [reveal, setReveal] = useState(false);
+  const [focused, setFocused] = useState(false);
   const actual = type === "password" && reveal ? "text" : type;
 
   return (
@@ -265,8 +266,8 @@ export function TextField({
           gap: 10,
           height: 52,
           padding: "0 14px",
-          background: "var(--bg-sunken)",
-          border: `1px solid ${error ? "var(--warning)" : "var(--stroke)"}`,
+          background: "var(--bg-elevated)",
+          border: `1px solid ${error ? "var(--warning)" : focused ? "var(--accent)" : "var(--stroke)"}`,
           borderRadius: "var(--r-field)",
           transition: "border-color var(--d-hover) var(--ease)",
         }}
@@ -278,6 +279,8 @@ export function TextField({
           value={value}
           autoFocus={autoFocus}
           placeholder={hint}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && onEnter) onEnter();
@@ -577,13 +580,17 @@ export function Sheet({
   open,
   onClose,
   title,
+  subtitle,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title?: string;
+  subtitle?: string;
   children: ReactNode;
 }) {
+  const { isDesktop } = useDeviceClass();
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -592,6 +599,81 @@ export function Sheet({
   }, [open, onClose]);
 
   if (!open) return null;
+
+  if (isDesktop) {
+    return (
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.55)",
+          zIndex: 800,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 20,
+        }}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="ld-enter"
+          style={{
+            width: "min(520px, 100%)",
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--stroke)",
+            borderRadius: "var(--r-card)",
+            padding: 24,
+            maxHeight: "min(640px, 90vh)",
+            overflowY: "auto",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+              marginBottom: 16,
+              gap: 12,
+            }}
+          >
+            <div>
+              {title && (
+                <div className="t-title-md" style={{ margin: 0 }}>
+                  {title}
+                </div>
+              )}
+              {subtitle && (
+                <div className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 4 }}>
+                  {subtitle}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Đóng"
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: 4,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "var(--fg-secondary)",
+                borderRadius: "50%",
+              }}
+            >
+              <Icon glyph="close" size={20} />
+            </button>
+          </div>
+          {children}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       onClick={onClose}

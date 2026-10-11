@@ -431,12 +431,51 @@ function Detail({
     case "downloads":
       return <DownloadsSection onBack={onBack} embedded={embedded} />;
     case "two-factor":
-      // the same screen the enrolment wall shows, so turning it on from
-      // settings and being made to turn it on are one flow, not two
-      return <TwoFactorSetup required={false} onDone={onBack ?? (() => {})} onBack={onBack} />;
+      return <TwoFactorSection onBack={onBack} embedded={embedded} />;
     default:
       return <AboutSection onBack={onBack} embedded={embedded} />;
   }
+}
+
+function TwoFactorSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
+  const t = useL10n();
+  const { user } = useSession();
+
+  if (user?.totp_enabled) {
+    return (
+      <Page title={t.twoFactorTitle} onBack={onBack} embedded={embedded}>
+        <div style={{ maxWidth: 640 }}>
+          {embedded && (
+            <h2 className="t-title-md" style={{ margin: "0 0 40px", fontWeight: 600 }}>
+              {t.twoFactorTitle}
+            </h2>
+          )}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              textAlign: "center",
+              padding: "40px 20px",
+            }}
+          >
+            <div style={{ marginBottom: 14 }}>
+              <Icon glyph="lock" size={40} color="var(--accent)" />
+            </div>
+            <div className="t-title-sm" style={{ fontWeight: 600, marginBottom: 6 }}>
+              {t.twoFactorOn}
+            </div>
+            <div className="t-body-md" style={{ color: "var(--fg-secondary)", maxWidth: 420 }}>
+              {t.twoFactorAlreadyOnBody}
+            </div>
+          </div>
+        </div>
+      </Page>
+    );
+  }
+
+  return <TwoFactorSetup required={false} onDone={onBack ?? (() => {})} onBack={onBack} embedded={embedded} />;
 }
 
 function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
@@ -859,28 +898,12 @@ function UsersSection({ onBack, embedded }: { onBack?: () => void; embedded?: bo
               </div>
             ) : (
               <form onSubmit={handleCreateInvite} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <div>
-                  <label className="t-label-sm" style={{ display: "block", marginBottom: 6, color: "var(--fg-secondary)" }}>
-                    {t.usersInviteLabel}
-                  </label>
-                  <input
-                    type="text"
-                    value={inviteLabel}
-                    onChange={(e) => setInviteLabel(e.target.value)}
-                    placeholder={t.usersInviteHint}
-                    autoFocus
-                    required
-                    style={{
-                      width: "100%",
-                      padding: "10px 14px",
-                      background: "var(--bg-primary)",
-                      border: "1px solid var(--stroke)",
-                      borderRadius: "var(--r-field)",
-                      color: "var(--fg-primary)",
-                      fontSize: 14,
-                    }}
-                  />
-                </div>
+                <TextField
+                  value={inviteLabel}
+                  onChange={setInviteLabel}
+                  hint={t.usersInviteHint}
+                  autoFocus
+                />
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
                   <Button label={t.actionCancel} variant="quiet" compact onClick={() => setInviting(false)} />
                   <Button label={t.invite} compact type="submit" />

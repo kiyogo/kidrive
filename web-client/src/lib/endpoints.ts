@@ -74,9 +74,11 @@ export const Api = {
   mountDrive: (id: string) => `${prefix}/admin/drives/${id}/mount`,
 
   // admin and activity
-  settings: `${prefix}/settings`,
+  settings: `${prefix}/server/settings`,
+  serverSettings: `${prefix}/server/settings`,
   activity: `${prefix}/activity`,
-  invites: `${prefix}/invites`,
+  invites: `${prefix}/admin/invites`,
+  invite: (id: string) => `${prefix}/admin/invites/${id}`,
   // the signed-in devices are the account's sessions; /devices only carries
   // the approve and deny actions for one that is waiting
   sessions: `${prefix}/sessions`,

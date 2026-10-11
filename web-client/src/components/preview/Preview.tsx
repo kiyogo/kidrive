@@ -44,7 +44,47 @@ export function Preview({
   const [volume, setVolume] = useState(100);
   const [muted, setMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [scrubberHover, setScrubberHover] = useState(false);
   const idleTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // 60 FPS smooth interpolation loop matching YouTube's exact progress bar behavior
+  useEffect(() => {
+    let animId: number;
+    const loop = () => {
+      if (videoRef.current && !videoRef.current.paused && !isScrubbing) {
+        setCurrentTime(videoRef.current.currentTime);
+        const dur = videoRef.current.duration;
+        if (dur && !isNaN(dur) && dur > 0) {
+          setDuration(dur);
+        }
+        if (videoRef.current.buffered.length > 0) {
+          setBuffered(videoRef.current.buffered.end(videoRef.current.buffered.length - 1));
+        }
+      }
+      animId = requestAnimationFrame(loop);
+    };
+
+    if (playing) {
+      animId = requestAnimationFrame(loop);
+    }
+    return () => {
+      if (animId) cancelAnimationFrame(animId);
+    };
+  }, [playing, isScrubbing]);
+
+  const seekFromPointer = useCallback(
+    (clientX: number, target: HTMLDivElement) => {
+      const rect = target.getBoundingClientRect();
+      const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      if (videoRef.current && duration > 0) {
+        const targetTime = pos * duration;
+        videoRef.current.currentTime = targetTime;
+        setCurrentTime(targetTime);
+      }
+    },
+    [duration],
+  );
 
   const currentIndex = nodes ? nodes.findIndex((n) => n.id === node.id) : -1;
   const total = nodes ? nodes.length : 1;
@@ -572,41 +612,89 @@ export function Preview({
             transition: "opacity 0.2s ease",
           }}
         >
-          {/* Scrubber slider matching Flutter MediaScrubber */}
+          {/* Scrubber slider matching Flutter MediaScrubber and YouTube 60 FPS smoothness */}
           <div
-            style={{ position: "relative", height: 24, display: "flex", alignItems: "center", cursor: "pointer" }}
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const pos = (e.clientX - rect.left) / rect.width;
-              if (videoRef.current && duration > 0) {
-                videoRef.current.currentTime = Math.max(0, Math.min(pos * duration, duration));
+            style={{
+              position: "relative",
+              height: 24,
+              display: "flex",
+              alignItems: "center",
+              cursor: "pointer",
+              touchAction: "none",
+            }}
+            onPointerEnter={() => setScrubberHover(true)}
+            onPointerLeave={() => setScrubberHover(false)}
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              setIsScrubbing(true);
+              seekFromPointer(e.clientX, e.currentTarget);
+            }}
+            onPointerMove={(e) => {
+              if (isScrubbing) {
+                seekFromPointer(e.clientX, e.currentTarget);
+              }
+            }}
+            onPointerUp={(e) => {
+              if (isScrubbing) {
+                try {
+                  e.currentTarget.releasePointerCapture(e.pointerId);
+                } catch {}
+                setIsScrubbing(false);
               }
             }}
           >
             {/* Background track */}
-            <div style={{ position: "absolute", left: 0, right: 0, height: 4, background: "rgba(255,255,255,0.25)", borderRadius: 2 }} />
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                height: scrubberHover || isScrubbing ? 6 : 4,
+                background: "rgba(255,255,255,0.25)",
+                borderRadius: 3,
+                transition: "height 0.15s ease",
+              }}
+            />
             {/* Buffer track */}
             <div
               style={{
                 position: "absolute",
                 left: 0,
                 width: `${duration ? (buffered / duration) * 100 : 0}%`,
-                height: 4,
+                height: scrubberHover || isScrubbing ? 6 : 4,
                 background: "rgba(255,255,255,0.45)",
-                borderRadius: 2,
+                borderRadius: 3,
+                transition: "height 0.15s ease",
               }}
             />
-            {/* Played track */}
+            {/* Played track (60 FPS smooth matching YouTube) */}
             <div
               style={{
                 position: "absolute",
                 left: 0,
                 width: `${duration ? (currentTime / duration) * 100 : 0}%`,
-                height: 4,
+                height: scrubberHover || isScrubbing ? 6 : 4,
                 background: "#4C8DFF",
-                borderRadius: 2,
+                borderRadius: 3,
+                transition: "height 0.15s ease",
               }}
             />
+            {/* Scrubber thumb */}
+            {(scrubberHover || isScrubbing) && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: `${duration ? (currentTime / duration) * 100 : 0}%`,
+                  width: 12,
+                  height: 12,
+                  borderRadius: "50%",
+                  background: "#4C8DFF",
+                  boxShadow: "0 0 4px rgba(0,0,0,0.4)",
+                  transform: "translateX(-50%)",
+                  pointerEvents: "none",
+                }}
+              />
+            )}
           </div>
 
           {/* Controls Bar matching Flutter _Bar */}

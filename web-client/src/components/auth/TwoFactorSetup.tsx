@@ -30,10 +30,12 @@ export function TwoFactorSetup({
   required,
   onDone,
   onBack,
+  embedded,
 }: {
   required: boolean;
   onDone: () => void;
   onBack?: () => void;
+  embedded?: boolean;
 }) {
   const t = useL10n();
   const toast = useToast();
@@ -98,7 +100,7 @@ export function TwoFactorSetup({
   // already on: there is nothing to enrol and saying so beats an empty form
   if (user?.totp_enabled && codes.length === 0) {
     return (
-      <Frame title={t.twoFactorTitle} onBack={onBack}>
+      <Frame title={t.twoFactorTitle} onBack={onBack} embedded={embedded}>
         <div style={{ display: "grid", placeItems: "center", padding: "40px 0", textAlign: "center" }}>
           <Icon glyph="lock" size={40} color="var(--accent)" />
           <div className="t-title-sm" style={{ margin: "14px 0 6px" }}>
@@ -114,7 +116,7 @@ export function TwoFactorSetup({
 
   if (codes.length > 0) {
     return (
-      <Frame title={t.recoveryCodesTitle}>
+      <Frame title={t.recoveryCodesTitle} embedded={embedded}>
         <p className="t-body-md" style={{ color: "var(--fg-secondary)", margin: "0 0 16px" }}>
           {t.recoveryCodesBody}
         </p>
@@ -166,7 +168,7 @@ export function TwoFactorSetup({
 
   if (loadError) {
     return (
-      <Frame title={t.twoFactorTitle} onBack={onBack}>
+      <Frame title={t.twoFactorTitle} onBack={onBack} embedded={embedded}>
         <ErrorState message={loadError} onRetry={() => void begin()} />
       </Frame>
     );
@@ -174,7 +176,7 @@ export function TwoFactorSetup({
 
   if (!data) {
     return (
-      <Frame title={t.twoFactorTitle} onBack={onBack}>
+      <Frame title={t.twoFactorTitle} onBack={onBack} embedded={embedded}>
         <div style={{ display: "grid", placeItems: "center", padding: 40 }}>
           <Spinner />
         </div>
@@ -183,7 +185,7 @@ export function TwoFactorSetup({
   }
 
   return (
-    <Frame title={t.twoFactorTitle} onBack={onBack}>
+    <Frame title={t.twoFactorTitle} onBack={onBack} embedded={embedded}>
       <p className="t-body-md" style={{ color: "var(--fg-secondary)", margin: "0 0 20px" }}>
         {required ? t.twoFactorRequiredBody : t.twoFactorOptionalBody}
       </p>
@@ -315,13 +317,25 @@ export function TwoFactorSetup({
 function Frame({
   title,
   onBack,
+  embedded,
   children,
 }: {
   title: string;
   onBack?: () => void;
+  embedded?: boolean;
   children: React.ReactNode;
 }) {
   const t = useL10n();
+  if (embedded) {
+    return (
+      <div style={{ width: "100%", maxWidth: 520, margin: "0 auto" }}>
+        <h2 className="t-title-md" style={{ margin: "0 0 20px", fontWeight: 600 }}>
+          {title}
+        </h2>
+        {children}
+      </div>
+    );
+  }
   return (
     <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center", padding: 24 }}>
       <div style={{ width: "100%", maxWidth: 460 }}>
