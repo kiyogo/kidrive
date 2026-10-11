@@ -47,13 +47,13 @@ type SectionId =
 
 /** Declared once, in the app's order. Users and server are admin only. */
 const sections: { id: SectionId; key: keyof Strings; glyph: Glyph; adminOnly?: boolean }[] = [
-  { id: "account", key: "settingsAccount", glyph: "user" },
-  { id: "appearance", key: "settingsAppearance", glyph: "sun" },
+  { id: "account", key: "settingsAccount", glyph: "person" },
+  { id: "appearance", key: "settingsAppearance", glyph: "eye" },
   { id: "devices", key: "devices", glyph: "device" },
-  { id: "language", key: "settingsLanguage", glyph: "globe" },
+  { id: "language", key: "settingsLanguage", glyph: "language" },
   { id: "two-factor", key: "settingsTwoFactor", glyph: "lock" },
-  { id: "downloads", key: "offlineDownloadsTitle", glyph: "offline" },
-  { id: "users", key: "settingsUsers", glyph: "users", adminOnly: true },
+  { id: "downloads", key: "offlineDownloadsTitle", glyph: "offlineReady" },
+  { id: "users", key: "settingsUsers", glyph: "people", adminOnly: true },
   { id: "server", key: "settingsServer", glyph: "server", adminOnly: true },
   { id: "about", key: "settingsAbout", glyph: "info" },
 ];
@@ -652,31 +652,105 @@ function DevicesSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
   );
 }
 
+const userMenuItemStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  width: "100%",
+  padding: "10px 14px",
+  background: "transparent",
+  border: "none",
+  color: "var(--fg-primary)",
+  fontSize: 14,
+  fontWeight: 500,
+  cursor: "pointer",
+  textAlign: "start",
+};
+
 function UsersSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
   const t = useL10n();
+  const toast = useToast();
   const [items, setItems] = useState<UserModel[] | null>(null);
-  useEffect(() => {
-    void (async () => {
-      try {
-        const data = await api.get<{ users: UserModel[] }>(Api.adminUsers);
-        setItems(data?.users ?? []);
-      } catch {
-        setItems([]);
-      }
-    })();
+  const [inviting, setInviting] = useState(false);
+  const [inviteLabel, setInviteLabel] = useState("");
+  const [createdInvite, setCreatedInvite] = useState<{ code: string; link: string } | null>(null);
+  const [selectedUser, setSelectedUser] = useState<UserModel | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api.get<{ users: UserModel[] }>(Api.adminUsers);
+      setItems(data?.users ?? []);
+    } catch {
+      setItems([]);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleCreateInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteLabel.trim()) return;
+    try {
+      const res = await api.post<{ code: string; link: string }>(Api.invites, { label: inviteLabel.trim() });
+      setCreatedInvite(res);
+      setInviteLabel("");
+      void load();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : t.errorUnexpectedTitle, "error");
+    }
+  };
+
+  const handleResetPassword = async (user: UserModel) => {
+    try {
+      await api.post(`${Api.adminUsers}/${user.id}/reset-password`, {});
+      toast(t.usersResetPassword, "success");
+      setSelectedUser(null);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : t.errorUnexpectedTitle, "error");
+    }
+  };
+
+  const handleToggleRole = async (user: UserModel) => {
+    try {
+      const nextRole = user.role === "admin" ? "member" : "admin";
+      await api.patch(`${Api.adminUsers}/${user.id}`, { role: nextRole });
+      toast(nextRole === "admin" ? t.usersMakeAdmin : t.usersMakeMember, "success");
+      setSelectedUser(null);
+      void load();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : t.errorUnexpectedTitle, "error");
+    }
+  };
 
   return (
     <Page title={t.settingsUsers} onBack={onBack} embedded={embedded}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+        <h2 className="t-title-sm" style={{ margin: 0, fontWeight: 600 }}>{t.settingsUsers}</h2>
+        <Button
+          label={t.usersInviteSomeone}
+          glyph="qr"
+          compact
+          expand={false}
+          onClick={() => {
+            setCreatedInvite(null);
+            setInviting(true);
+          }}
+        />
+      </div>
+
       {items === null ? (
         <ListSkeleton rows={4} />
       ) : items.length === 0 ? (
-        <EmptyState glyph="users" title={t.emptyUsersTitle} message={t.emptyUsersBody} />
+        <EmptyState glyph="people" title={t.emptyUsersTitle} message={t.emptyUsersBody} />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {items.map((u) => (
-            <div
+            <Tappable
               key={u.id}
+              onClick={() => setSelectedUser(u)}
+              radius={16}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -685,22 +759,189 @@ function UsersSection({ onBack, embedded }: { onBack?: () => void; embedded?: bo
                 background: "var(--bg-elevated)",
                 border: "1px solid var(--stroke)",
                 borderRadius: "var(--r-card)",
+                cursor: "pointer",
+                width: "100%",
+                boxSizing: "border-box",
               }}
             >
-              <Avatar name={u.display_name || u.username} seed={u.avatar_seed} />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span className="t-body-lg" style={{ display: "block" }}>
+              <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+                <span className="t-body-lg" style={{ display: "block", fontWeight: 500 }}>
                   {u.display_name || u.username}
                 </span>
                 <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-                  {u.role === "admin" ? t.roleAdmin : t.roleMember} ·{" "}
-                  {u.quota_bytes > 0
-                    ? t.storageUsedOf({ used: bytes(u.quota_bytes_used), total: bytes(u.quota_bytes) })
-                    : bytes(u.quota_bytes_used)}
+                  {[
+                    u.role === "admin" ? t.roleAdmin : t.roleMember,
+                    u.quota_bytes > 0
+                      ? t.storageUsedOf({ used: bytes(u.quota_bytes_used), total: bytes(u.quota_bytes) })
+                      : t.sidebarStorageUsed({ used: bytes(u.quota_bytes_used) }),
+                  ].join("  ·  ")}
                 </span>
-              </span>
-            </div>
+              </div>
+              <Avatar name={u.display_name || u.username} seed={u.avatar_seed} size={34} />
+            </Tappable>
           ))}
+        </div>
+      )}
+
+      {/* Invite Modal */}
+      {inviting && (
+        <div
+          onClick={() => setInviting(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 100,
+            background: "rgba(0,0,0,0.45)",
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 440,
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--stroke)",
+              borderRadius: "var(--r-card)",
+              padding: 24,
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+            }}
+          >
+            <h3 className="t-title-md" style={{ margin: 0 }}>
+              {createdInvite ? t.invite : t.usersInviteSomeone}
+            </h3>
+
+            {createdInvite ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <p className="t-body-sm" style={{ color: "var(--fg-secondary)", margin: 0 }}>
+                  {t.usersInviteCreated}
+                </p>
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    background: "var(--bg-primary)",
+                    border: "1px solid var(--stroke)",
+                    borderRadius: "var(--r-field)",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 16,
+                    fontWeight: 600,
+                    textAlign: "center",
+                    letterSpacing: 2,
+                  }}
+                >
+                  {createdInvite.code}
+                </div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <Button
+                    label={t.actionCopyCode}
+                    variant="quiet"
+                    compact
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(createdInvite.code);
+                      toast(t.actionCopied, "success");
+                    }}
+                  />
+                  <Button
+                    label={t.actionCopyLink}
+                    compact
+                    onClick={async () => {
+                      const link = window.location.origin + createdInvite.link;
+                      await navigator.clipboard.writeText(link);
+                      toast(t.actionCopied, "success");
+                    }}
+                  />
+                </div>
+                <Button label={t.actionDone} variant="quiet" onClick={() => setInviting(false)} />
+              </div>
+            ) : (
+              <form onSubmit={handleCreateInvite} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div>
+                  <label className="t-label-sm" style={{ display: "block", marginBottom: 6, color: "var(--fg-secondary)" }}>
+                    {t.usersInviteLabel}
+                  </label>
+                  <input
+                    type="text"
+                    value={inviteLabel}
+                    onChange={(e) => setInviteLabel(e.target.value)}
+                    placeholder={t.usersInviteHint}
+                    autoFocus
+                    required
+                    style={{
+                      width: "100%",
+                      padding: "10px 14px",
+                      background: "var(--bg-primary)",
+                      border: "1px solid var(--stroke)",
+                      borderRadius: "var(--r-field)",
+                      color: "var(--fg-primary)",
+                      fontSize: 14,
+                    }}
+                  />
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                  <Button label={t.actionCancel} variant="quiet" compact onClick={() => setInviting(false)} />
+                  <Button label={t.invite} compact type="submit" />
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* User Manage Context Menu */}
+      {selectedUser && (
+        <div
+          onClick={() => setSelectedUser(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 100,
+            background: "rgba(0,0,0,0.45)",
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 360,
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--stroke)",
+              borderRadius: "var(--r-card)",
+              padding: 16,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--stroke)" }}>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>{selectedUser.display_name || selectedUser.username}</div>
+              <div style={{ fontSize: 12, color: "var(--fg-secondary)" }}>{selectedUser.username}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleResetPassword(selectedUser)}
+              style={userMenuItemStyle}
+            >
+              <Icon glyph="lock" size={18} />
+              <span>{t.usersResetPassword}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleToggleRole(selectedUser)}
+              style={userMenuItemStyle}
+            >
+              <Icon glyph="person" size={18} />
+              <span>{selectedUser.role === "admin" ? t.usersMakeMember : t.usersMakeAdmin}</span>
+            </button>
+            <div style={{ height: 1, background: "var(--stroke)", margin: "4px 0" }} />
+            <Button label={t.actionCancel} variant="quiet" compact onClick={() => setSelectedUser(null)} />
+          </div>
         </div>
       )}
     </Page>

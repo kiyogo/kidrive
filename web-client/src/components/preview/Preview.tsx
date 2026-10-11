@@ -41,7 +41,10 @@ export function Preview({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [buffered, setBuffered] = useState(0);
+  const [volume, setVolume] = useState(100);
+  const [muted, setMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const idleTimer = useRef<NodeJS.Timeout | null>(null);
 
   const currentIndex = nodes ? nodes.findIndex((n) => n.id === node.id) : -1;
   const total = nodes ? nodes.length : 1;
@@ -92,12 +95,19 @@ export function Preview({
       if (e.key === "Escape") onClose();
       else if (e.key === "ArrowLeft") handlePrev();
       else if (e.key === "ArrowRight") handleNext();
+      else if (e.key === " " && category === "video") {
+        e.preventDefault();
+        togglePlay();
+      } else if ((e.key === "f" || e.key === "F" || e.key === "F11") && category === "video") {
+        e.preventDefault();
+        toggleFullscreen();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, handlePrev, handleNext]);
+  }, [onClose, handlePrev, handleNext, category]);
 
-  // Touch swipe support
+  // Touch swipe support for gallery
   const touchStartX = useRef<number | null>(null);
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX;
@@ -164,6 +174,7 @@ export function Preview({
     } else {
       videoRef.current.pause();
     }
+    wakeVideoControls();
   };
 
   const toggleFullscreen = () => {
@@ -171,6 +182,16 @@ export function Preview({
       void document.documentElement.requestFullscreen().then(() => setIsFullscreen(true));
     } else {
       void document.exitFullscreen().then(() => setIsFullscreen(false));
+    }
+  };
+
+  const wakeVideoControls = () => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    setChrome(true);
+    if (playing) {
+      idleTimer.current = setTimeout(() => {
+        setChrome(false);
+      }, 1500);
     }
   };
 
@@ -186,8 +207,9 @@ export function Preview({
         overflow: "hidden",
         userSelect: "none",
       }}
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
+      onTouchStart={category === "image" ? handleTouchStart : undefined}
+      onTouchEnd={category === "image" ? handleTouchEnd : undefined}
+      onMouseMove={category === "video" ? wakeVideoControls : undefined}
     >
       {/* ----------------- TOP SCRIM ----------------- */}
       <div
@@ -301,7 +323,6 @@ export function Preview({
                 borderRadius: 14,
                 padding: "6px 0",
                 zIndex: 60,
-                boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
               }}
             >
               <button
@@ -360,31 +381,24 @@ export function Preview({
 
       {/* ----------------- MEDIA CANVAS ----------------- */}
       <div
-        onClick={() => {
-          setMenuOpen(false);
-          setChrome((c) => !c);
-        }}
         style={{
           flex: 1,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           position: "relative",
-          cursor: "pointer",
+          overflow: "hidden",
         }}
       >
         {unreachable ? (
           <EmptyState glyph="offline" title={node.name} message={t.offlineNeedsConnection} />
         ) : category === "image" ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <InteractiveImage
             src={src}
             alt={node.name}
-            style={{
-              maxWidth: "100%",
-              maxHeight: "100%",
-              objectFit: "contain",
-              display: "block",
+            onTap={() => {
+              setMenuOpen(false);
+              setChrome((c) => !c);
             }}
           />
         ) : category === "video" ? (
@@ -394,14 +408,24 @@ export function Preview({
               e.stopPropagation();
               togglePlay();
             }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              toggleFullscreen();
+            }}
           >
             <video
               ref={videoRef}
               src={src}
               playsInline
               autoPlay
-              onPlay={() => setPlaying(true)}
-              onPause={() => setPlaying(false)}
+              onPlay={() => {
+                setPlaying(true);
+                wakeVideoControls();
+              }}
+              onPause={() => {
+                setPlaying(false);
+                wakeVideoControls();
+              }}
               onTimeUpdate={() => {
                 if (videoRef.current) {
                   setCurrentTime(videoRef.current.currentTime);
@@ -430,7 +454,7 @@ export function Preview({
                 margin: "0 auto 16px",
               }}
             >
-              <Icon glyph="audio" size={36} color="#4CC6C6" />
+              <Icon glyph="music" size={36} color="#4CC6C6" />
             </div>
             <div style={{ fontSize: 16, fontWeight: 600, color: "#fff", marginBottom: 20 }}>
               {node.name}
@@ -499,7 +523,7 @@ export function Preview({
           </button>
         )}
 
-        {nodes && currentIndex >= 0 && currentIndex < nodes.length - 1 && (
+        {nodes && currentIndex < total - 1 && (
           <button
             type="button"
             onClick={(e) => {
@@ -541,21 +565,21 @@ export function Preview({
             left: 0,
             right: 0,
             zIndex: 40,
-            background: "linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%)",
-            padding: "24px 20px max(16px, env(safe-area-inset-bottom))",
+            background: "linear-gradient(to top, rgba(0,0,0,0.90) 0%, transparent 100%)",
+            padding: "28px 16px max(16px, env(safe-area-inset-bottom))",
             opacity: chrome ? 1 : 0,
             pointerEvents: chrome ? "auto" : "none",
             transition: "opacity 0.2s ease",
           }}
         >
-          {/* Scrubber slider */}
+          {/* Scrubber slider matching Flutter MediaScrubber */}
           <div
-            style={{ position: "relative", height: 16, display: "flex", alignItems: "center", cursor: "pointer" }}
+            style={{ position: "relative", height: 24, display: "flex", alignItems: "center", cursor: "pointer" }}
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               const pos = (e.clientX - rect.left) / rect.width;
               if (videoRef.current && duration > 0) {
-                videoRef.current.currentTime = pos * duration;
+                videoRef.current.currentTime = Math.max(0, Math.min(pos * duration, duration));
               }
             }}
           >
@@ -585,8 +609,8 @@ export function Preview({
             />
           </div>
 
-          {/* Controls Bar */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
+          {/* Controls Bar matching Flutter _Bar */}
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 10 }}>
             <button
               type="button"
               onClick={togglePlay}
@@ -603,22 +627,76 @@ export function Preview({
                 cursor: "pointer",
               }}
             >
-              <Icon glyph={playing ? "pause" : "play"} size={22} color="#FFFFFF" />
+              <Icon glyph={playing ? "pause" : "play"} size={20} color="#FFFFFF" />
             </button>
 
-            <span style={{ fontSize: 13, fontWeight: 600, color: "#FFFFFF" }}>
-              {formatClock(currentTime)}
-            </span>
-            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.72)" }}>
-              / {formatClock(duration)}
-            </span>
+            {/* Elapsed / Total time matching Flutter exactly */}
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#FFFFFF" }}>
+                {formatClock(currentTime)}
+              </span>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "#FFFFFF" }}>
+                {"  /  " + formatClock(duration)}
+              </span>
+            </div>
 
             <span style={{ flex: 1 }} />
 
+            {/* Time left matching Flutter exactly */}
             <span style={{ fontSize: 13, fontWeight: 600, color: "#FFFFFF" }}>
-              -{formatClock(Math.max(0, duration - currentTime))}
+              {"-" + formatClock(Math.max(0, duration - currentTime))}
             </span>
 
+            {/* Volume control */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (videoRef.current) {
+                    const next = !muted;
+                    setMuted(next);
+                    videoRef.current.muted = next;
+                  }
+                }}
+                title={muted ? t.actionUnmute : t.actionMute}
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: "50%",
+                  background: "transparent",
+                  border: "none",
+                  color: "#FFFFFF",
+                  display: "grid",
+                  placeItems: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <Icon glyph={muted ? "volume-off" : "volume"} size={20} color="#FFFFFF" />
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={muted ? 0 : volume}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setVolume(val);
+                  setMuted(val === 0);
+                  if (videoRef.current) {
+                    videoRef.current.volume = val / 100;
+                    videoRef.current.muted = val === 0;
+                  }
+                }}
+                style={{
+                  width: 60,
+                  height: 4,
+                  accentColor: "#4C8DFF",
+                  cursor: "pointer",
+                }}
+              />
+            </div>
+
+            {/* Fullscreen button */}
             <button
               type="button"
               onClick={toggleFullscreen}
@@ -635,7 +713,7 @@ export function Preview({
                 cursor: "pointer",
               }}
             >
-              <Icon glyph="expand" size={18} color="#FFFFFF" />
+              <Icon glyph={isFullscreen ? "fullscreenExit" : "fullscreen"} size={20} color="#FFFFFF" />
             </button>
           </div>
         </div>
@@ -649,7 +727,7 @@ export function Preview({
             right: 0,
             zIndex: 40,
             background: "linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%)",
-            padding: "16px 20px max(14px, env(safe-area-inset-bottom))",
+            padding: "14px 20px max(10px, env(safe-area-inset-bottom))",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
@@ -658,8 +736,8 @@ export function Preview({
             transition: "opacity 0.2s ease",
           }}
         >
-          {/* Capture Date timestamp */}
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.85)", marginBottom: 12 }}>
+          {/* Capture Date timestamp matching Flutter LdFormat */}
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.9)", marginBottom: 12 }}>
             {node.taken_at
               ? dateTime(node.taken_at)
               : node.created_at
@@ -684,7 +762,7 @@ export function Preview({
             }}
           >
             <ActionButton
-              glyph="share"
+              glyph="shared"
               label={t.actionShare}
               onClick={handleShare}
             />
@@ -700,7 +778,7 @@ export function Preview({
             />
             {!isFolder(node) && (
               <ActionButton
-                glyph="offline"
+                glyph={kept ? "offlineReady" : "offline"}
                 label={kept ? t.offlineRemoveDownload : t.offlineMakeAvailable}
                 active={kept}
                 onClick={handleToggleOffline}
@@ -715,6 +793,143 @@ export function Preview({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Interactive image viewer supporting zoom and pan matching Flutter's PhotoViewGallery / ZoomOnScroll.
+ */
+function InteractiveImage({
+  src,
+  alt,
+  onTap,
+}: {
+  src: string;
+  alt: string;
+  onTap: () => void;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [scale, setScale] = useState(1);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const startPos = useRef({ x: 0, y: 0 });
+  const didDrag = useRef(false);
+
+  // Reset zoom on src change
+  useEffect(() => {
+    setScale(1);
+    setPosition({ x: 0, y: 0 });
+  }, [src]);
+
+  // Double click / double tap
+  const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (scale > 1) {
+      setScale(1);
+      setPosition({ x: 0, y: 0 });
+    } else {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) {
+        setScale(2.5);
+        return;
+      }
+      const clickX = e.clientX - rect.left - rect.width / 2;
+      const clickY = e.clientY - rect.top - rect.height / 2;
+      setScale(2.5);
+      setPosition({ x: -clickX * 1.5, y: -clickY * 1.5 });
+    }
+  };
+
+  // Mouse wheel zoom
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
+    setScale((prev) => {
+      const next = Math.min(Math.max(1, prev * zoomFactor), 5);
+      if (next === 1) {
+        setPosition({ x: 0, y: 0 });
+      }
+      return next;
+    });
+  };
+
+  // Mouse/touch dragging
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (scale <= 1) return;
+    e.stopPropagation();
+    isDragging.current = true;
+    didDrag.current = false;
+    dragStart.current = { x: e.clientX, y: e.clientY };
+    startPos.current = { ...position };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging.current) return;
+    e.stopPropagation();
+    const dx = e.clientX - dragStart.current.x;
+    const dy = e.clientY - dragStart.current.y;
+    if (Math.hypot(dx, dy) > 3) {
+      didDrag.current = true;
+    }
+    setPosition({
+      x: startPos.current.x + dx,
+      y: startPos.current.y + dy,
+    });
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isDragging.current) {
+      isDragging.current = false;
+      try {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {}
+    }
+  };
+
+  const handleClick = () => {
+    if (didDrag.current) return;
+    onTap();
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      onWheel={handleWheel}
+      onDoubleClick={handleDoubleClick}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onClick={handleClick}
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
+        cursor: scale > 1 ? (isDragging.current ? "grabbing" : "grab") : "default",
+        touchAction: scale > 1 ? "none" : "pan-y",
+      }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt}
+        draggable={false}
+        style={{
+          maxWidth: "100%",
+          maxHeight: "100%",
+          objectFit: "contain",
+          transform: `translate3d(${position.x}px, ${position.y}px, 0) scale(${scale})`,
+          transition: isDragging.current ? "none" : "transform 0.15s ease-out",
+          userSelect: "none",
+          pointerEvents: "auto",
+        }}
+      />
     </div>
   );
 }
