@@ -1,16 +1,18 @@
 "use client";
 
-import { useRef, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useL10n, type Strings } from "@/lib/l10n";
 import { Icon, type Glyph } from "./Icon";
 import { Mark } from "./Mark";
-import { Tappable, useDeviceClass } from "./ui";
+import { Sheet, Tappable, useDeviceClass } from "./ui";
 import { bytes, percent } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { ThemeToggle } from "./ThemeToggle";
 
 export type Section =
   | "files"
   | "gallery"
+  | "videos"
   | "shared"
   | "recent"
   | "starred"
@@ -27,6 +29,7 @@ export type Section =
 const primary: { id: Section; key: keyof Strings; glyph: Glyph }[] = [
   { id: "files", key: "myFiles", glyph: "home" },
   { id: "gallery", key: "gallery", glyph: "gallery" },
+  { id: "videos", key: "videos", glyph: "video" },
   { id: "shared", key: "sharedWithMe", glyph: "shared" },
   { id: "recent", key: "recent", glyph: "recent" },
   { id: "starred", key: "starred", glyph: "star" },
@@ -47,6 +50,7 @@ export function Shell({
   section,
   onNavigate,
   onUpload,
+  onCreateFolder,
   children,
 }: {
   section: Section;
@@ -55,11 +59,13 @@ export function Shell({
    *  browser, because the sidebar and the phone's plus button have to reach it
    *  from Settings, Gallery and everywhere else too. */
   onUpload: (files: FileList | null) => void;
+  onCreateFolder?: () => void;
   children: ReactNode;
 }) {
   const t = useL10n();
   const { isMobile } = useDeviceClass();
   const { user } = useSession();
+  const [createSheetOpen, setCreateSheetOpen] = useState(false);
   const shellFileInput = useRef<HTMLInputElement>(null);
   const pick = () => shellFileInput.current?.click();
 
@@ -87,7 +93,7 @@ export function Shell({
             <BottomItem key={item.id} item={item} active={section === item.id} onClick={() => onNavigate(item.id)} />
           ))}
           <Tappable
-            onClick={pick}
+            onClick={() => setCreateSheetOpen(true)}
             radius={999}
             style={{
               width: 52,
@@ -97,7 +103,7 @@ export function Shell({
               alignItems: "center",
               justifyContent: "center",
             }}
-            title={t.upload}
+            title={t.navCreate}
           >
             <Icon glyph="plus" size={24} color="#FFFFFF" />
           </Tappable>
@@ -105,6 +111,53 @@ export function Shell({
             <BottomItem key={item.id} item={item} active={section === item.id} onClick={() => onNavigate(item.id)} />
           ))}
         </nav>
+
+        <Sheet open={createSheetOpen} onClose={() => setCreateSheetOpen(false)} title={t.navCreate}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <Tappable
+              onClick={() => {
+                setCreateSheetOpen(false);
+                pick();
+              }}
+              radius={12}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                padding: "16px 18px",
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--stroke)",
+              }}
+            >
+              <Icon glyph="upload" size={20} color="var(--accent)" />
+              <span className="t-body-md" style={{ fontWeight: 600 }}>
+                {t.uploadFile}
+              </span>
+            </Tappable>
+            {onCreateFolder && (
+              <Tappable
+                onClick={() => {
+                  setCreateSheetOpen(false);
+                  onCreateFolder();
+                }}
+                radius={12}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                  padding: "16px 18px",
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--stroke)",
+                }}
+              >
+                <Icon glyph="folder-plus" size={20} color="var(--accent)" />
+                <span className="t-body-md" style={{ fontWeight: 600 }}>
+                  {t.newFolder}
+                </span>
+              </Tappable>
+            )}
+          </div>
+        </Sheet>
       </div>
     );
   }
@@ -126,9 +179,12 @@ export function Shell({
           height: "100dvh",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 8px 14px" }}>
-          <Mark size={26} />
-          <span className="t-title-sm">{t.appName}</span>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 8px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Mark size={26} />
+            <span className="t-title-sm">{t.appName}</span>
+          </div>
+          <ThemeToggle compact />
         </div>
 
         <Tappable

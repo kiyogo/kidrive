@@ -27,9 +27,11 @@ export function bytes(n: number): string {
  * dozen places, and one caller forgetting to pass the locale is an English
  * date sitting in an Arabic screen, which is exactly the bug this had.
  */
-let current: "en" | "ar" = "en";
+import type { Locale } from "./l10n.generated";
 
-export function setFormatLocale(locale: "en" | "ar") {
+let current: Locale = "vi";
+
+export function setFormatLocale(locale: Locale) {
   current = locale;
 }
 
@@ -41,20 +43,31 @@ export function relative(ms: number, locale = current): string {
   const hour = 60 * minute;
   const day = 24 * hour;
 
-  if (diff < minute) return locale === "ar" ? "الآن" : "just now";
+  if (diff < minute) {
+    if (locale === "vi") return "vừa xong";
+    if (locale === "ar") return "الآن";
+    return "just now";
+  }
   if (diff < hour) {
     const n = Math.floor(diff / minute);
-    return locale === "ar" ? `منذ ${n} دقيقة` : `${n} minute${n === 1 ? "" : "s"} ago`;
+    if (locale === "vi") return `${n} phút trước`;
+    if (locale === "ar") return `منذ ${n} دقيقة`;
+    return `${n} minute${n === 1 ? "" : "s"} ago`;
   }
   if (diff < day) {
     const n = Math.floor(diff / hour);
-    return locale === "ar" ? `منذ ${n} ساعة` : `${n} hour${n === 1 ? "" : "s"} ago`;
+    if (locale === "vi") return `${n} giờ trước`;
+    if (locale === "ar") return `منذ ${n} ساعة`;
+    return `${n} hour${n === 1 ? "" : "s"} ago`;
   }
   if (diff < 7 * day) {
     const n = Math.floor(diff / day);
-    return locale === "ar" ? `منذ ${n} يوم` : `${n} day${n === 1 ? "" : "s"} ago`;
+    if (locale === "vi") return `${n} ngày trước`;
+    if (locale === "ar") return `منذ ${n} يوم`;
+    return `${n} day${n === 1 ? "" : "s"} ago`;
   }
-  return then.toLocaleDateString(locale === "ar" ? "ar" : "en-GB", {
+  const dateLocale = locale === "vi" ? "vi-VN" : locale === "ar" ? "ar" : "en-GB";
+  return then.toLocaleDateString(dateLocale, {
     day: "numeric",
     month: "short",
     year: then.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
@@ -63,7 +76,8 @@ export function relative(ms: number, locale = current): string {
 
 export function dateTime(ms: number, locale = current): string {
   if (!ms) return "";
-  return new Date(ms).toLocaleString(locale === "ar" ? "ar" : "en-GB", {
+  const dateLocale = locale === "vi" ? "vi-VN" : locale === "ar" ? "ar" : "en-GB";
+  return new Date(ms).toLocaleString(dateLocale, {
     day: "numeric",
     month: "short",
     year: "numeric",

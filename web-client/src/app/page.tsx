@@ -14,6 +14,7 @@ import { TwoFactorSetup } from "@/components/auth/TwoFactorSetup";
 import { FilesBrowser } from "@/components/files/FilesBrowser";
 import { ActivityScreen, SettingsScreen, StorageScreen } from "@/components/settings/Settings";
 import { GalleryScreen, TransfersScreen } from "@/components/gallery/Gallery";
+import { VideosScreen } from "@/components/gallery/VideosScreen";
 import { Preview } from "@/components/preview/Preview";
 import { Shell, type Section } from "@/components/Shell";
 import { Button, TextField } from "@/components/ui";
@@ -90,6 +91,7 @@ function Drive() {
   const titles: Record<Section, string> = {
     files: current.name,
     gallery: t.gallery,
+    videos: t.videos,
     shared: t.sharedWithMe,
     recent: t.recent,
     starred: t.starred,
@@ -126,6 +128,8 @@ function Drive() {
         <ActivityScreen />
       ) : section === "gallery" ? (
         <GalleryScreen onOpen={setPreview} />
+      ) : section === "videos" ? (
+        <VideosScreen onOpen={setPreview} />
       ) : section === "transfers" ? (
         <TransfersScreen />
       ) : section in filterFor ? (

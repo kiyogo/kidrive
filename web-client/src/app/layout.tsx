@@ -25,6 +25,8 @@ const plexArabic = IBM_Plex_Sans_Arabic({
   display: "swap",
 });
 
+import { ThemeProvider } from "@/lib/theme";
+
 export const metadata: Metadata = {
   title: "Local Drive",
   description: "Your own file server, on your own hardware.",
@@ -39,11 +41,13 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" dir="ltr">
+    <html lang="vi" dir="ltr" data-theme="dark">
       <body className={`${spaceGrotesk.variable} ${plexArabic.variable}`}>
-        <SessionProvider>
-          <ToastHost>{children}</ToastHost>
-        </SessionProvider>
+        <ThemeProvider>
+          <SessionProvider>
+            <ToastHost>{children}</ToastHost>
+          </SessionProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -47,7 +47,7 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel) => void }) {
         }}
       >
         <h1 className="t-title-lg" style={{ margin: 0 }}>
-          Gallery
+          {t.gallery}
         </h1>
       </header>
 

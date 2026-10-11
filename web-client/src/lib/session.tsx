@@ -29,15 +29,17 @@ export type SessionStage =
   | "mustEnableTotp"
   | "ready";
 
+import type { Locale } from "./l10n.generated";
+
 interface SessionValue {
   stage: SessionStage;
   user: UserModel | null;
   server: string;
   pendingSessionId: string;
   error: string;
-  locale: "en" | "ar";
+  locale: Locale;
 
-  setLocale(locale: "en" | "ar"): void;
+  setLocale(locale: Locale): void;
   connect(address: string): Promise<void>;
   signIn(username: string, password: string, totp?: string): Promise<void>;
   setupFirstAdmin(v: {
@@ -80,13 +82,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [server, setServer] = useState("");
   const [pendingSessionId, setPendingSessionId] = useState("");
   const [error, setError] = useState("");
-  const [locale, setLocaleState] = useState<"en" | "ar">(() =>
-    typeof window === "undefined"
-      ? "en"
-      : ((localStorage.getItem("ld.locale") as "en" | "ar") ?? "en"),
-  );
+  const [locale, setLocaleState] = useState<Locale>(() => {
+    if (typeof window === "undefined") return "vi";
+    const saved = localStorage.getItem("ld.locale") as Locale | null;
+    return saved === "vi" || saved === "en" || saved === "ar" ? saved : "vi";
+  });
 
-  const setLocale = useCallback((next: "en" | "ar") => {
+  const setLocale = useCallback((next: Locale) => {
     setLocaleState(next);
     localStorage.setItem("ld.locale", next);
     document.documentElement.lang = next;

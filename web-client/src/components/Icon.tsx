@@ -64,7 +64,9 @@ export type Glyph =
   | "offline"
   | "restore"
   | "copy"
-  | "move";
+  | "move"
+  | "sun"
+  | "moon";
 
 const paths: Record<Glyph, string> = {
   home: "M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4v-5.5h-6V20H5a1 1 0 0 1-1-1z",
@@ -128,6 +130,8 @@ const paths: Record<Glyph, string> = {
   restore: "M4 12a8 8 0 1 0 2.6-5.9M4 4v4h4",
   copy: "M9 9h10v11H9zM5 15V4h10",
   move: "M12 4v16m0-16-3 3m3-3 3 3m-3 13-3-3m3 3 3-3M4 12h16m-16 0 3-3m-3 3 3 3m13-3-3-3m3 3-3 3",
+  sun: "M12 3v2m0 14v2m9-9h-2M5 12H3m15.364 6.364-1.414-1.414M7.05 7.05 5.636 5.636m12.728 0-1.414 1.414M7.05 16.95l-1.414 1.414M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z",
+  moon: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z",
 };
 
 const filled: Partial<Record<Glyph, boolean>> = { "star-filled": true, play: true, slides: false };

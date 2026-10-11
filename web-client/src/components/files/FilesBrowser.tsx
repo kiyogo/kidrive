@@ -70,6 +70,9 @@ export function FilesBrowser({
   const [searching, setSearching] = useState(false);
   const [sharing, setSharing] = useState<NodeModel | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [sortBy, setSortBy] = useState<"name" | "updated" | "size">("updated");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [sortMenu, setSortMenu] = useState<{ x: number; y: number } | null>(null);
   const toast = useToast();
   const { isDesktop, isMobile } = useDeviceClass();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -142,7 +145,28 @@ export function FilesBrowser({
     setSelection(new Set());
   }, [folderId, filter]);
 
-  const visible = useMemo(() => nodes ?? [], [nodes]);
+  const visible = useMemo(() => {
+    if (!nodes) return [];
+    let list = nodes;
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter((n) => n.name.toLowerCase().includes(q));
+    }
+    return [...list].sort((a, b) => {
+      if (isFolder(a) !== isFolder(b)) return isFolder(a) ? -1 : 1;
+      let cmp = 0;
+      if (sortBy === "name") {
+        cmp = a.name.localeCompare(b.name);
+      } else if (sortBy === "size") {
+        cmp = (a.size_bytes || 0) - (b.size_bytes || 0);
+      } else {
+        const ta = a.updated_at || a.created_at || 0;
+        const tb = b.updated_at || b.created_at || 0;
+        cmp = ta - tb;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [nodes, query, sortBy, sortDir]);
 
   const toggle = (id: string, additive: boolean, range = false) => {
     if (range) {
@@ -309,13 +333,35 @@ export function FilesBrowser({
              here squeezes the folder name down to an ellipsis. */
           <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
             <UtilityButton glyph="search" title={t.search} onClick={() => setSearching((s) => !s)} />
-            <UtilityButton glyph="sort" title={t.sortBy} onClick={() => undefined} />
+            <UtilityButton glyph="sort" title={t.sortBy} onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })} />
             <UtilityButton
               glyph={view === "grid" ? "list" : "grid"}
-              title={view === "grid" ? "List view" : "Grid view"}
+              title={view === "grid" ? t.viewList : t.viewGrid}
               onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
             />
-            <UtilityButton glyph="folder-plus" title={t.newFolder} onClick={() => { setFolderName(""); setCreateFolderOpen(true); }} />
+            {filter === "trash" && nodes && nodes.length > 0 ? (
+              <Button
+                label={t.emptyTrashAction}
+                glyph="trash"
+                variant="danger"
+                compact
+                expand={false}
+                onClick={async () => {
+                  try {
+                    await api.del(Api.trash);
+                    toast(t.emptyTrashAction, "success");
+                    void load();
+                  } catch (e) {
+                    toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
+                  }
+                }}
+              />
+            ) : (
+              <>
+                <UtilityButton glyph="folder-plus" title={t.newFolder} onClick={() => { setFolderName(""); setCreateFolderOpen(true); }} />
+                <Button label={t.upload} glyph="upload" compact expand={false} onClick={() => fileInput.current?.click()} />
+              </>
+            )}
           </span>
         ) : (
           <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
@@ -353,14 +399,35 @@ export function FilesBrowser({
                 }}
               />
             </span>
-            <UtilityButton glyph="sort" title={t.sortBy} onClick={() => undefined} />
+            <UtilityButton glyph="sort" title={t.sortBy} onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })} />
             <UtilityButton
               glyph={view === "grid" ? "list" : "grid"}
-              title={view === "grid" ? "List view" : "Grid view"}
+              title={view === "grid" ? t.viewList : t.viewGrid}
               onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
             />
-            <UtilityButton glyph="folder-plus" title={t.newFolder} onClick={() => { setFolderName(""); setCreateFolderOpen(true); }} />
-            <Button label={t.upload} glyph="upload" compact expand={false} onClick={() => fileInput.current?.click()} />
+            {filter === "trash" && nodes && nodes.length > 0 ? (
+              <Button
+                label={t.emptyTrashAction}
+                glyph="trash"
+                variant="danger"
+                compact
+                expand={false}
+                onClick={async () => {
+                  try {
+                    await api.del(Api.trash);
+                    toast(t.emptyTrashAction, "success");
+                    void load();
+                  } catch (e) {
+                    toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
+                  }
+                }}
+              />
+            ) : (
+              <>
+                <UtilityButton glyph="folder-plus" title={t.newFolder} onClick={() => { setFolderName(""); setCreateFolderOpen(true); }} />
+                <Button label={t.upload} glyph="upload" compact expand={false} onClick={() => fileInput.current?.click()} />
+              </>
+            )}
           </span>
         )}
       </header>
@@ -545,14 +612,61 @@ export function FilesBrowser({
         onClose={() => setOverflow(null)}
         items={[
           {
-            label: view === "grid" ? "List view" : "Grid view",
+            label: view === "grid" ? t.viewList : t.viewGrid,
             glyph: view === "grid" ? "list" : "grid",
             onClick: () => setView((v) => (v === "grid" ? "list" : "grid")),
           },
-          { label: t.sortBy, glyph: "sort", onClick: () => undefined },
+          {
+            label: t.sortBy,
+            glyph: "sort",
+            onClick: () => setSortMenu({ x: 120, y: 120 }),
+          },
           { label: t.newFolder, glyph: "folder-plus", onClick: () => { setFolderName(""); setCreateFolderOpen(true); } },
           { label: t.upload, glyph: "upload", onClick: () => fileInput.current?.click() },
           { label: t.actionRefresh, glyph: "refresh", onClick: () => void load() },
+        ]}
+      />
+
+      {/* Sort Menu */}
+      <Menu
+        open={Boolean(sortMenu)}
+        x={sortMenu?.x ?? 0}
+        y={sortMenu?.y ?? 0}
+        onClose={() => setSortMenu(null)}
+        items={[
+          {
+            label: `${t.sortName} (${sortBy === "name" && sortDir === "asc" ? "Z→A" : "A→Z"})`,
+            glyph: "sort",
+            onClick: () => {
+              if (sortBy === "name") setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+              else {
+                setSortBy("name");
+                setSortDir("asc");
+              }
+            },
+          },
+          {
+            label: `${t.sortUpdated} (${sortBy === "updated" && sortDir === "desc" ? "Cũ nhất" : "Mới nhất"})`,
+            glyph: "sort",
+            onClick: () => {
+              if (sortBy === "updated") setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+              else {
+                setSortBy("updated");
+                setSortDir("desc");
+              }
+            },
+          },
+          {
+            label: `${t.sortSize} (${sortBy === "size" && sortDir === "desc" ? "Nhỏ nhất" : "Lớn nhất"})`,
+            glyph: "sort",
+            onClick: () => {
+              if (sortBy === "size") setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+              else {
+                setSortBy("size");
+                setSortDir("desc");
+              }
+            },
+          },
         ]}
       />
 
@@ -563,40 +677,79 @@ export function FilesBrowser({
         onClose={() => setMenu(null)}
         items={
           menu
-            ? [
-                { label: t.actionOpen, glyph: "eye", onClick: () => activate(menu.node) },
-                {
-                  label: t.download,
-                  glyph: "download",
-                  onClick: () => window.open(api.media(Api.download(menu.node.id)), "_blank"),
-                },
-                {
-                  label: menu.node.starred ? "Remove star" : "Star",
-                  glyph: "star",
-                  onClick: async () => {
-                    await api.post(Api.star(menu.node.id), { starred: !menu.node.starred });
-                    void load();
+            ? filter === "trash"
+              ? [
+                  {
+                    label: t.restore,
+                    glyph: "restore",
+                    onClick: async () => {
+                      try {
+                        await api.post(Api.restore(menu.node.id), {});
+                        toast(t.restore, "success");
+                        void load();
+                      } catch (e) {
+                        toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
+                      }
+                    },
                   },
-                },
-                {
-                  label: t.actionRename,
-                  glyph: "rename",
-                  onClick: () => {
-                    setRenamingNode(menu.node);
-                    setRenameName(menu.node.name);
+                  {
+                    label: t.permanentlyDelete,
+                    glyph: "trash",
+                    danger: true,
+                    onClick: async () => {
+                      try {
+                        await api.del(Api.permanent(menu.node.id));
+                        toast(t.permanentlyDelete, "success");
+                        void load();
+                      } catch (e) {
+                        toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
+                      }
+                    },
                   },
-                },
-                {
-                  label: t.confirmTrashTitle,
-                  glyph: "trash",
-                  danger: true,
-                  onClick: async () => {
-                    await api.del(Api.node(menu.node.id));
-                    toast(t.confirmTrashTitle, "success");
-                    void load();
+                ]
+              : [
+                  { label: t.actionOpen, glyph: "eye", onClick: () => activate(menu.node) },
+                  ...(!isFolder(menu.node)
+                    ? [
+                        {
+                          label: t.download,
+                          glyph: "download" as Glyph,
+                          onClick: () => window.open(api.media(Api.download(menu.node.id)), "_blank"),
+                        },
+                      ]
+                    : []),
+                  {
+                    label: menu.node.starred ? "Bỏ gắn sao" : "Gắn sao",
+                    glyph: (menu.node.starred ? "star-filled" : "star") as Glyph,
+                    onClick: async () => {
+                      await api.post(Api.star(menu.node.id), { starred: !menu.node.starred });
+                      void load();
+                    },
                   },
-                },
-              ]
+                  {
+                    label: t.actionShare,
+                    glyph: "share",
+                    onClick: () => setSharing(menu.node),
+                  },
+                  {
+                    label: t.actionRename,
+                    glyph: "rename",
+                    onClick: () => {
+                      setRenamingNode(menu.node);
+                      setRenameName(menu.node.name);
+                    },
+                  },
+                  {
+                    label: t.confirmTrashTitle,
+                    glyph: "trash",
+                    danger: true,
+                    onClick: async () => {
+                      await api.del(Api.node(menu.node.id));
+                      toast(t.confirmTrashTitle, "success");
+                      void load();
+                    },
+                  },
+                ]
             : []
         }
       />

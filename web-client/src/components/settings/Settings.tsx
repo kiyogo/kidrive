@@ -21,6 +21,8 @@ import { HIDE_TWO_FACTOR } from "@/lib/flags";
 import { capChoices, forget, forgetAll, setSoftCap, usage, type OfflineUsage } from "@/lib/offline";
 import { useSession } from "@/lib/session";
 import { TwoFactorSetup } from "@/components/auth/TwoFactorSetup";
+import { useTheme } from "@/lib/theme";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 /*
   Settings, ported from features/settings. One list of sections, each opening
@@ -32,6 +34,7 @@ import { TwoFactorSetup } from "@/components/auth/TwoFactorSetup";
 type SectionId =
   | "root"
   | "account"
+  | "appearance"
   | "devices"
   | "language"
   | "two-factor"
@@ -43,6 +46,7 @@ type SectionId =
 /** Declared once, in the app's order. Users and server are admin only. */
 const sections: { id: SectionId; key: keyof Strings; glyph: Glyph; adminOnly?: boolean }[] = [
   { id: "account", key: "settingsAccount", glyph: "user" },
+  { id: "appearance", key: "settingsAppearance", glyph: "sun" },
   { id: "devices", key: "devices", glyph: "device" },
   { id: "language", key: "settingsLanguage", glyph: "globe" },
   { id: "two-factor", key: "settingsTwoFactor", glyph: "lock" },
@@ -54,7 +58,8 @@ const sections: { id: SectionId; key: keyof Strings; glyph: Glyph; adminOnly?: b
 
 export function SettingsScreen() {
   const t = useL10n();
-  const { user, signOut } = useSession();
+  const { user, signOut, locale } = useSession();
+  const { theme } = useTheme();
   const [section, setSection] = useState<SectionId>("root");
   const isAdmin = user?.role === "admin";
 
@@ -93,14 +98,31 @@ export function SettingsScreen() {
         {sections
           .filter((s) => !s.adminOnly || isAdmin)
           .filter((s) => s.id !== "two-factor" || !HIDE_TWO_FACTOR)
-          .map((s) => (
-            <Row
-              key={s.id}
-              glyph={s.glyph}
-              label={t[s.key] as string}
-              onClick={() => setSection(s.id)}
-            />
-          ))}
+          .map((s) => {
+            const value =
+              s.id === "appearance"
+                ? theme === "system"
+                  ? t.themeSystem
+                  : theme === "light"
+                    ? t.themeLight
+                    : t.themeDark
+                : s.id === "language"
+                  ? locale === "vi"
+                    ? "Tiếng Việt"
+                    : locale === "en"
+                      ? "English"
+                      : "العربية"
+                  : undefined;
+            return (
+              <Row
+                key={s.id}
+                glyph={s.glyph}
+                label={t[s.key] as string}
+                value={value}
+                onClick={() => setSection(s.id)}
+              />
+            );
+          })}
       </div>
 
       <div style={{ marginTop: 24 }}>
@@ -266,6 +288,8 @@ function Detail({ section, onBack }: { section: SectionId; onBack: () => void })
   switch (section) {
     case "account":
       return <AccountSection onBack={onBack} />;
+    case "appearance":
+      return <AppearanceSection onBack={onBack} />;
     case "devices":
       return <DevicesSection onBack={onBack} />;
     case "users":
@@ -649,12 +673,30 @@ function ServerSection({ onBack }: { onBack: () => void }) {
   );
 }
 
+function AppearanceSection({ onBack }: { onBack: () => void }) {
+  const t = useL10n();
+  return (
+    <Page title={t.settingsAppearance} onBack={onBack}>
+      <p className="t-body-sm" style={{ color: "var(--fg-secondary)", margin: "0 0 16px" }}>
+        {t.themeSubtitle}
+      </p>
+      <ThemeToggle />
+    </Page>
+  );
+}
+
 function LanguageSection({ onBack }: { onBack: () => void }) {
   const t = useL10n();
   const { locale, setLocale } = useSession();
   return (
     <Page title={t.settingsLanguage} onBack={onBack}>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <Row
+          glyph="globe"
+          label={t.languageVietnamese}
+          value={locale === "vi" ? t.actionDone : ""}
+          onClick={() => setLocale("vi")}
+        />
         <Row
           glyph="globe"
           label={t.languageEnglish}

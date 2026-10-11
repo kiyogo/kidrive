@@ -5,7 +5,7 @@ import { Mark } from "@/components/Mark";
 import { Button, Spinner, TextField, Tappable, useToast } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import { normaliseServer } from "@/lib/api";
-import { useL10n } from "@/lib/l10n";
+import { useL10n, type Locale } from "@/lib/l10n";
 import { HIDE_TWO_FACTOR } from "@/lib/flags";
 import { useSession } from "@/lib/session";
 
@@ -67,20 +67,23 @@ function Scaffold({
 /** LdLanguageToggle(compact: true): the globe and the current language. */
 function LanguageToggle() {
   const { locale, setLocale } = useSession();
+  const next: Record<Locale, Locale> = { vi: "en", en: "ar", ar: "vi" };
+  const labels: Record<Locale, string> = { vi: "Tiếng Việt", en: "English", ar: "العربية" };
   return (
     <Tappable
-      onClick={() => setLocale(locale === "en" ? "ar" : "en")}
+      onClick={() => setLocale(next[locale] ?? "vi")}
       radius={999}
       style={{
         display: "inline-flex",
         alignItems: "center",
         gap: 8,
         padding: "8px 14px",
+        background: "var(--bg-elevated)",
         border: "1px solid var(--stroke)",
       }}
     >
       <Icon glyph="globe" size={17} color="var(--fg-secondary)" />
-      <span className="t-label-lg">{locale === "en" ? "English" : "العربية"}</span>
+      <span className="t-label-lg">{labels[locale] ?? "Tiếng Việt"}</span>
     </Tappable>
   );
 }
@@ -94,10 +97,10 @@ export function WelcomeScreen({ onContinue }: { onContinue: () => void }) {
       <div className="ld-enter" style={{ textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center" }}>
         <Mark size={96} />
         <h1 className="t-display" style={{ margin: "28px 0 10px" }}>
-          Your files, your hardware
+          {t.welcomeTitle}
         </h1>
         <p className="t-body-lg" style={{ color: "var(--fg-secondary)", margin: 0, maxWidth: 460 }}>
-          Local Drive keeps everything on a server you run, in a place you can point at.
+          {t.welcomeBody}
         </p>
         <div style={{ width: "100%", marginTop: 32 }}>
           <Button label={t.welcomeStart} onClick={onContinue} />
@@ -112,7 +115,8 @@ export function WelcomeScreen({ onContinue }: { onContinue: () => void }) {
 export function LanguageScreen({ onDone, onBack }: { onDone: () => void; onBack?: () => void }) {
   const t = useL10n();
   const { locale, setLocale } = useSession();
-  const options: { id: "en" | "ar"; label: string }[] = [
+  const options: { id: Locale; label: string }[] = [
+    { id: "vi", label: "Tiếng Việt" },
     { id: "en", label: "English" },
     { id: "ar", label: "العربية" },
   ];
@@ -122,7 +126,7 @@ export function LanguageScreen({ onDone, onBack }: { onDone: () => void; onBack?
       <div className="ld-enter" style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <Mark size={72} />
         <h1 className="t-headline" style={{ margin: "26px 0 24px", textAlign: "center" }}>
-          Choose a language
+          {t.languageTitle}
         </h1>
         <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 12 }}>
           {options.map((o) => {
