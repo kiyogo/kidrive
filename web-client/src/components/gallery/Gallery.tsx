@@ -17,7 +17,7 @@ import { transfers, type Transfer } from "@/lib/upload";
  * The grid is masonry, so a panorama stays a panorama instead of being cropped
  * to a square. That is the whole reason it is not the files grid with a filter.
  */
-export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel) => void }) {
+export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeModel[]) => void }) {
   const t = useL10n();
   const [nodes, setNodes] = useState<NodeModel[] | null>(null);
   const [error, setError] = useState("");
@@ -31,24 +31,34 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel) => void }) {
         setError(e instanceof Error ? e.message : t.errorUnexpectedBody);
       }
     })();
-  }, []);
+  }, [t]);
 
+  const photoCount = (nodes ?? []).filter((n) => !n.mime_type?.startsWith("video/")).length;
+  const videoCount = (nodes ?? []).filter((n) => n.mime_type?.startsWith("video/")).length;
   const groups = groupByMonth(nodes ?? []);
 
   return (
     <div style={{ minHeight: "100dvh" }}>
       <header
         style={{
-          padding: "max(8px, env(safe-area-inset-top)) 16px 8px",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          height: 64,
+          padding: "0 24px",
+          borderBottom: "1px solid var(--stroke)",
           position: "sticky",
           top: 0,
           background: "var(--bg-primary)",
           zIndex: 60,
         }}
       >
-        <h1 className="t-title-lg" style={{ margin: 0 }}>
+        <h1 className="t-title-lg" style={{ margin: 0, fontSize: 20 }}>
           {t.gallery}
         </h1>
+        <div style={{ fontSize: 13, color: "var(--fg-secondary)", marginTop: 2 }}>
+          {photoCount} ảnh, {videoCount} video
+        </div>
       </header>
 
       {error ? (
@@ -58,60 +68,102 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel) => void }) {
       ) : nodes.length === 0 ? (
         <EmptyState glyph="gallery" title={t.galleryEmptyTitle} message={t.galleryEmptyBody} />
       ) : (
-        <div style={{ padding: "8px 16px 120px" }}>
+        <div style={{ padding: "16px 24px 120px" }}>
           {groups.map(([month, items]) => (
-            <section key={month} style={{ marginBottom: 28 }}>
-              <h2 className="t-label-md" style={{ color: "var(--fg-secondary)", margin: "0 0 10px" }}>
+            <section key={month} style={{ marginBottom: 32 }}>
+              <h2 className="t-label-md" style={{ color: "var(--fg-secondary)", margin: "0 0 12px", fontWeight: 600 }}>
                 {month}
               </h2>
-              {/* masonry by columns, so tall pictures keep their shape */}
-              <div style={{ columnWidth: 180, columnGap: 10 }}>
-                {items.map((n) => (
-                  <Tappable
-                    key={n.id}
-                    onClick={() => onOpen(n)}
-                    radius={12}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      breakInside: "avoid",
-                      marginBottom: 10,
-                      overflow: "hidden",
-                      border: "1px solid var(--stroke)",
-                      background: "var(--bg-elevated)",
-                      position: "relative",
-                    }}
-                  >
-                    {n.has_thumbnail ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={api.media(Api.thumbnail(n.id))}
-                        alt={n.name}
-                        loading="lazy"
-                        style={{ width: "100%", display: "block" }}
-                      />
-                    ) : (
-                      <span style={{ display: "grid", placeItems: "center", height: 150 }}>
-                        <Icon glyph={n.mime_type?.startsWith("video/") ? "video" : "image"} size={30} color="#4CC6C6" />
-                      </span>
-                    )}
-                    {n.mime_type?.startsWith("video/") && (
-                      <span
-                        style={{
-                          position: "absolute",
-                          insetInlineEnd: 8,
-                          bottom: 8,
-                          background: "rgba(0,0,0,0.6)",
-                          borderRadius: 999,
-                          padding: 5,
-                          display: "inline-flex",
-                        }}
-                      >
-                        <Icon glyph="play" size={13} color="#FFFFFF" />
-                      </span>
-                    )}
-                  </Tappable>
-                ))}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
+                  gap: 14,
+                }}
+              >
+                {items.map((n) => {
+                  const isVid = Boolean(n.mime_type?.startsWith("video/"));
+                  return (
+                    <Tappable
+                      key={n.id}
+                      onClick={() => onOpen(n, items)}
+                      radius={14}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        aspectRatio: "1 / 1",
+                        overflow: "hidden",
+                        border: "1px solid var(--stroke)",
+                        background: isVid ? "#13161C" : "var(--bg-elevated)",
+                        position: "relative",
+                      }}
+                    >
+                      {n.has_thumbnail ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={api.media(Api.thumbnail(n.id))}
+                          alt={n.name}
+                          loading="lazy"
+                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                        />
+                      ) : (
+                        <span style={{ display: "grid", placeItems: "center", height: "100%" }}>
+                          <Icon glyph={isVid ? "video" : "image"} size={36} color="#4CC6C6" />
+                        </span>
+                      )}
+
+                      {/* Video Center Play Overlay */}
+                      {isVid && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            inset: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            pointerEvents: "none",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 40,
+                              height: 40,
+                              borderRadius: "50%",
+                              background: "rgba(0, 0, 0, 0.62)",
+                              border: "1px solid rgba(255, 255, 255, 0.5)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            <Icon glyph="play" size={18} strokeWidth={2.4} color="#FFFFFF" />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Video Bottom-Left Play Badge matching media_1791702934970.png */}
+                      {isVid && (
+                        <span
+                          style={{
+                            position: "absolute",
+                            insetInlineStart: 8,
+                            bottom: 8,
+                            background: "rgba(255, 255, 255, 0.25)",
+                            borderRadius: 999,
+                            width: 24,
+                            height: 24,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "#FFFFFF",
+                          }}
+                        >
+                          <Icon glyph="play" size={12} strokeWidth={2.6} color="#FFFFFF" />
+                        </span>
+                      )}
+                    </Tappable>
+                  );
+                })}
               </div>
             </section>
           ))}

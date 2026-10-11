@@ -47,7 +47,19 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="vi" dir="ltr" data-theme="dark">
+    <html lang="vi" dir="ltr" data-theme="system" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){
+              try {
+                var t = localStorage.getItem('ld.theme') || 'system';
+                document.documentElement.setAttribute('data-theme', t);
+              } catch(e) {}
+            })()`,
+          }}
+        />
+      </head>
       <body className={`${spaceGrotesk.variable} ${plexArabic.variable} ${plusJakarta.variable}`}>
         <ThemeProvider>
           <SessionProvider>

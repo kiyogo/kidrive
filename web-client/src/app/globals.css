@@ -42,7 +42,9 @@
 }
 
 @media (prefers-color-scheme: light) {
-  :root[data-theme="system"] {
+  :root,
+  :root[data-theme="system"],
+  :root:not([data-theme="dark"]) {
     --bg-primary: #f6f7f9;
     --bg-elevated: #ffffff;
     --bg-sunken: #eceef1;

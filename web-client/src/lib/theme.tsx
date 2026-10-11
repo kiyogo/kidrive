@@ -27,9 +27,9 @@ export function useTheme() {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>(() => {
-    if (typeof window === "undefined") return "dark";
+    if (typeof window === "undefined") return "system";
     const saved = localStorage.getItem("ld.theme") as ThemeMode | null;
-    return saved === "light" || saved === "dark" || saved === "system" ? saved : "dark";
+    return saved === "light" || saved === "dark" || saved === "system" ? saved : "system";
   });
 
   const [isDark, setIsDark] = useState<boolean>(true);

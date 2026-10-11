@@ -66,7 +66,9 @@ export type Glyph =
   | "copy"
   | "move"
   | "sun"
-  | "moon";
+  | "moon"
+  | "expand"
+  | "minimize";
 
 const paths: Record<Glyph, string> = {
   home: "M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4v-5.5h-6V20H5a1 1 0 0 1-1-1z",
@@ -132,6 +134,8 @@ const paths: Record<Glyph, string> = {
   move: "M12 4v16m0-16-3 3m3-3 3 3m-3 13-3-3m3 3 3-3M4 12h16m-16 0 3-3m-3 3 3 3m13-3-3-3m3 3-3 3",
   sun: "M12 3v2m0 14v2m9-9h-2M5 12H3m15.364 6.364-1.414-1.414M7.05 7.05 5.636 5.636m12.728 0-1.414 1.414M7.05 16.95l-1.414 1.414M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z",
   moon: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z",
+  expand: "M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7",
+  minimize: "M4 14h6v6M20 10h-6V4M10 14l-7 7M14 10l7-7",
 };
 
 const filled: Partial<Record<Glyph, boolean>> = { "star-filled": true, play: true, slides: false };

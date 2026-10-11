@@ -77,8 +77,12 @@ function Drive() {
   const t = useL10n();
   const [section, setSection] = useState<Section>("files");
   const [folder, setFolder] = useState<{ id: string; name: string }[]>([]);
-  const [preview, setPreview] = useState<NodeModel | null>(null);
+  const [preview, setPreview] = useState<{ node: NodeModel; nodes?: NodeModel[] } | null>(null);
   const [refresh, setRefresh] = useState(0);
+
+  const openPreview = (node: NodeModel, nodes?: NodeModel[]) => {
+    setPreview({ node, nodes });
+  };
 
   const current = folder.length ? folder[folder.length - 1] : { id: "", name: t.myFiles };
 
@@ -128,9 +132,9 @@ function Drive() {
       ) : section === "activity" ? (
         <ActivityScreen />
       ) : section === "gallery" ? (
-        <GalleryScreen onOpen={setPreview} />
+        <GalleryScreen onOpen={openPreview} />
       ) : section === "videos" ? (
-        <VideosScreen onOpen={setPreview} />
+        <VideosScreen onOpen={openPreview} />
       ) : section === "transfers" ? (
         <TransfersScreen />
       ) : section === "search" ? (
@@ -140,7 +144,7 @@ function Drive() {
             setFolder([{ id: node.id, name: node.name }]);
             setSection("files");
           }}
-          onPreview={setPreview}
+          onPreview={(n) => openPreview(n)}
         />
       ) : section in filterFor ? (
         <>
@@ -153,14 +157,21 @@ function Drive() {
             filter={filterFor[section]}
             title={titles[section]}
             onOpenFolder={(node) => setFolder((t) => [...t, { id: node.id, name: node.name }])}
-            onPreview={setPreview}
+            onPreview={(n) => openPreview(n)}
             onSearch={() => setSection("search")}
           />
         </>
       ) : null}
 
       {clashSheet}
-      {preview && <Preview node={preview} onClose={() => setPreview(null)} />}
+      {preview && (
+        <Preview
+          node={preview.node}
+          nodes={preview.nodes}
+          onClose={() => setPreview(null)}
+          onNavigate={(next) => setPreview({ node: next, nodes: preview.nodes })}
+        />
+      )}
     </Shell>
   );
 }

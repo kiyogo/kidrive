@@ -216,14 +216,13 @@ export function Shell({
                 display: "flex",
                 alignItems: "center",
                 gap: 12,
-                padding: "12px 14px",
+                padding: "11px 14px",
                 background: active ? "rgba(76,141,255,0.12)" : "transparent",
-                color: active ? "var(--accent)" : "var(--fg-secondary)",
-                border: `1px solid ${active ? "rgba(76,141,255,0.35)" : "transparent"}`,
+                color: "var(--fg-primary)",
               }}
             >
-              <Icon glyph={item.glyph} size={19} />
-              <span className="t-body-lg" style={{ fontWeight: active ? 600 : 400 }}>
+              <Icon glyph={item.glyph} size={19} color={active ? "var(--accent)" : "var(--fg-secondary)"} />
+              <span className="t-body-lg" style={{ fontWeight: active ? 600 : 400, flex: 1 }}>
                 {String(t[item.key])}
               </span>
             </Tappable>

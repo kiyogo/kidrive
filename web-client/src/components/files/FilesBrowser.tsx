@@ -29,6 +29,7 @@ import { ShareSheet } from "@/components/share/ShareSheet";
 import { DetailsPane } from "./DetailsPane";
 import { bandStyle, hasPointer, rangeBetween, useFileKeys, useMarquee, useNodeDrag } from "./desktop";
 import { useL10n, type Strings } from "@/lib/l10n";
+import { FileTileIcon, categoryOfNode } from "./FileTileIcon";
 
 type ViewMode = "grid" | "list";
 
@@ -338,9 +339,11 @@ export function FilesBrowser({
         style={{
           display: "flex",
           alignItems: "center",
+          height: isDesktop ? 64 : undefined,
           padding: isDesktop
-            ? "4px 24px 8px"
+            ? "0 24px"
             : "max(8px, env(safe-area-inset-top)) 16px 8px",
+          borderBottom: isDesktop ? "1px solid var(--stroke)" : undefined,
           position: "sticky",
           top: 0,
           background: "var(--bg-primary)",
@@ -1078,9 +1081,7 @@ function Tile({
   kept: boolean;
 }) {
   const t = useL10n();
-  const category = categoryOf(node);
-  const tone = isFolder(node) && node.color ? folderSwatches[node.color] ?? colorForCategory(category) : colorForCategory(category);
-  const ext = extensionOf(node.name);
+  const cat = categoryOfNode(node);
 
   return (
     <div
@@ -1098,7 +1099,7 @@ function Tile({
         e.stopPropagation();
         onMenu({ x: e.clientX, y: e.clientY, node });
       }}
-      style={{ cursor: "pointer" }}
+      style={{ cursor: "pointer", display: "flex", flexDirection: "column" }}
     >
       <div
         style={{
@@ -1106,7 +1107,6 @@ function Tile({
           aspectRatio: "1 / 1",
           borderRadius: "var(--r-tile)",
           border: `1px solid ${over === node.id || selected ? "var(--accent)" : "var(--stroke)"}`,
-          // a folder lights up while something is held over it
           background: over === node.id ? "rgba(76,141,255,0.12)" : "var(--bg-elevated)",
           display: "flex",
           alignItems: "center",
@@ -1116,32 +1116,66 @@ function Tile({
         }}
       >
         {node.has_thumbnail ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={api.media(Api.thumbnail(node.id))}
-            alt=""
-            loading="lazy"
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={api.media(Api.thumbnail(node.id))}
+              alt=""
+              loading="lazy"
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+            {cat === "video" && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  pointerEvents: "none",
+                }}
+              >
+                <div
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: "50%",
+                    background: "rgba(0, 0, 0, 0.62)",
+                    border: "1px solid rgba(255, 255, 255, 0.5)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#FFFFFF",
+                  }}
+                >
+                  <Icon glyph="play" size={18} strokeWidth={2.4} color="#FFFFFF" />
+                </div>
+              </div>
+            )}
+            <div
+              style={{
+                position: "absolute",
+                insetInlineEnd: 6,
+                bottom: 6,
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--stroke)",
+                borderRadius: 8,
+                padding: 4,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <FileTileIcon category={cat} size={18} />
+            </div>
+          </>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-            {/* a folder reads as a solid shape, the way it does in the app; a
-                file keeps the outline glyph in its type colour */}
-            {isFolder(node) ? (
-              <svg viewBox="0 0 24 24" width={52} height={52} aria-hidden="true">
-                <path
-                  d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 3 17.5z"
-                  fill={node.color ? tone : "var(--fg-muted)"}
-                />
-              </svg>
-            ) : (
-              <Icon glyph={glyphForCategory[category] ?? "file"} size={44} color={tone} />
-            )}
-            {ext && !isFolder(node) && (
-              <span className="t-label-sm" style={{ color: "var(--fg-secondary)" }}>
-                {ext}
-              </span>
-            )}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <FileTileIcon
+              category={cat}
+              size={54}
+              folderColor={node.color}
+            />
           </div>
         )}
 
@@ -1163,16 +1197,12 @@ function Tile({
             <Icon glyph="check" size={14} color="#FFFFFF" strokeWidth={2.6} />
           </span>
         )}
-        {/* top-left is the owner's corner, and only ever appears on something
-            someone else owns */}
         {node.owner && (
           <span style={{ position: "absolute", insetInlineStart: 6, top: 6 }} title={node.owner.name}>
             <Avatar name={node.owner.name} seed={node.owner.avatar_seed} size={26} showBorder />
           </span>
         )}
 
-        {/* top-right holds one thing at a time: the selection tick while
-            choosing, then the offline mark, then the shared mark */}
         {kept && !selected && (
           <span
             style={{
@@ -1199,11 +1229,35 @@ function Tile({
         )}
       </div>
 
-      <div className="t-body-md" style={{ marginTop: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {node.name}
-      </div>
-      <div className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-        {isFolder(node) ? relative(node.updated_at) : bytes(node.size_bytes)}
+      <div style={{ marginTop: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span
+            className="t-body-md"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              color: "var(--fg-primary)",
+            }}
+          >
+            {node.name}
+          </span>
+          {node.starred && (
+            <span style={{ color: "#E8935C", flexShrink: 0 }} title={t.starred}>
+              <Icon glyph="star-filled" size={13} color="#E8935C" />
+            </span>
+          )}
+          {node.shared && (
+            <span style={{ color: "var(--accent)", flexShrink: 0 }} title={t.actionShare}>
+              <Icon glyph="link" size={13} color="var(--accent)" />
+            </span>
+          )}
+        </div>
+        <div className="t-label-sm" style={{ color: "var(--fg-secondary)", marginTop: 2 }}>
+          {isFolder(node) ? relative(node.updated_at) : bytes(node.size_bytes)}
+        </div>
       </div>
     </div>
   );

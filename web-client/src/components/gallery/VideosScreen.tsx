@@ -12,7 +12,7 @@ import type { NodeModel } from "@/lib/models";
 /**
  * All videos in one place, matching Flutter VideosPage.
  */
-export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel) => void }) {
+export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeModel[]) => void }) {
   const t = useL10n();
   const [nodes, setNodes] = useState<NodeModel[] | null>(null);
   const [error, setError] = useState("");
@@ -32,22 +32,24 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel) => void }) {
     <div style={{ minHeight: "100dvh" }}>
       <header
         style={{
-          padding: "max(8px, env(safe-area-inset-top)) 16px 8px",
+          height: 64,
+          padding: "0 20px",
           position: "sticky",
           top: 0,
           background: "var(--bg-primary)",
+          borderBottom: "1px solid var(--stroke)",
           zIndex: 60,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
         }}
       >
-        <div>
-          <h1 className="t-title-lg" style={{ margin: 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", justifyContent: "center" }}>
+          <h1 className="t-title-md" style={{ margin: 0, lineHeight: 1.2 }}>
             {t.videos}
           </h1>
           {nodes && nodes.length > 0 && (
-            <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
+            <span className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 2 }}>
               {t.videosSummary({ count: nodes.length })}
             </span>
           )}
@@ -64,100 +66,114 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel) => void }) {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-            gap: 12,
-            padding: "12px 16px 120px",
+            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+            gap: 16,
+            padding: "16px 20px 120px",
           }}
         >
           {nodes.map((node) => (
             <Tappable
               key={node.id}
-              onClick={() => onOpen(node)}
+              onClick={() => onOpen(node, nodes)}
               radius={14}
               style={{
-                display: "flex",
-                flexDirection: "column",
+                position: "relative",
+                width: "100%",
+                aspectRatio: "16 / 9",
                 overflow: "hidden",
                 border: "1px solid var(--stroke)",
                 background: "var(--bg-elevated)",
+                borderRadius: "var(--r-tile)",
               }}
             >
-              <div
-                style={{
-                  position: "relative",
-                  width: "100%",
-                  aspectRatio: "16 / 9",
-                  background: "var(--bg-sunken)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  overflow: "hidden",
-                }}
-              >
-                {node.has_thumbnail ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={api.media(Api.thumbnail(node.id))}
-                    alt={node.name}
-                    loading="lazy"
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
-                ) : (
-                  <Icon glyph="video" size={32} color="#4CC6C6" />
-                )}
-                {/* Play button overlay */}
+              {/* Video Thumbnail or dark fallback */}
+              {node.has_thumbnail ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={api.media(Api.thumbnail(node.id))}
+                  alt={node.name}
+                  loading="lazy"
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                />
+              ) : (
                 <div
                   style={{
-                    position: "absolute",
-                    inset: 0,
+                    width: "100%",
+                    height: "100%",
+                    background: "#141424",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    background: "rgba(0,0,0,0.25)",
+                  }}
+                />
+              )}
+
+              {/* Center Play Button Overlay */}
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  pointerEvents: "none",
+                }}
+              >
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: "50%",
+                    background: "rgba(0,0,0,0.5)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
                   }}
                 >
-                  <div
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 999,
-                      background: "rgba(0,0,0,0.65)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      border: "1px solid rgba(255,255,255,0.2)",
-                    }}
-                  >
-                    <Icon glyph="play" size={20} color="#FFFFFF" />
-                  </div>
+                  <Icon glyph="play" size={20} color="#FFFFFF" />
                 </div>
               </div>
 
-              <div style={{ padding: "10px 12px" }}>
-                <div
-                  className="t-body-md"
+              {/* Bottom Info Bar Overlay (matching Flutter VideoTile) */}
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: 0,
+                  insetInline: 0,
+                  background: "rgba(0,0,0,0.65)",
+                  padding: "6px 8px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <Icon glyph="play" size={13} color="#FFFFFF" />
+                <span
                   style={{
+                    flex: 1,
+                    minWidth: 0,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
-                    fontWeight: 600,
+                    color: "#FFFFFF",
+                    fontSize: 13,
+                    fontWeight: 500,
                   }}
                   title={node.name}
                 >
                   {node.name}
-                </div>
-                <div
-                  className="t-body-sm"
-                  style={{
-                    color: "var(--fg-secondary)",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    marginTop: 4,
-                  }}
-                >
-                  <span>{bytes(node.size_bytes)}</span>
-                  <span>{relative(node.updated_at || node.created_at)}</span>
-                </div>
+                </span>
+                {node.size_bytes > 0 && (
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      color: "rgba(255,255,255,0.7)",
+                      fontSize: 12,
+                    }}
+                  >
+                    {bytes(node.size_bytes)}
+                  </span>
+                )}
               </div>
             </Tappable>
           ))}
