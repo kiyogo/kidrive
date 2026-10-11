@@ -3,11 +3,9 @@
 import { useRef, useState, type ReactNode } from "react";
 import { useL10n, type Strings } from "@/lib/l10n";
 import { Icon, type Glyph } from "./Icon";
-import { Mark } from "./Mark";
 import { Sheet, Tappable, useDeviceClass } from "./ui";
 import { bytes, percent } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import { ThemeToggle } from "./ThemeToggle";
 
 export type Section =
   | "files"
@@ -170,67 +168,65 @@ export function Shell({
           width: 248,
           flex: "none",
           borderInlineEnd: "1px solid var(--stroke)",
-          padding: "18px 14px",
+          padding: "24px 0 20px 0",
           display: "flex",
           flexDirection: "column",
-          gap: 6,
           position: "sticky",
           top: 0,
           height: "100dvh",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 8px 14px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <Mark size={26} />
-            <span className="t-title-sm">{t.appName}</span>
-          </div>
-          <ThemeToggle compact />
+        <div style={{ padding: "0 20px 20px 20px" }}>
+          <Tappable
+            onClick={pick}
+            radius={24}
+            style={{
+              height: 38,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              background: "var(--accent)",
+              color: "#FFFFFF",
+              width: "100%",
+            }}
+          >
+            <Icon glyph="upload" size={18} color="#FFFFFF" />
+            <span className="t-label-lg" style={{ color: "#FFFFFF" }}>{t.upload}</span>
+          </Tappable>
         </div>
 
-        <Tappable
-          onClick={pick}
-          radius={24}
-          style={{
-            height: 46,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            background: "var(--accent)",
-            color: "#FFFFFF",
-            marginBottom: 10,
-          }}
-        >
-          <Icon glyph="upload" size={18} color="#FFFFFF" />
-          <span className="t-label-lg">{t.upload}</span>
-        </Tappable>
+        <div style={{ flex: 1, overflowY: "auto", padding: "0 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+          {primary.map((item) => {
+            const active = section === item.id;
+            return (
+              <Tappable
+                key={item.id}
+                onClick={() => onNavigate(item.id)}
+                radius={14}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "11px 14px",
+                  background: active ? "rgba(76,141,255,0.12)" : "transparent",
+                  color: "var(--fg-primary)",
+                }}
+              >
+                <Icon glyph={item.glyph} size={19} color={active ? "var(--accent)" : "var(--fg-secondary)"} />
+                <span className="t-body-lg" style={{ fontWeight: active ? 600 : 400, flex: 1 }}>
+                  {String(t[item.key])}
+                </span>
+              </Tappable>
+            );
+          })}
+        </div>
 
-        {primary.map((item) => {
-          const active = section === item.id;
-          return (
-            <Tappable
-              key={item.id}
-              onClick={() => onNavigate(item.id)}
-              radius={14}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "11px 14px",
-                background: active ? "rgba(76,141,255,0.12)" : "transparent",
-                color: "var(--fg-primary)",
-              }}
-            >
-              <Icon glyph={item.glyph} size={19} color={active ? "var(--accent)" : "var(--fg-secondary)"} />
-              <span className="t-body-lg" style={{ fontWeight: active ? 600 : 400, flex: 1 }}>
-                {String(t[item.key])}
-              </span>
-            </Tappable>
-          );
-        })}
-
-        <div style={{ flex: 1 }} />
-        {user && <QuotaBar used={user.quota_bytes_used} total={user.quota_bytes} />}
+        {user && (
+          <div style={{ padding: "12px 16px 0 16px" }}>
+            <QuotaBar used={user.quota_bytes_used} total={user.quota_bytes} />
+          </div>
+        )}
       </aside>
 
       <main style={{ flex: 1, minWidth: 0 }}>{children}</main>
