@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# this workflow moved to the repository root, where GitHub will actually run
+# it. everything in it is still about the Go server, so the working directory
+# is set once here rather than on each step.
+defaults:
+  run:
+    working-directory: server
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    # every job carries one of these. GitHub's own default is six hours, which
+    # is not a timeout so much as a billing accident: a job that hangs runs all
+    # night and nobody hears about it until the morning. these numbers are
+    # roughly four times what the step actually takes, so a real slowdown still
+    # passes and a hang is reported while there is still a day left to fix it.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.13"
+          cache-dependency-path: server/go.sum
+
+      - name: Verify formatting
+        run: |
+          unformatted="$(gofmt -l . | grep -v '^vendor/' || true)"
+          if [ -n "$unformatted" ]; then
+            echo "these files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Build
+        run: go build ./cmd/localdrive
+
+  client:
+    name: Client analyze and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: localdrive
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # pinned for the same reason Go and Node are. `channel: stable` alone
+          # installs whatever shipped most recently, so the toolchain moves
+          # under the project between two runs of an unchanged commit. that is
+          # what broke this job: 3.47 landed, build_runner stopped terminating,
+          # and CI went from two minutes to the six hour ceiling without anyone
+          # touching the repository. bump this deliberately, not by waking up.
+          flutter-version: 3.44.9
+          channel: stable
+          cache: true
+
+      - name: Dependencies
+        run: flutter pub get
+
+      # the generated sources are gitignored, so a clean checkout does not
+      # analyse until they exist. this is not an optional convenience step.
+      - name: Generate
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+  vulncheck:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.13"
+          # the module lives in server/, not at the root. Without this the
+          # cache lookup goes looking for a go.mod beside the workflow, misses,
+          # and every run downloads the module set again.
+          cache-dependency-path: server/go.sum
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
+
+  image:
+    name: Image build and scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: test
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the image
+        run: docker build -t localdrive/server:ci -f Dockerfile .
+
+      - name: Scan the image
+        # pinned to a release rather than a branch: an action referenced by a
+        # moving ref runs whatever that branch holds at the moment CI runs,
+        # which is somebody else's code with this workflow's permissions
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: localdrive/server:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+  cross-compile:
+    name: The binary, for every target someone might run it on
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.13"
+          cache-dependency-path: server/go.sum
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build -trimpath -o /tmp/localdrive ./cmd/localdrive

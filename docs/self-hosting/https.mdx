@@ -1,0 +1,231 @@
+---
+title: HTTP and HTTPS
+description: Why the default is plain HTTP, what that costs, and how to turn on real HTTPS when you have a domain.
+sidebar_position: 3
+---
+
+# HTTP and HTTPS
+
+Local Drive serves plain HTTP by default. That is a deliberate choice for a
+server on your own network, and it is reversible in one line the moment you
+have a domain.
+
+## Why not HTTPS by default
+
+HTTPS needs a certificate, and a certificate is an assertion about a **name**.
+No certificate authority will issue one for `192.168.1.42`, because nobody owns
+that address and it means something different on every network in the world.
+
+The usual workaround is a certificate the server signs itself. It sounds
+harmless and it is not, because nothing trusts it:
+
+- **Browsers** interrupt every visit with a full page warning. People learn to
+  click through security warnings, which is worse than the problem it solves.
+- **The app** does not warn, it refuses. An HTTP client rejects an untrusted
+  certificate outright, so a perfectly healthy server looks exactly like one
+  that is down, with no way to tell the difference from inside the app.
+- **Android** ignores user installed certificate authorities for app traffic
+  from Android 7 onwards, so even importing the certificate by hand does not
+  fix the app.
+
+A self signed certificate on a LAN address does not buy security, it buys a
+habit of dismissing warnings. So the default is honest instead: plain HTTP,
+clearly labelled, on a network you control.
+
+## What plain HTTP actually costs
+
+Worth stating rather than glossing over.
+
+- **Traffic is readable to anyone on the same network.** On a home network with
+  a password on the Wi-Fi, that is you and your household. On a shared office
+  network, university network, or open Wi-Fi, treat it as public.
+- **Passwords and tokens are part of that traffic.**
+- **Browsers restrict some features to secure contexts.** Service workers are
+  the one that shows: the web client will not install as an offline app over
+  plain HTTP on a LAN address. It works normally over `localhost` and over
+  HTTPS. The Android, Windows and Linux apps are unaffected, since none of them
+  are browsers.
+
+If any of that describes your situation, turn HTTPS on. It takes a domain and
+one line.
+
+## Turning on HTTPS
+
+You need a domain name pointing at the machine. A subdomain of something you
+already own is fine, and it does not have to be reachable from the internet if
+you use the DNS challenge.
+
+Set it in `.env` in the install folder:
+
+```
+LD_DOMAIN=drive.example.com
+LD_TLS_EMAIL=you@example.com
+```
+
+Then regenerate the proxy config and restart:
+
+```
+localdrive init --force
+localdrive restart
+```
+
+Caddy takes it from there: it requests a certificate from Let's Encrypt, serves
+HTTPS, and renews on its own. `LD_TLS_EMAIL` is only used for expiry notices
+and can be left out.
+
+Check it:
+
+```
+localdrive status
+```
+
+The addresses it prints turn into `https://` once a domain is set.
+
+### Ports
+
+Let's Encrypt only ever connects back on **port 80 or port 443**. That is the
+protocol, not a setting: a server reachable only on 7443 can never be issued a
+certificate, however it is configured. Both need to be reachable from the
+internet at the time of issue, and again at every renewal.
+
+Port 7443 keeps working alongside them. It is where the server answers; 80 and
+443 are how the certificate is proved and renewed.
+
+If neither port can be opened, use the DNS challenge instead, which proves
+ownership through a DNS record and needs no inbound port at all. That requires
+Docker and a Caddy build with your DNS provider's plugin; see the
+[Caddy documentation](https://caddyserver.com/docs/automatic-https).
+
+### Without Docker
+
+The bare binary gets its own certificate too. Set `LD_DOMAIN` and restart, and
+it requests one from Let's Encrypt, serves HTTPS and renews on its own, with no
+proxy in front of it and nothing else to install.
+
+```
+LD_DOMAIN=drive.example.com
+LD_TLS_EMAIL=you@example.com
+```
+
+It serves that certificate on **443 and on your configured port both**, so
+`https://drive.example.com` and `https://drive.example.com:7443` are the same
+server.
+
+### Reaching it by address once a domain is set
+
+A certificate covers a name. It cannot cover `192.168.1.10`, because no
+authority signs certificates for addresses like that one, so a phone on the same
+network has nothing to verify and HTTPS to that address can never work.
+
+Setting a domain therefore must not be the same as giving up local access. Your
+configured port accepts **either protocol**, decided per connection by what the
+client actually sends:
+
+```
+https://drive.example.com          the name, over the certificate
+https://drive.example.com:7443     the same thing on your own port
+http://192.168.1.10:7443           the same server, from the same network
+```
+
+Port 443 is HTTPS only, since every client already assumes that. The rule for
+plain HTTP on your own port is short:
+
+- From your own network, an address is served as it is. That is a phone on the
+  same wifi, and it is the case this exists for.
+- Asking for the **domain** over plain HTTP is redirected to HTTPS, so the name
+  is never served unencrypted.
+- From the public internet, plain HTTP to the machine's address is redirected to
+  the domain, because the name works from there and a password does not belong
+  in the clear on the open internet.
+
+Nothing here is a setting. The apps already follow the same rule when you type
+an address: an IP or a `.local` name gets `http://`, a public domain gets
+`https://`. See
+[Ports and addresses](/getting-started/ports-and-addresses).
+
+Two things this needs:
+
+- **Ports 80 and 443 open**, for the reasons in [Ports](#ports) below. On a
+  firewalled machine that is `ufw allow 80` and `ufw allow 443`.
+- **Permission to bind them.** Ports below 1024 are privileged on Linux, so run
+  it as root, or grant the binary the capability once:
+
+  ```
+  sudo setcap 'cap_net_bind_service=+ep' ./localdrive
+  ```
+
+If 443 cannot be opened it says so and keeps serving on your own port rather
+than refusing to start.
+
+To use a proxy instead, set `LD_TLS=off`, put any reverse proxy in front, and
+let the proxy hold the certificate. Docker installs do this already: the
+compose file pins `LD_TLS=off`, because Caddy owns the certificate there and
+two clients asking for the same name would race each other and both fail.
+
+## When a certificate cannot be issued
+
+To get a certificate, the authority has to reach **this** server. It looks up
+your domain and connects to whatever answers. If that is not your machine, the
+check fails, and it will keep failing however many times you restart.
+
+The usual cause is a DNS record pointing somewhere else. A proxied record, the
+orange cloud in Cloudflare, resolves to the proxy rather than to you, so the
+challenge lands there and never arrives.
+
+The server tells you rather than sitting silent. A request that needs a
+certificate waits up to twenty seconds and then fails, and the log says what has
+to change:
+
+```
+could not obtain a certificate, so https is not answering
+  domain=drive.example.com
+  needs=drive.example.com must resolve to this machine, and ports 80 and 443
+        must be reachable from the internet
+```
+
+It keeps trying in the background, so once the cause is fixed the next request
+succeeds without a restart.
+
+Two ways out, and both are fine:
+
+- **Let this server hold the certificate.** Point the record straight at your
+  address, grey cloud rather than orange, and make sure ports 80 and 443 reach
+  you.
+- **Let the proxy hold it.** Set `LD_TLS=off` and let Cloudflare, Caddy or
+  whatever sits in front terminate HTTPS. The server then serves plain HTTP to
+  the proxy only, and the proxy must be pointed at the port it is actually
+  listening on.
+
+Check what your name resolves to before assuming anything else:
+
+```
+dig +short drive.example.com
+```
+
+If that is not your server's address, nothing else in this page will work yet.
+
+## Reaching it from outside your network
+
+Opening a port to the internet is the part worth slowing down on, and it is
+where HTTPS stops being optional.
+
+Two options that avoid opening anything:
+
+- **A VPN**, such as WireGuard or Tailscale. The server stays entirely private,
+  you connect to your own network, and plain HTTP is fine because the tunnel is
+  already encrypted. This is the simplest safe answer.
+- **A tunnel** such as Cloudflare Tunnel, which gives you a real hostname and a
+  real certificate without a port forward.
+
+If you do forward a port, set `LD_DOMAIN` and use HTTPS. Local Drive requires
+device approval by default, so a new device cannot get in on a password alone,
+but that is not a reason to send passwords in the clear across the internet.
+
+## Summary
+
+| Situation | What to use |
+| --- | --- |
+| Your own network, home or small office | Plain HTTP, the default |
+| Shared or untrusted network | HTTPS with a domain |
+| Reaching it from outside | A VPN, or HTTPS with a domain |
+| A browser, and you want the offline web app | HTTPS with a domain |
