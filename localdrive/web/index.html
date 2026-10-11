@@ -50,20 +50,7 @@
       } catch (e) {}
     })();
 
-    // Auto-clean stale node_url and tokens if it points to a different origin/port
-    (function () {
-      try {
-        var nodeUrl = localStorage.getItem('flutter.ld.node_url') || localStorage.getItem('ld.node_url');
-        if (nodeUrl && (!nodeUrl.startsWith(window.location.origin) || nodeUrl.indexOf(':7555') !== -1)) {
-          localStorage.removeItem('flutter.ld.node_url');
-          localStorage.removeItem('ld.node_url');
-          localStorage.removeItem('flutter.ld.token.access');
-          localStorage.removeItem('flutter.ld.token.refresh');
-          localStorage.removeItem('ld.token.access');
-          localStorage.removeItem('ld.token.refresh');
-        }
-      } catch (e) {}
-    })();
+
 
     // Offline mode / Service Worker management
     var isOfflineEnabled = false;
@@ -268,13 +255,19 @@
     });
 
     // the splash fades out once flutter has painted its first frame, so there
-    // is never a flash of an empty page between the two
-    window.addEventListener('flutter-first-frame', function () {
+    // is never a flash of an empty page between the two.
+    function hideSplash() {
       var splash = document.getElementById('ld-splash');
-      if (!splash) return;
+      if (!splash || splash.classList.contains('ld-done')) return;
       splash.classList.add('ld-done');
-      window.setTimeout(function () { splash.remove(); }, 320);
-    });
+      window.setTimeout(function () {
+        if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+      }, 350);
+    }
+
+    window.addEventListener('flutter-first-frame', hideSplash);
+    // Dismiss splash after 1.5s as fallback in case event was missed or delayed
+    window.setTimeout(hideSplash, 1500);
 
   </script>
 

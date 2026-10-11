@@ -77,41 +77,50 @@ class ApiClient {
     if (url == null || url.isEmpty) {
       // In a browser the app was served by a server, and asking someone to
       // type the address of the machine they are already talking to is
-      // nonsense. It also loses invite links: /invite/CODE on a device with no
-      // node configured is bounced to onboarding and the code goes with it.
+      // nonsense.
       final sameOrigin = await _originIsAServer();
-      if (sameOrigin == null) return false;
-      url = sameOrigin;
-      await _store.writeNodeUrl(url);
+      if (sameOrigin != null) {
+        url = sameOrigin;
+        await _store.writeNodeUrl(url);
+      } else if (kIsWeb) {
+        // Fallback probe for local development backend on port 7443
+        final localDevServer = await _probeServer('http://localhost:7443');
+        if (localDevServer != null) {
+          url = localDevServer;
+          await _store.writeNodeUrl(url);
+        } else {
+          return false;
+        }
+      } else {
+        return false;
+      }
     }
     useNode(url);
     _accessToken = await _store.readAccessToken();
     return _accessToken != null;
   }
 
+  Future<String?> _probeServer(String hostUrl) async {
+    try {
+      final probe = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 2),
+        receiveTimeout: const Duration(seconds: 2),
+      ));
+      final response = await probe.getUri<Map<String, dynamic>>(
+        Uri.parse('$hostUrl${Api.status}'),
+      );
+      return response.data?['server_id'] is String ? hostUrl : null;
+    } on Object {
+      return null;
+    }
+  }
+
   /// The origin this page came from, if a Local Drive server answers there.
-  ///
-  /// Checked rather than assumed. During development the app is often served
-  /// from one port and the server listens on another, and adopting an origin
-  /// with nothing behind it would replace "which server?" with a connection
-  /// error, which is worse.
   Future<String?> _originIsAServer() async {
     if (!kIsWeb) return null;
     final origin = Uri.base.origin;
     if (origin.isEmpty || origin.startsWith('file:')) return null;
-    try {
-      final probe = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 3),
-        receiveTimeout: const Duration(seconds: 3),
-      ));
-      final response = await probe.getUri<Map<String, dynamic>>(
-        Uri.parse('$origin${Api.status}'),
-      );
-      // any json with a server_id is this application, not somebody else's 200
-      return response.data?['server_id'] is String ? origin : null;
-    } on Object {
-      return null;
-    }
+    return _probeServer(origin);
   }
 
   Future<void> clearSession() async {
