@@ -219,7 +219,7 @@ class L10nVi extends L10n {
   String get recent => 'Gần đây';
 
   @override
-  String get starred => 'Có gắn sao';
+  String get starred => 'Gắn sao';
 
   @override
   String get trash => 'Thùng rác';
@@ -999,7 +999,7 @@ class L10nVi extends L10n {
   String get offlineMakeAvailable => 'Lưu ngoại tuyến';
 
   @override
-  String get offlineRemoveDownload => 'Xóa bản tải ngoại tuyến';
+  String get offlineRemoveDownload => 'Xóa ngoại tuyến';
 
   @override
   String offlineRemoved(String name) {

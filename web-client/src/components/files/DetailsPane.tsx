@@ -127,8 +127,8 @@ export function DetailsPane({
           />
         )}
         <Action
-          glyph="star"
-          label={node.starred ? t.actionRemove : t.starred}
+          glyph={node.starred ? "star-filled" : "star"}
+          label={t.starred}
           onClick={async () => {
             if (node.starred) await api.del(Api.star(node.id));
             else await api.post(Api.star(node.id), {});

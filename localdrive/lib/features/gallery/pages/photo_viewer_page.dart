@@ -438,45 +438,70 @@ class _Chrome extends ConsumerWidget {
                         ),
                   ),
                   const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: <Widget>[
-                      _Action(
-                        glyph: LdGlyph.shared,
-                        label: l10n.actionShare,
-                        onTap: () => showShareSheet(context, ref, node),
-                      ),
-                      _Action(
-                        glyph: LdGlyph.download,
-                        label: l10n.download,
-                        onTap: () =>
-                            downloadNodes(context, ref, <NodeModel>[node]),
-                      ),
-                      if (OfflineController.isSupported)
-                        _Action(
-                          glyph: LdGlyph.offlineReady,
-                          label: offline
-                              ? l10n.offlineRemoveDownload
-                              : l10n.offlineMakeAvailable,
-                          active: offline,
-                          onTap: () async {
-                            final controller = ref.read(
-                              offlineControllerProvider.notifier,
-                            );
-                            if (offline) {
-                              await controller.unmark(node);
-                            } else {
-                              await controller.mark(node);
-                            }
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      return ScrollConfiguration(
+                        behavior: ScrollConfiguration.of(context).copyWith(
+                          dragDevices: <PointerDeviceKind>{
+                            PointerDeviceKind.touch,
+                            PointerDeviceKind.mouse,
+                            PointerDeviceKind.trackpad,
+                            PointerDeviceKind.stylus,
                           },
                         ),
-                      _Action(
-                        glyph: node.starred ? LdGlyph.starFilled : LdGlyph.star,
-                        label: l10n.starred,
-                        active: node.starred,
-                        onTap: () => toggleStar(context, ref, node),
-                      ),
-                    ],
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          physics: const BouncingScrollPhysics(),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              minWidth: constraints.maxWidth,
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              children: <Widget>[
+                                _Action(
+                                  glyph: LdGlyph.shared,
+                                  label: l10n.actionShare,
+                                  onTap: () => showShareSheet(context, ref, node),
+                                ),
+                                _Action(
+                                  glyph: LdGlyph.download,
+                                  label: l10n.download,
+                                  onTap: () =>
+                                      downloadNodes(context, ref, <NodeModel>[node]),
+                                ),
+                                if (OfflineController.isSupported)
+                                  _Action(
+                                    glyph: LdGlyph.offlineReady,
+                                    label: offline
+                                        ? l10n.offlineRemoveDownload
+                                        : l10n.offlineMakeAvailable,
+                                    active: offline,
+                                    onTap: () async {
+                                      final controller = ref.read(
+                                        offlineControllerProvider.notifier,
+                                      );
+                                      if (offline) {
+                                        await controller.unmark(node);
+                                      } else {
+                                        await controller.mark(node);
+                                      }
+                                    },
+                                  ),
+                                _Action(
+                                  glyph: node.starred
+                                      ? LdGlyph.starFilled
+                                      : LdGlyph.star,
+                                  label: l10n.starred,
+                                  active: node.starred,
+                                  onTap: () => toggleStar(context, ref, node),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),
@@ -535,7 +560,7 @@ class _Action extends StatelessWidget {
       onTap: onTap,
       borderRadius: LdRadii.tileRadius,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
@@ -544,7 +569,6 @@ class _Action extends StatelessWidget {
             Text(
               label,
               maxLines: 1,
-              overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: active
                         ? LdColors.accentPrimary

@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/Icon";
-import { EmptyState, ErrorState, Spinner, Tappable } from "@/components/ui";
+import { EmptyState, ErrorState, Spinner, Tappable, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { bytes } from "@/lib/format";
 import { useL10n } from "@/lib/l10n";
-import { categoryOf, type NodeModel } from "@/lib/models";
-import { readKept } from "@/lib/offline";
+import { categoryOf, isFolder, type NodeModel } from "@/lib/models";
+import { forget, isKept, keep, readKept } from "@/lib/offline";
 
 /**
  * The preview, ported from features/preview/pages/preview_page.dart.
@@ -19,8 +19,15 @@ import { readKept } from "@/lib/offline";
  */
 export function Preview({ node, onClose }: { node: NodeModel; onClose: () => void }) {
   const t = useL10n();
+  const toast = useToast();
   const category = categoryOf(node);
   const [local, setLocal] = useState<string>("");
+  const [starred, setStarred] = useState<boolean>(Boolean(node.starred));
+  const [kept, setKept] = useState<boolean>(false);
+
+  useEffect(() => {
+    setKept(isKept(node.id));
+  }, [node.id]);
 
   // a kept copy is read before the network, so a file marked available offline
   // opens with the server unreachable
@@ -51,6 +58,54 @@ export function Preview({ node, onClose }: { node: NodeModel; onClose: () => voi
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const handleShare = async () => {
+    try {
+      const shareUrl = window.location.origin + `/preview/${node.id}`;
+      if (navigator.share) {
+        await navigator.share({ title: node.name, url: shareUrl });
+      } else {
+        await navigator.clipboard.writeText(shareUrl);
+        toast(t.actionCopied, "success");
+      }
+    } catch {
+      /* user canceled share */
+    }
+  };
+
+  const handleToggleOffline = async () => {
+    try {
+      if (kept) {
+        await forget(node.id);
+        setKept(false);
+        toast(t.offlineRemoved({ name: node.name }), "success");
+      } else {
+        const ok = await keep(node.id, node.name);
+        if (!ok) {
+          toast(t.errorUnexpectedTitle, "error");
+          return;
+        }
+        setKept(true);
+        toast(t.offlineQueued({ name: node.name }), "success");
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
+    }
+  };
+
+  const handleToggleStar = async () => {
+    try {
+      const next = !starred;
+      setStarred(next);
+      if (next) {
+        await api.post(Api.star(node.id), {});
+      } else {
+        await api.del(Api.star(node.id));
+      }
+    } catch {
+      setStarred(!starred);
+    }
+  };
 
   return (
     <div
@@ -98,16 +153,16 @@ export function Preview({ node, onClose }: { node: NodeModel; onClose: () => voi
             alignItems: "center",
             justifyContent: "center",
             minHeight: 240,
-            maxHeight: "78vh",
+            maxHeight: "72vh",
           }}
         >
           {unreachable ? (
             <EmptyState glyph="offline" title={node.name} message={t.offlineNeedsConnection} />
           ) : category === "image" ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={src} alt={node.name} style={{ maxWidth: "100%", maxHeight: "78vh", display: "block" }} />
+            <img src={src} alt={node.name} style={{ maxWidth: "100%", maxHeight: "72vh", display: "block" }} />
           ) : category === "video" ? (
-            <video src={src} controls autoPlay style={{ width: "100%", maxHeight: "78vh", background: "#000" }} />
+            <video src={src} controls autoPlay style={{ width: "100%", maxHeight: "72vh", background: "#000" }} />
           ) : category === "audio" ? (
             <div style={{ width: "100%", padding: 28, textAlign: "center" }}>
               <Icon glyph="audio" size={46} color="#4CC6C6" />
@@ -117,7 +172,7 @@ export function Preview({ node, onClose }: { node: NodeModel; onClose: () => voi
               <audio src={src} controls autoPlay style={{ width: "100%" }} />
             </div>
           ) : category === "pdf" ? (
-            <iframe src={src} title={node.name} style={{ width: "100%", height: "78vh", border: 0 }} />
+            <iframe src={src} title={node.name} style={{ width: "100%", height: "72vh", border: 0 }} />
           ) : textual ? (
             <TextView node={node} markdown={isMarkdown} lineNumbers={category === "code"} />
           ) : (
@@ -127,6 +182,118 @@ export function Preview({ node, onClose }: { node: NodeModel; onClose: () => voi
               message={t.previewDownloadToOpen}
             />
           )}
+        </div>
+
+        {/* Bottom action bar with horizontal touch/mouse scrolling */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-around",
+            gap: 8,
+            marginTop: 10,
+            padding: "8px 12px",
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--stroke)",
+            borderRadius: "var(--r-card)",
+            overflowX: "auto",
+            WebkitOverflowScrolling: "touch",
+            scrollbarWidth: "none",
+            whiteSpace: "nowrap",
+            touchAction: "pan-x",
+          }}
+        >
+          <button
+            type="button"
+            onClick={handleShare}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 4,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: "6px 12px",
+              borderRadius: "var(--r-tile)",
+              color: "var(--fg)",
+              fontSize: 12,
+              fontWeight: 500,
+              flexShrink: 0,
+            }}
+          >
+            <Icon glyph="share" size={20} />
+            <span>{t.actionShare}</span>
+          </button>
+          <a
+            href={src}
+            download
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 4,
+              textDecoration: "none",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: "6px 12px",
+              borderRadius: "var(--r-tile)",
+              color: "var(--fg)",
+              fontSize: 12,
+              fontWeight: 500,
+              flexShrink: 0,
+            }}
+          >
+            <Icon glyph="download" size={20} />
+            <span>{t.download}</span>
+          </a>
+          {!isFolder(node) && (
+            <button
+              type="button"
+              onClick={handleToggleOffline}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 4,
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: "6px 12px",
+                borderRadius: "var(--r-tile)",
+                color: kept ? "var(--accent)" : "var(--fg)",
+                fontSize: 12,
+                fontWeight: 500,
+                flexShrink: 0,
+              }}
+            >
+              <Icon glyph="offline" size={20} color={kept ? "var(--accent)" : "currentColor"} />
+              <span>{kept ? t.offlineRemoveDownload : t.offlineMakeAvailable}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleToggleStar}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 4,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: "6px 12px",
+              borderRadius: "var(--r-tile)",
+              color: starred ? "var(--accent)" : "var(--fg)",
+              fontSize: 12,
+              fontWeight: 500,
+              flexShrink: 0,
+            }}
+          >
+            <Icon glyph={starred ? "star-filled" : "star"} size={20} color={starred ? "var(--accent)" : "currentColor"} />
+            <span>{t.starred}</span>
+          </button>
         </div>
       </div>
     </div>

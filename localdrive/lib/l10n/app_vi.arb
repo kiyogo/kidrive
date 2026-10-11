@@ -70,7 +70,7 @@
   "share": "Chia sẻ",
   "sharedWithMe": "Được chia sẻ với tôi",
   "recent": "Gần đây",
-  "starred": "Có gắn sao",
+  "starred": "Gắn sao",
   "trash": "Thùng rác",
   "restore": "Khôi phục",
   "storage": "Bộ nhớ",
@@ -324,7 +324,7 @@
   "transferPausedOffline": "Đã tạm dừng, đang chờ kết nối mạng",
 
   "offlineMakeAvailable": "Lưu ngoại tuyến",
-  "offlineRemoveDownload": "Xóa bản tải ngoại tuyến",
+  "offlineRemoveDownload": "Xóa ngoại tuyến",
   "offlineRemoved": "{name} không còn được lưu trên thiết bị này",
   "offlineQueued": "{name} sẽ được lưu trên thiết bị này",
   "offlineOverCapTitle": "Thao tác này sẽ dùng vượt quá giới hạn bộ nhớ của bạn",
