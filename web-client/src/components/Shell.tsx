@@ -213,7 +213,7 @@ export function Shell({
                   gap: 12,
                   padding: "11px 14px",
                   background: active ? "rgba(76,141,255,0.12)" : "transparent",
-                  color: active ? "var(--fg-primary)" : "var(--fg-secondary)",
+                  color: "var(--fg-primary)",
                 }}
               >
                 <Icon glyph={item.glyph} size={19} color={active ? "var(--accent)" : "var(--fg-secondary)"} />
@@ -222,7 +222,7 @@ export function Shell({
                   style={{
                     fontWeight: 400,
                     flex: 1,
-                    color: active ? "var(--fg-primary)" : "var(--fg-secondary)",
+                    color: "var(--fg-primary)",
                   }}
                 >
                   {String(t[item.key])}

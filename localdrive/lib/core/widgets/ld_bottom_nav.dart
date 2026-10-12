@@ -264,9 +264,7 @@ class _SidebarRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final labelColor = selected
-        ? context.surfaces.foregroundPrimary
-        : context.surfaces.foregroundSecondary;
+    final labelColor = context.surfaces.foregroundPrimary;
     final iconColor = selected
         ? LdColors.accentPrimary
         : context.surfaces.foregroundSecondary;
