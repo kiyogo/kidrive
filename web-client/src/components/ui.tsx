@@ -1331,13 +1331,12 @@ export function Menu({
             >
               {item.glyph && <Icon glyph={item.glyph} size={19} color={itemColor} />}
               <span
+                className="t-body-lg"
                 style={{
-                  fontSize: 16,
-                  fontWeight: 400,
                   color: itemColor,
                   flex: 1,
                   textAlign: "left",
-                  lineHeight: 1.3,
+                  lineHeight: "22px",
                   whiteSpace: "nowrap",
                   overflow: "hidden",
                   textOverflow: "ellipsis",

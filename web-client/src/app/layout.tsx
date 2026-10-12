@@ -47,7 +47,13 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="vi" dir="ltr" data-theme="system" suppressHydrationWarning>
+    <html
+      lang="vi"
+      dir="ltr"
+      data-theme="system"
+      className={`${spaceGrotesk.variable} ${plexArabic.variable} ${plusJakarta.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <script
           dangerouslySetInnerHTML={{
@@ -55,6 +61,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               try {
                 var t = localStorage.getItem('ld.theme') || 'system';
                 document.documentElement.setAttribute('data-theme', t);
+                var l = localStorage.getItem('ld.locale') || 'vi';
+                document.documentElement.lang = l;
+                document.documentElement.dir = l === 'ar' ? 'rtl' : 'ltr';
               } catch(e) {}
             })()`,
           }}
