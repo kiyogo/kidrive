@@ -1155,7 +1155,7 @@ export function Menu({
   onClose: () => void;
   items: { label: string; glyph?: Glyph; onClick: () => void; danger?: boolean }[];
 }) {
-  const { isMobile } = useDeviceClass();
+  const { isDesktop } = useDeviceClass();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -1171,7 +1171,7 @@ export function Menu({
 
   if (!open || !mounted) return null;
 
-  if (isMobile) {
+  if (!isDesktop) {
     return (
       <Sheet open={open} onClose={onClose} title={title} subtitle={subtitle}>
         <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "4px 0" }}>
@@ -1193,6 +1193,7 @@ export function Menu({
                   padding: "14px 4px",
                   color: itemColor,
                   boxSizing: "border-box",
+                  whiteSpace: "nowrap",
                 }}
               >
                 {item.glyph && <Icon glyph={item.glyph} size={20} color={itemColor} />}
@@ -1203,6 +1204,9 @@ export function Menu({
                     flex: 1,
                     textAlign: "left",
                     lineHeight: 1.3,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
                   }}
                 >
                   {item.label}
@@ -1217,38 +1221,27 @@ export function Menu({
 
   const panelWidth = 240;
   const estimatedHeight = items.length * 46 + 12;
-  const winW = typeof window !== "undefined" ? window.innerWidth : 800;
-  const winH = typeof window !== "undefined" ? window.innerHeight : 600;
+  const winW = typeof window !== "undefined" ? window.innerWidth : 1280;
+  const winH = typeof window !== "undefined" ? window.innerHeight : 800;
 
-  let left = 8;
-  let top = 8;
+  let posX = x ?? 0;
+  let posY = y ?? 0;
 
   if (anchorRect) {
-    // If the button is in the right half of the window OR opening right overflows:
-    // Align menu right edge to button's right edge
-    const alignEnd = anchorRect.right > winW / 2 || anchorRect.left + panelWidth > winW - 8;
-    const targetLeft = alignEnd ? anchorRect.right - panelWidth : anchorRect.left;
-    left = Math.max(8, Math.min(targetLeft, winW - panelWidth - 8));
-
-    const fitsBelow = anchorRect.bottom + estimatedHeight <= winH - 8;
-    top = fitsBelow
-      ? Math.max(8, Math.min(anchorRect.bottom, winH - estimatedHeight - 8))
-      : Math.max(8, anchorRect.top - estimatedHeight);
-  } else {
-    const posX = x ?? 0;
-    const posY = y ?? 0;
-
-    // Follow Flutter _showFloating:
-    // (anchor.dx > size.width / 2 || anchor.dx + panelWidth > size.width)
-    const flipH = posX > winW / 2 || posX + panelWidth > winW - 8;
-    const targetLeft = flipH ? posX - panelWidth : posX;
-    left = Math.max(8, Math.min(targetLeft, winW - panelWidth - 8));
-
-    const fitsBelow = posY + estimatedHeight <= winH - 8;
-    top = fitsBelow
-      ? Math.max(8, Math.min(posY, winH - estimatedHeight - 8))
-      : Math.max(8, posY - estimatedHeight);
+    posX = anchorRect.right;
+    posY = anchorRect.bottom;
   }
+
+  // Follow Flutter _showFloating:
+  // (anchor.dx > size.width / 2 || anchor.dx + panelWidth > size.width)
+  const flipH = posX > winW / 2 || posX + panelWidth > winW - 8;
+  const targetLeft = flipH ? posX - panelWidth : posX;
+  const left = Math.max(8, Math.min(targetLeft, winW - panelWidth - 8));
+
+  const fitsBelow = posY + estimatedHeight <= winH - 8;
+  const top = fitsBelow
+    ? Math.max(8, Math.min(posY, winH - estimatedHeight - 8))
+    : Math.max(8, posY - estimatedHeight);
 
   return createPortal(
     <>

@@ -61,13 +61,13 @@ export function Shell({
   children: ReactNode;
 }) {
   const t = useL10n();
-  const { isMobile } = useDeviceClass();
+  const { isDesktop } = useDeviceClass();
   const { user } = useSession();
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
   const shellFileInput = useRef<HTMLInputElement>(null);
   const pick = () => shellFileInput.current?.click();
 
-  if (isMobile) {
+  if (!isDesktop) {
     return (
       <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
         <input ref={shellFileInput} type="file" multiple hidden onChange={(e) => { onUpload(e.target.files); e.target.value = ""; }} />
@@ -289,11 +289,13 @@ function QuotaBar({ used, total }: { used: number; total: number }) {
   const t = useL10n();
   const unlimited = !total || total <= 0;
   const pct = percent(used, total);
+  const remaining = Math.max(0, total - used);
+
   return (
-    <div style={{ padding: "12px 10px" }}>
+    <div style={{ padding: "12px 10px", whiteSpace: "nowrap" }}>
       <div
         style={{
-          height: 4,
+          height: 6,
           borderRadius: 999,
           background: "var(--bg-elevated)",
           overflow: "hidden",
@@ -305,14 +307,28 @@ function QuotaBar({ used, total }: { used: number; total: number }) {
             height: "100%",
             width: unlimited ? "12%" : `${pct}%`,
             background: pct > 90 ? "var(--warning)" : "var(--accent)",
-            transition: "width var(--d-standard) var(--ease)",
           }}
         />
       </div>
-      <div className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-        {unlimited
-          ? t.sidebarStorageUsed({ used: bytes(used) })
-          : t.storageUsedOf({ used: bytes(used), total: bytes(total) })}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          whiteSpace: "nowrap",
+          fontSize: 12,
+          color: "var(--fg-secondary)",
+          gap: 6,
+        }}
+      >
+        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {t.sidebarStorageUsed({ used: bytes(used) })}
+        </span>
+        {!unlimited && (
+          <span style={{ color: "var(--fg-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {t.sidebarStorageFree({ free: bytes(remaining) })}
+          </span>
+        )}
       </div>
     </div>
   );

@@ -256,18 +256,14 @@ body {
 }
 
 /* ---------------------------------------------------------------- motion */
-@keyframes ld-enter {
-  from {
-    opacity: 0;
-    transform: translateY(var(--slide-offset));
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-.ld-enter {
-  animation: ld-enter var(--d-standard) var(--ease) both;
+/* Remove 100% of animations and transitions for instant native Flutter response */
+*,
+*::before,
+*::after {
+  transition: none !important;
+  transition-duration: 0s !important;
+  animation: none !important;
+  animation-duration: 0s !important;
 }
 
 @keyframes ld-spin {
@@ -276,7 +272,7 @@ body {
   }
 }
 .ld-spin {
-  animation: ld-spin var(--d-spinner) linear infinite;
+  animation: ld-spin var(--d-spinner) linear infinite !important;
 }
 
 @keyframes ld-shimmer {
@@ -296,17 +292,18 @@ body {
     var(--bg-elevated) 63%
   );
   background-size: 400% 100%;
-  animation: ld-shimmer 1.4s ease-in-out infinite;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
+/* Prevent text wrapping on buttons, tabs, navigation items, chips, and headers */
+button,
+.ld-tappable,
+.t-label-lg,
+.t-label-md,
+.t-label-sm,
+nav,
+aside,
+header {
+  white-space: nowrap;
 }
 
 /* inputs, buttons and containers never use floating browser outline rings; they highlight their 1px border like Flutter */

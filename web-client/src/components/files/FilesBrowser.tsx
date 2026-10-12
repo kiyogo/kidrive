@@ -619,7 +619,6 @@ export function FilesBrowser({
                   background: "var(--bg-elevated)",
                   border: `1px solid ${desktopSearchFocused ? "var(--accent)" : "var(--stroke)"}`,
                   borderRadius: "var(--r-pill)",
-                  transition: "border-color var(--d-hover) var(--ease)",
                 }}
               >
                 <Icon glyph="search" size={18} color="var(--fg-secondary)" />
@@ -1416,7 +1415,6 @@ function Tile({
           alignItems: "center",
           justifyContent: "center",
           overflow: "hidden",
-          transition: "border-color var(--d-hover) var(--ease)",
         }}
       >
         {node.has_thumbnail ? (
