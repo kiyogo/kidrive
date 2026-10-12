@@ -400,32 +400,18 @@ function Detail({
 }
 
 function TwoFactorSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
-  const t = useL10n();
-  const { user } = useSession();
-
-  if (user?.totp_enabled) {
-    const done = (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          minHeight: 320,
-          padding: 24,
-          width: "100%",
-        }}
-      >
-        <EmptyState
-          glyph="lock"
-          title={t.twoFactorOn}
-          message={t.twoFactorAlreadyOnBody}
-        />
-      </div>
-    );
-    return embedded ? done : <Page title={t.twoFactorTitle} onBack={onBack}>{done}</Page>;
-  }
-
-  return <TwoFactorSetup required={false} onDone={onBack ?? (() => {})} onBack={onBack} embedded={embedded} />;
+  const { refreshUser } = useSession();
+  return (
+    <TwoFactorSetup
+      required={false}
+      onDone={() => {
+        void refreshUser();
+        onBack?.();
+      }}
+      onBack={onBack}
+      embedded={embedded}
+    />
+  );
 }
 
 function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {

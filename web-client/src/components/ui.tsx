@@ -88,7 +88,7 @@ export function Button({
   label: string;
   onClick?: () => void;
   glyph?: Glyph;
-  variant?: "primary" | "secondary" | "quiet" | "danger" | "destructive";
+  variant?: "primary" | "secondary" | "quiet" | "text" | "danger" | "destructive";
   expand?: boolean;
   compact?: boolean;
   disabled?: boolean;
@@ -99,6 +99,7 @@ export function Button({
     primary: { bg: "var(--accent)", fg: "#FFFFFF", border: "var(--accent)" },
     secondary: { bg: "transparent", fg: "var(--fg-primary)", border: "var(--stroke)" },
     quiet: { bg: "transparent", fg: "var(--fg-primary)", border: "var(--stroke)" },
+    text: { bg: "transparent", fg: "var(--accent)", border: "transparent" },
     danger: { bg: "transparent", fg: "var(--warning)", border: "var(--warning)" },
     destructive: { bg: "transparent", fg: "var(--warning)", border: "var(--warning)" },
   }[variant];
@@ -113,8 +114,8 @@ export function Button({
         alignItems: "center",
         justifyContent: "center",
         gap: 8,
-        height: compact ? 40 : "var(--button-height)",
-        padding: compact ? "0 16px" : "0 22px",
+        height: compact ? 38 : "var(--button-height)",
+        padding: compact ? "0 14px" : "0 20px",
         width: expand ? "100%" : undefined,
         borderRadius: "var(--r-pill)",
         background: palette.bg,
@@ -122,7 +123,7 @@ export function Button({
         border: `1px solid ${palette.border}`,
         font: "inherit",
         fontWeight: 600,
-        fontSize: compact ? 14 : 15,
+        fontSize: compact ? 13 : 14,
         cursor: disabled || busy ? "not-allowed" : "pointer",
         opacity: disabled ? 0.45 : 1,
         transition: "background var(--d-hover) var(--ease), border-color var(--d-hover) var(--ease)",
@@ -455,7 +456,7 @@ export function TextField({
           display: "flex",
           alignItems: "center",
           gap: 10,
-          height: 52,
+          height: 48,
           padding: "0 14px",
           background: "var(--bg-elevated)",
           border: `1px solid ${error ? "var(--warning)" : focused ? "var(--accent)" : "var(--stroke)"}`,
@@ -484,7 +485,7 @@ export function TextField({
             outline: "none",
             color: "var(--fg-primary)",
             font: "inherit",
-            fontSize: 15,
+            fontSize: 14,
           }}
         />
         {type === "password" && (
@@ -723,56 +724,72 @@ export const useToast = () => useContext(ToastCtx);
 export function ToastHost({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<Toast[]>([]);
   const next = useRef(1);
+  const { isMobile } = useDeviceClass();
 
   const show = useCallback((message: string, tone: Toast["tone"] = "info") => {
     const id = next.current++;
     setItems((list) => [...list, { id, message, tone }]);
-    setTimeout(() => setItems((list) => list.filter((t) => t.id !== id)), 4000);
+    setTimeout(() => setItems((list) => list.filter((t) => t.id !== id)), 3500);
   }, []);
 
   return (
     <ToastCtx.Provider value={show}>
       {children}
-      {/* from the top on a phone, where the bottom is where the navigation is */}
       <div
         style={{
           position: "fixed",
-          insetInline: 0,
-          top: 16,
+          left: 0,
+          right: 0,
+          ...(!isMobile ? { bottom: 24 } : { top: 12 }),
           display: "flex",
-          flexDirection: "column",
+          flexDirection: !isMobile ? "column-reverse" : "column",
           alignItems: "center",
           gap: 8,
-          zIndex: 900,
+          zIndex: 9999,
           pointerEvents: "none",
         }}
       >
-        {items.map((t) => (
-          <div
-            key={t.id}
-            className="ld-enter t-body-md"
-            style={{
-              pointerEvents: "auto",
-              maxWidth: "min(560px, calc(100vw - 32px))",
-              padding: "12px 16px",
-              borderRadius: "var(--r-pill)",
-              background: "var(--bg-elevated)",
-              border: `1px solid ${
-                t.tone === "error" ? "var(--warning)" : t.tone === "success" ? "var(--accent)" : "var(--stroke)"
-              }`,
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <Icon
-              glyph={t.tone === "error" ? "alert" : t.tone === "success" ? "check" : "info"}
-              size={17}
-              color={t.tone === "error" ? "var(--warning)" : t.tone === "success" ? "var(--accent)" : "var(--fg-secondary)"}
-            />
-            {t.message}
-          </div>
-        ))}
+        {items.map((t) => {
+          const accent =
+            t.tone === "success"
+              ? "var(--file-spreadsheet)"
+              : t.tone === "error"
+              ? "var(--warning)"
+              : "var(--accent)";
+          const glyph =
+            t.tone === "success"
+              ? "check"
+              : t.tone === "error"
+              ? "alert"
+              : "info";
+
+          return (
+            <div
+              key={t.id}
+              className="ld-enter"
+              style={{
+                pointerEvents: "auto",
+                maxWidth: 480,
+                width: "fit-content",
+                margin: "0 20px",
+                padding: "12px 16px",
+                borderRadius: "var(--r-card)",
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--stroke)",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                color: "var(--fg-primary)",
+                fontSize: 14,
+                lineHeight: "20px",
+                fontWeight: 400,
+              }}
+            >
+              <Icon glyph={glyph} size={20} color={accent} />
+              <span>{t.message}</span>
+            </div>
+          );
+        })}
       </div>
     </ToastCtx.Provider>
   );

@@ -401,7 +401,7 @@
   "twoFactorOptionalBody": "Thêm một bước xác nhận khi đăng nhập để tăng cường bảo mật. Bạn có thể chọn bật hoặc tắt.",
   "twoFactorScanTitle": "Thêm tài khoản vào ứng dụng xác thực của bạn",
   "twoFactorUseQr": "Quét mã QR",
-  "twoFactorUseKey": "Nhập khóa khóa bí mật",
+  "twoFactorUseKey": "Nhập khóa bí mật",
   "twoFactorKeyBody": "Sử dụng cách này nếu ứng dụng xác thực ở trên thiết bị khác, hoặc bạn lưu mã trong trình quản lý mật khẩu.",
   "twoFactorConfirmTitle": "Nhập mã gồm sáu chữ số hiển thị trên ứng dụng",
   "twoFactorCodeHint": "Sáu chữ số",

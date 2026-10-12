@@ -3,7 +3,17 @@
 import { useCallback, useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { Icon } from "@/components/Icon";
-import { Button, ErrorState, Spinner, Tappable, TextField, useToast } from "@/components/ui";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  Spinner,
+  Tappable,
+  TextField,
+  useDeviceClass,
+  useToast,
+} from "@/components/ui";
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { useL10n } from "@/lib/l10n";
@@ -16,23 +26,22 @@ type Enrollment = {
 };
 
 /**
- * Turning on two-factor, ported from auth/pages/two_factor_setup_page.
+ * Turning on two-factor, ported 100% from auth/pages/two_factor_setup_page.dart.
  *
- * Open the authenticator, point it at the screen, done. The key is underneath
- * for anyone whose authenticator lives on the device already showing this
- * page, where there is no second screen to point at anything.
+ * The QR is shown first because that is the path almost everybody takes: open
+ * the authenticator, point it at the screen, done. The secret is underneath
+ * for anyone typing it into a password manager or setting up a device that
+ * cannot see this screen.
  *
- * An admin cannot get past this when the server requires it, so it is the only
- * screen on that path: without it this client would show a wall with nothing
- * behind it.
+ * Nothing is enabled until a real code from the app is accepted.
  */
 export function TwoFactorSetup({
-  required,
+  required = false,
   onDone,
   onBack,
-  embedded,
+  embedded = false,
 }: {
-  required: boolean;
+  required?: boolean;
   onDone: () => void;
   onBack?: () => void;
   embedded?: boolean;
@@ -40,27 +49,28 @@ export function TwoFactorSetup({
   const t = useL10n();
   const toast = useToast();
   const { user, signOut } = useSession();
+  const { isMobile } = useDeviceClass();
 
   const [data, setData] = useState<Enrollment | null>(null);
   const [qr, setQr] = useState("");
-  const [mode, setMode] = useState<"qr" | "key">("qr");
+  const [byHand, setByHand] = useState(false);
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [codes, setCodes] = useState<string[]>([]);
+
+  const alreadyOn = user?.totp_enabled ?? false;
 
   const begin = useCallback(async () => {
+    if (alreadyOn) return;
     setLoadError("");
     try {
       const started = await api.post<Enrollment>(Api.totpBegin, {});
       setData(started);
       if (started?.otpauth_url) {
-        // drawn here rather than fetched from a chart service, because the url
-        // carries the secret and nobody else needs to see it
         setQr(
           await QRCode.toDataURL(started.otpauth_url, {
-            width: 220,
+            width: 200,
             margin: 1,
             color: { dark: "#000000", light: "#FFFFFF" },
           }),
@@ -69,7 +79,7 @@ export function TwoFactorSetup({
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : t.errorUnexpectedTitle);
     }
-  }, [t]);
+  }, [alreadyOn, t]);
 
   useEffect(() => {
     void begin();
@@ -85,10 +95,6 @@ export function TwoFactorSetup({
     try {
       await api.post(Api.totpVerify, { code: code.trim() });
       toast(t.twoFactorOn, "success");
-      if (data?.recovery_codes?.length) {
-        setCodes(data.recovery_codes);
-        return;
-      }
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : t.errorUnexpectedTitle);
@@ -97,180 +103,178 @@ export function TwoFactorSetup({
     }
   };
 
-  // already on: there is nothing to enrol and saying so beats an empty form
-  if (user?.totp_enabled && codes.length === 0) {
+  // Enrolment only makes sense for an account that is not enrolled.
+  if (alreadyOn) {
+    const done = <AlreadyOn />;
     return (
-      <Frame title={t.twoFactorTitle} onBack={onBack} embedded={embedded}>
-        <div style={{ display: "grid", placeItems: "center", padding: "40px 0", textAlign: "center" }}>
-          <Icon glyph="lock" size={40} color="var(--accent)" />
-          <div className="t-title-sm" style={{ margin: "14px 0 6px" }}>
-            {t.twoFactorOn}
-          </div>
-          <p className="t-body-md" style={{ color: "var(--fg-secondary)", margin: 0 }}>
-            {t.twoFactorAlreadyOnBody}
-          </p>
-        </div>
-      </Frame>
-    );
-  }
-
-  if (codes.length > 0) {
-    return (
-      <Frame title={t.recoveryCodesTitle} embedded={embedded}>
-        <p className="t-body-md" style={{ color: "var(--fg-secondary)", margin: "0 0 16px" }}>
-          {t.recoveryCodesBody}
-        </p>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
-            gap: 8,
-            marginBottom: 18,
-          }}
-        >
-          {codes.map((one) => (
-            <span
-              key={one}
-              className="t-body-md"
-              dir="ltr"
-              style={{
-                padding: "10px 12px",
-                background: "var(--bg-sunken)",
-                border: "1px solid var(--stroke)",
-                borderRadius: "var(--r-chip)",
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                textAlign: "center",
-              }}
-            >
-              {one}
-            </span>
-          ))}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <Button
-            label={t.actionCopy}
-            glyph="copy"
-            variant="quiet"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(codes.join("\n"));
-                toast(t.actionCopied, "success");
-              } catch {
-                toast(t.errorUnexpectedTitle, "error");
-              }
-            }}
-          />
-          <Button label={t.actionDone} onClick={onDone} />
-        </div>
-      </Frame>
+      <ScaffoldShell
+        title={t.twoFactorTitle}
+        showBack={!required}
+        onBack={onBack}
+        embedded={embedded}
+      >
+        {done}
+      </ScaffoldShell>
     );
   }
 
   if (loadError) {
     return (
-      <Frame title={t.twoFactorTitle} onBack={onBack} embedded={embedded}>
+      <ScaffoldShell
+        title={t.twoFactorTitle}
+        showBack={!required}
+        onBack={onBack}
+        embedded={embedded}
+      >
         <ErrorState message={loadError} onRetry={() => void begin()} />
-      </Frame>
+      </ScaffoldShell>
     );
   }
 
   if (!data) {
     return (
-      <Frame title={t.twoFactorTitle} onBack={onBack} embedded={embedded}>
-        <div style={{ display: "grid", placeItems: "center", padding: 40 }}>
+      <ScaffoldShell
+        title={t.twoFactorTitle}
+        showBack={!required}
+        onBack={onBack}
+        embedded={embedded}
+      >
+        <div style={{ display: "grid", placeItems: "center", minHeight: 300 }}>
           <Spinner />
         </div>
-      </Frame>
+      </ScaffoldShell>
     );
   }
 
-  return (
-    <Frame title={t.twoFactorTitle} onBack={onBack} embedded={embedded}>
-      <p className="t-body-md" style={{ color: "var(--fg-secondary)", margin: "0 0 20px" }}>
-        {required ? t.twoFactorRequiredBody : t.twoFactorOptionalBody}
-      </p>
+  const recoveryCodes = data.recovery_codes || [];
 
-      <Step number={1} title={t.twoFactorScanTitle} />
+  // Left panel: Step 1 (Scan QR / Use Secret Key)
+  const panel = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <StepBadge number={1} title={t.twoFactorScanTitle} />
 
+      {/* LdSegmented: Use QR vs Use Key */}
       <div
         style={{
           display: "flex",
-          gap: 4,
+          gap: 0,
           padding: 4,
-          background: "var(--bg-sunken)",
+          background: "var(--bg-elevated)",
           border: "1px solid var(--stroke)",
           borderRadius: "var(--r-pill)",
-          margin: "12px 0 16px",
         }}
       >
-        {(["qr", "key"] as const).map((id) => {
-          const active = mode === id;
-          return (
-            <Tappable
-              key={id}
-              onClick={() => setMode(id)}
-              radius={999}
-              style={{
-                flex: 1,
-                padding: "10px 0",
-                textAlign: "center",
-                background: active ? "var(--accent)" : "transparent",
-                color: active ? "#FFFFFF" : "var(--fg-secondary)",
-              }}
-            >
-              <span className="t-label-lg">{id === "qr" ? t.twoFactorUseQr : t.twoFactorUseKey}</span>
-            </Tappable>
-          );
-        })}
+        <button
+          type="button"
+          onClick={() => setByHand(false)}
+          style={{
+            flex: 1,
+            padding: "10px 16px",
+            borderRadius: "var(--r-pill)",
+            background: !byHand ? "var(--accent)" : "transparent",
+            color: !byHand ? "#FFFFFF" : "var(--fg-secondary)",
+            fontSize: 14,
+            fontWeight: 600,
+            border: "none",
+            cursor: "pointer",
+            transition: "all 0.15s ease",
+            textAlign: "center",
+          }}
+        >
+          {t.twoFactorUseQr}
+        </button>
+        <button
+          type="button"
+          onClick={() => setByHand(true)}
+          style={{
+            flex: 1,
+            padding: "10px 16px",
+            borderRadius: "var(--r-pill)",
+            background: byHand ? "var(--accent)" : "transparent",
+            color: byHand ? "#FFFFFF" : "var(--fg-secondary)",
+            fontSize: 14,
+            fontWeight: 600,
+            border: "none",
+            cursor: "pointer",
+            transition: "all 0.15s ease",
+            textAlign: "center",
+          }}
+        >
+          {t.twoFactorUseKey}
+        </button>
       </div>
 
-      {mode === "qr" ? (
-        <div style={{ display: "grid", placeItems: "center", marginBottom: 20 }}>
-          {qr ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={qr}
-              alt={t.twoFactorUseQr}
-              width={220}
-              height={220}
-              style={{ borderRadius: 12, background: "#FFFFFF", padding: 10 }}
-            />
-          ) : (
-            <Spinner />
-          )}
+      {!byHand ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: "12px 0" }}>
+          <div
+            style={{
+              padding: 16,
+              background: "#FFFFFF",
+              borderRadius: "var(--r-card)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {qr ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={qr}
+                alt={t.twoFactorUseQr}
+                width={200}
+                height={200}
+                style={{ display: "block" }}
+              />
+            ) : (
+              <div style={{ width: 200, height: 200, display: "grid", placeItems: "center" }}>
+                <Spinner />
+              </div>
+            )}
+          </div>
         </div>
       ) : (
-        <div style={{ marginBottom: 20 }}>
-          <p className="t-body-sm" style={{ color: "var(--fg-secondary)", margin: "0 0 10px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <p
+            className="t-body-sm"
+            style={{
+              color: "var(--fg-secondary)",
+              margin: 0,
+              fontSize: 13,
+              lineHeight: 1.4,
+            }}
+          >
             {t.twoFactorKeyBody}
           </p>
           <div
             style={{
               display: "flex",
               alignItems: "center",
+              justifyContent: "space-between",
               gap: 10,
-              padding: "12px 14px",
+              padding: "10px 8px 10px 14px",
               background: "var(--bg-sunken)",
               border: "1px solid var(--stroke)",
               borderRadius: "var(--r-field)",
             }}
           >
             <span
-              className="t-body-md"
-              dir="ltr"
               style={{
-                flex: 1,
-                minWidth: 0,
-                overflowWrap: "anywhere",
                 fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                fontSize: 14,
+                letterSpacing: 1.2,
+                color: "var(--fg-primary)",
+                wordBreak: "break-all",
+                flex: 1,
               }}
             >
               {data.secret}
             </span>
-            <Tappable
-              radius={8}
-              style={{ padding: 6, color: "var(--accent)" }}
-              title={t.actionCopyCode}
+            <Button
+              label={t.actionCopyCode}
+              glyph="copy"
+              variant="text"
+              expand={false}
+              compact
               onClick={async () => {
                 try {
                   await navigator.clipboard.writeText(data.secret);
@@ -279,91 +283,182 @@ export function TwoFactorSetup({
                   toast(t.errorUnexpectedTitle, "error");
                 }
               }}
-            >
-              <Icon glyph="copy" size={17} />
-            </Tappable>
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // Right panel: Step 2 (Confirm Code & Recovery Codes)
+  const proof = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <StepBadge number={2} title={t.twoFactorConfirmTitle} />
+
+      <TextField
+        value={code}
+        onChange={setCode}
+        label={t.twoFactorCode}
+        hint={t.twoFactorCodeHint}
+        glyph="lock"
+        dir="ltr"
+        onEnter={confirm}
+      />
+
+      {error && (
+        <div className="t-body-sm" style={{ color: "var(--warning)", marginTop: -8 }}>
+          {error}
+        </div>
+      )}
+
+      <Button
+        label={t.twoFactorTurnOn}
+        onClick={() => void confirm()}
+        busy={busy}
+        disabled={code.trim().length < 6}
+      />
+
+      {recoveryCodes.length > 0 && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: 16,
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--warning)",
+            borderRadius: "var(--r-card)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Icon glyph="warning" size={18} color="var(--warning)" />
+            <span className="t-title-sm" style={{ fontWeight: 600 }}>
+              {t.recoveryCodesTitle}
+            </span>
+          </div>
+          <p
+            className="t-body-sm"
+            style={{
+              color: "var(--fg-secondary)",
+              margin: 0,
+              fontSize: 13,
+              lineHeight: 1.4,
+            }}
+          >
+            {t.recoveryCodesBody}
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 10px", marginTop: 4 }}>
+            {recoveryCodes.map((c) => (
+              <span
+                key={c}
+                style={{
+                  padding: "6px 10px",
+                  background: "var(--bg-sunken)",
+                  borderRadius: "var(--r-chip)",
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                  fontSize: 13,
+                  letterSpacing: 1,
+                  color: "var(--fg-primary)",
+                }}
+              >
+                {c}
+              </span>
+            ))}
+          </div>
+          <div style={{ marginTop: 4, display: "flex", justifyContent: "flex-start" }}>
+            <Button
+              label={t.actionCopy}
+              glyph="copy"
+              variant="secondary"
+              expand={false}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(recoveryCodes.join("\n"));
+                  toast(t.actionCopied, "success");
+                } catch {
+                  toast(t.errorUnexpectedTitle, "error");
+                }
+              }}
+            />
           </div>
         </div>
       )}
 
-      <Step number={2} title={t.twoFactorConfirmTitle} />
-      <div style={{ margin: "12px 0 16px" }}>
-        <TextField
-          value={code}
-          onChange={setCode}
-          label={t.twoFactorCode}
-          hint={t.twoFactorCodeHint}
-          glyph="lock"
-          dir="ltr"
-          onEnter={confirm}
-        />
-      </div>
-      {error && (
-        <div className="t-body-sm" style={{ color: "var(--warning)", marginBottom: 12 }}>
-          {error}
-        </div>
-      )}
-      <Button label={t.twoFactorTurnOn} glyph="lock" onClick={() => void confirm()} busy={busy} />
-
       {required && (
-        <div style={{ marginTop: 10 }}>
+        <div style={{ marginTop: 8 }}>
           <Button label={t.settingsSignOut} variant="quiet" onClick={() => void signOut()} />
         </div>
       )}
-    </Frame>
+    </div>
+  );
+
+  return (
+    <ScaffoldShell
+      title={t.twoFactorTitle}
+      showBack={!required}
+      onBack={onBack}
+      embedded={embedded}
+    >
+      <div style={{ width: "100%" }}>
+        <p
+          className="t-body-md"
+          style={{
+            color: "var(--fg-secondary)",
+            margin: "0 0 28px",
+            fontSize: 14,
+            lineHeight: 1.5,
+          }}
+        >
+          {required ? t.twoFactorRequiredBody : t.twoFactorOptionalBody}
+        </p>
+
+        {!isMobile ? (
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 40 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>{panel}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>{proof}</div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+            {panel}
+            {proof}
+          </div>
+        )}
+      </div>
+    </ScaffoldShell>
   );
 }
 
-function Frame({
-  title,
-  onBack,
-  embedded,
-  children,
-}: {
-  title: string;
-  onBack?: () => void;
-  embedded?: boolean;
-  children: React.ReactNode;
-}) {
+/**
+ * Empty state shown when 2FA is already turned on. Matches Flutter's _AlreadyOn.
+ */
+function AlreadyOn() {
   const t = useL10n();
-  if (embedded) {
-    return (
-      <div style={{ width: "100%", maxWidth: 520, margin: "0 auto" }}>
-        <h2 className="t-title-md" style={{ margin: "0 0 20px", fontWeight: 600 }}>
-          {title}
-        </h2>
-        {children}
-      </div>
-    );
-  }
+
   return (
-    <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center", padding: 24 }}>
-      <div style={{ width: "100%", maxWidth: 460 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18 }}>
-          {onBack && (
-            <Tappable onClick={onBack} radius={999} style={{ padding: 8 }} title={t.actionBack}>
-              <Icon glyph="chevron-left" size={20} />
-            </Tappable>
-          )}
-          <h1 className="t-title-lg" style={{ margin: 0 }}>
-            {title}
-          </h1>
-        </div>
-        {children}
-      </div>
+    <div style={{ display: "grid", placeItems: "center", minHeight: 320, padding: "24px 0" }}>
+      <EmptyState
+        glyph="lock"
+        title={t.twoFactorOn}
+        message={t.twoFactorAlreadyOnBody}
+        compact
+      />
     </div>
   );
 }
 
-function Step({ number, title }: { number: number; title: string }) {
+/**
+ * Step numbered circle badge matching Flutter's _Step.
+ */
+function StepBadge({ number, title }: { number: number; title: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
       <span
         style={{
-          width: 24,
-          height: 24,
+          width: 22,
+          height: 22,
           flex: "none",
-          borderRadius: 999,
+          borderRadius: "50%",
           background: "var(--accent)",
           color: "#FFFFFF",
           display: "inline-flex",
@@ -375,7 +470,98 @@ function Step({ number, title }: { number: number; title: string }) {
       >
         {number}
       </span>
-      <span className="t-title-sm">{title}</span>
+      <span
+        className="t-title-sm"
+        style={{ fontWeight: 600, fontSize: 15, color: "var(--fg-primary)" }}
+      >
+        {title}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Shell matching Flutter's LdScaffold and LdContentPane(maxWidth: 860).
+ */
+function ScaffoldShell({
+  title,
+  showBack = false,
+  onBack,
+  embedded = false,
+  children,
+}: {
+  title: string;
+  showBack?: boolean;
+  onBack?: () => void;
+  embedded?: boolean;
+  children: React.ReactNode;
+}) {
+  const t = useL10n();
+
+  if (embedded) {
+    return (
+      <div style={{ width: "100%", maxWidth: 860, margin: "0 auto", padding: "8px 0 32px" }}>
+        {children}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        minHeight: "100dvh",
+        background: "var(--bg-primary)",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {/* Header bar matching LdScaffold */}
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          padding: "8px 16px",
+          gap: 4,
+          background: "transparent",
+          flex: "none",
+        }}
+      >
+        {showBack && (
+          <Tappable
+            onClick={onBack ?? (() => window.history.back())}
+            radius={999}
+            style={{
+              width: 38,
+              height: 38,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "var(--fg-primary)",
+            }}
+            title={t.actionBack}
+          >
+            <Icon glyph="chevron-left" size={22} />
+          </Tappable>
+        )}
+        <h1
+          className="t-title-lg"
+          style={{
+            margin: 0,
+            fontSize: 20,
+            fontWeight: 600,
+            color: "var(--fg-primary)",
+          }}
+        >
+          {title}
+        </h1>
+      </header>
+
+      {/* Body container matching LdContentPane */}
+      <main style={{ flex: 1, overflowY: "auto", padding: "8px 16px 32px" }}>
+        <div style={{ maxWidth: 860, margin: "0 auto", width: "100%" }}>
+          {children}
+        </div>
+      </main>
     </div>
   );
 }

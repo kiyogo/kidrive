@@ -164,6 +164,26 @@ textarea,
   user-select: text !important;
 }
 
+button,
+input,
+optgroup,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin: 0;
+}
+
 ::selection {
   background: transparent !important;
   color: inherit !important;
@@ -182,12 +202,15 @@ body {
   width: 100%;
   height: 100%;
   overflow-x: hidden;
+  font-size: 14px;
 }
 
 body {
   background: var(--bg-primary);
   color: var(--fg-primary);
   font-family: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
 }
@@ -239,7 +262,7 @@ body {
   font-weight: 400;
 }
 .t-label-lg {
-  font-size: 15px;
+  font-size: 14px;
   line-height: 20px;
   font-weight: 600;
   letter-spacing: 0.1px;

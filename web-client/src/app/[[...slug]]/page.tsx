@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   BootScreen,
   ConnectScreen,
@@ -40,7 +40,8 @@ export default function AppRoute({
   const unwrappedParams = params ? ("then" in params ? use(params) : params) : undefined;
   const slug = unwrappedParams?.slug;
   const pathname = usePathname() || "";
-  const { stage, locale } = useSession();
+  const router = useRouter();
+  const { stage, locale, refreshUser } = useSession();
 
   const [step, setStep] = useState<"welcome" | "language" | "connect">(() =>
     typeof window !== "undefined" && localStorage.getItem("ld.locale.chosen") === "1"
@@ -58,6 +59,9 @@ export default function AppRoute({
     (slug && slug[0] === "create-account") ||
     Boolean(inviteCodeFromPath);
 
+  const isTwoFactor =
+    pathname === "/two-factor" || (slug && slug[0] === "two-factor");
+
   const [createMode, setCreateMode] = useState<boolean>(Boolean(isCreateAccount));
   const [inviteCode, setInviteCode] = useState<string>(inviteCodeFromPath);
 
@@ -73,10 +77,20 @@ export default function AppRoute({
   }, [pathname, inviteCodeFromPath]);
 
   useEffect(() => {
-    if (stage === "ready" && (pathname === "/signin" || pathname === "/create-account" || isInvite)) {
-      window.history.replaceState(null, "", "/files");
+    if (stage === "ready") {
+      if (pathname === "/signin" || pathname === "/create-account" || isInvite) {
+        router.replace("/files");
+      }
+    } else if (stage === "mustEnableTotp") {
+      if (pathname !== "/two-factor") {
+        router.replace("/two-factor");
+      }
+    } else if (stage === "signedOut") {
+      if (pathname === "/two-factor") {
+        router.replace("/signin");
+      }
     }
-  }, [stage, pathname, isInvite]);
+  }, [stage, pathname, isInvite, router]);
 
   if (stage === "loading") return <BootScreen />;
 
@@ -109,13 +123,9 @@ export default function AppRoute({
         onToggleMode={(creating) => {
           setCreateMode(creating);
           if (creating) {
-            window.history.pushState(
-              null,
-              "",
-              inviteCode ? `/create-account/${inviteCode}` : "/create-account",
-            );
+            router.push(inviteCode ? `/create-account/${inviteCode}` : "/create-account");
           } else {
-            window.history.pushState(null, "", "/signin");
+            router.push("/signin");
           }
         }}
       />
@@ -124,7 +134,36 @@ export default function AppRoute({
 
   if (stage === "pendingApproval") return <PendingApprovalScreen />;
   if (stage === "mustChangePassword") return <MustChangePassword />;
-  if (stage === "mustEnableTotp") return <MustEnableTotp />;
+  if (stage === "mustEnableTotp") {
+    return (
+      <TwoFactorSetup
+        required={true}
+        onDone={() => {
+          void refreshUser();
+          router.replace("/files");
+        }}
+      />
+    );
+  }
+
+  if (isTwoFactor) {
+    return (
+      <TwoFactorSetup
+        required={false}
+        onDone={() => {
+          void refreshUser();
+          router.push("/files");
+        }}
+        onBack={() => {
+          if (typeof window !== "undefined" && window.history.length > 1) {
+            router.back();
+          } else {
+            router.push("/settings/two-factor");
+          }
+        }}
+      />
+    );
+  }
 
   return <Drive key={locale} initialSlug={slug} />;
 }
