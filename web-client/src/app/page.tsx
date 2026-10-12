@@ -162,7 +162,7 @@ function Drive() {
           onRoot={() => setFolder([])}
           createFolderTrigger={newFolderTrigger}
           onOpenFolder={(node) => setFolder((t) => [...t, { id: node.id, name: node.name }])}
-          onPreview={(n) => openPreview(n)}
+          onPreview={(n, list) => openPreview(n, list)}
           onSearch={() => setSection("search")}
         />
       ) : null}

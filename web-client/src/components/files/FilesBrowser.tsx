@@ -69,7 +69,7 @@ export function FilesBrowser({
   onRoot?: () => void;
   createFolderTrigger?: number;
   onOpenFolder: (node: NodeModel) => void;
-  onPreview: (node: NodeModel) => void;
+  onPreview: (node: NodeModel, nodes?: NodeModel[]) => void;
   onSearch?: () => void;
 }) {
   const t = useL10n();
@@ -256,7 +256,7 @@ export function FilesBrowser({
 
   const activate = (node: NodeModel) => {
     if (isFolder(node)) onOpenFolder(node);
-    else onPreview(node);
+    else onPreview(node, nodes ? nodes.filter((n) => !isFolder(n)) : undefined);
   };
 
   const { pick: upload, sheet: clashSheet, busy: resolvingClash } = useUploader(folderId, () => {
