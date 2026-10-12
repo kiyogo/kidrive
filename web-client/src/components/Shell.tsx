@@ -64,6 +64,7 @@ export function Shell({
   const { isDesktop } = useDeviceClass();
   const { user } = useSession();
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
+  const [desktopCreateOpen, setDesktopCreateOpen] = useState(false);
   const shellFileInput = useRef<HTMLInputElement>(null);
   const pick = () => shellFileInput.current?.click();
 
@@ -180,9 +181,9 @@ export function Shell({
           flexShrink: 0,
         }}
       >
-        <div style={{ padding: "0 20px 20px 20px" }}>
+        <div style={{ padding: "0 20px 20px 20px", position: "relative" }}>
           <Tappable
-            onClick={pick}
+            onClick={() => setDesktopCreateOpen((o) => !o)}
             radius={24}
             style={{
               height: 38,
@@ -198,6 +199,75 @@ export function Shell({
             <Icon glyph="upload" size={18} color="#FFFFFF" />
             <span className="t-label-lg" style={{ color: "#FFFFFF" }}>{t.upload}</span>
           </Tappable>
+
+          {desktopCreateOpen && (
+            <>
+              <div
+                onClick={() => setDesktopCreateOpen(false)}
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  zIndex: 90,
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  left: 20,
+                  right: 20,
+                  top: 44,
+                  zIndex: 100,
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--stroke)",
+                  borderRadius: "var(--r-tile)",
+                  boxShadow: "var(--nav-shadow)",
+                  padding: "6px 0",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2,
+                }}
+              >
+                <Tappable
+                  onClick={() => {
+                    setDesktopCreateOpen(false);
+                    onCreateFolder?.();
+                  }}
+                  radius={10}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    padding: "11px 14px",
+                    color: "var(--fg-primary)",
+                  }}
+                >
+                  <Icon glyph="folder" size={19} color="var(--fg-primary)" />
+                  <span className="t-body-lg" style={{ fontWeight: 400, flex: 1 }}>
+                    {t.newFolder}
+                  </span>
+                </Tappable>
+                <Tappable
+                  onClick={() => {
+                    setDesktopCreateOpen(false);
+                    pick();
+                  }}
+                  radius={10}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    padding: "11px 14px",
+                    color: "var(--fg-primary)",
+                  }}
+                >
+                  <Icon glyph="upload" size={19} color="var(--fg-primary)" />
+                  <span className="t-body-lg" style={{ fontWeight: 400, flex: 1 }}>
+                    {t.uploadFile}
+                  </span>
+                </Tappable>
+              </div>
+            </>
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "0 12px", display: "flex", flexDirection: "column", gap: 4 }}>

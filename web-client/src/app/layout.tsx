@@ -11,8 +11,8 @@ import { ToastHost } from "@/components/ui";
   - IBM Plex Sans Arabic: Arabic (ar)
 */
 const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["400", "600", "700"],
+  subsets: ["latin", "vietnamese"],
+  weight: ["400", "500", "600", "700"],
   variable: "--font-space-grotesk",
   display: "swap",
 });

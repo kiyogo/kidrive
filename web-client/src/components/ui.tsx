@@ -732,6 +732,17 @@ export function ToastHost({ children }: { children: ReactNode }) {
     setTimeout(() => setItems((list) => list.filter((t) => t.id !== id)), 3500);
   }, []);
 
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<{ message: string; tone?: Toast["tone"] }>;
+      if (ce.detail?.message) {
+        show(ce.detail.message, ce.detail.tone || "info");
+      }
+    };
+    window.addEventListener("ld-toast", handler);
+    return () => window.removeEventListener("ld-toast", handler);
+  }, [show]);
+
   return (
     <ToastCtx.Provider value={show}>
       {children}
@@ -740,9 +751,9 @@ export function ToastHost({ children }: { children: ReactNode }) {
           position: "fixed",
           left: 0,
           right: 0,
-          ...(!isMobile ? { bottom: 24 } : { top: 12 }),
+          bottom: 24,
           display: "flex",
-          flexDirection: !isMobile ? "column-reverse" : "column",
+          flexDirection: "column-reverse",
           alignItems: "center",
           gap: 8,
           zIndex: 9999,
@@ -772,16 +783,17 @@ export function ToastHost({ children }: { children: ReactNode }) {
                 maxWidth: 480,
                 width: "fit-content",
                 margin: "0 20px",
-                padding: "12px 16px",
+                padding: "12px 14px",
                 borderRadius: "var(--r-card)",
                 background: "var(--bg-elevated)",
                 border: "1px solid var(--stroke)",
+                boxShadow: "0 4px 16px rgba(0, 0, 0, 0.12)",
                 display: "flex",
                 alignItems: "center",
                 gap: 12,
                 color: "var(--fg-primary)",
-                fontSize: 14,
-                lineHeight: "20px",
+                fontSize: 15,
+                lineHeight: "22px",
                 fontWeight: 400,
               }}
             >
