@@ -78,14 +78,27 @@ export function FilesBrowser({
   const [view, setView] = useState<ViewMode>("grid");
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
-  const [menu, setMenu] = useState<{ x: number; y: number; node: NodeModel } | null>(null);
-  const [overflow, setOverflow] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{
+    x?: number;
+    y?: number;
+    anchorRect?: { left: number; right: number; top: number; bottom: number };
+    node: NodeModel;
+  } | null>(null);
+  const [overflow, setOverflow] = useState<{
+    x?: number;
+    y?: number;
+    anchorRect?: { left: number; right: number; top: number; bottom: number };
+  } | null>(null);
   const [searching, setSearching] = useState(false);
   const [sharing, setSharing] = useState<NodeModel | null>(null);
   const [dragging, setDragging] = useState(false);
   const [sortBy, setSortBy] = useState<"name" | "updated" | "size">("updated");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [sortMenu, setSortMenu] = useState<{ x: number; y: number } | null>(null);
+  const [sortMenu, setSortMenu] = useState<{
+    x?: number;
+    y?: number;
+    anchorRect?: { left: number; right: number; top: number; bottom: number };
+  } | null>(null);
   const [desktopSearchFocused, setDesktopSearchFocused] = useState(false);
   const toast = useToast();
   const { isDesktop, isMobile } = useDeviceClass();
@@ -512,7 +525,11 @@ export function FilesBrowser({
                 title={t.moreActions}
                 onClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
-                  setOverflow({ x: rect.right, y: rect.bottom });
+                  setOverflow({
+                    anchorRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+                    x: rect.right,
+                    y: rect.bottom,
+                  });
                 }}
               />
             </span>
@@ -536,7 +553,11 @@ export function FilesBrowser({
                 title={t.sortBy}
                 onClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
-                  setSortMenu({ x: rect.right, y: rect.bottom });
+                  setSortMenu({
+                    anchorRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+                    x: rect.right,
+                    y: rect.bottom,
+                  });
                 }}
               />
               <UtilityButton
@@ -553,7 +574,11 @@ export function FilesBrowser({
                 title={t.sortBy}
                 onClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
-                  setSortMenu({ x: rect.right, y: rect.bottom });
+                  setSortMenu({
+                    anchorRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+                    x: rect.right,
+                    y: rect.bottom,
+                  });
                 }}
               />
               <UtilityButton
@@ -630,7 +655,11 @@ export function FilesBrowser({
                   title={t.sortBy}
                   onClick={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
-                    setSortMenu({ x: rect.right, y: rect.bottom });
+                    setSortMenu({
+                      anchorRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+                      x: rect.right,
+                      y: rect.bottom,
+                    });
                   }}
                 />
                 <UtilityButton
@@ -733,8 +762,16 @@ export function FilesBrowser({
             <Tappable
               radius={999}
               style={{ padding: 6 }}
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                setMenu({
+                  anchorRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+                  x: rect.right,
+                  y: rect.bottom,
+                  node: chosen[0],
+                });
+              }}
               title={t.moreActions}
-              onClick={(e) => setMenu({ x: e.clientX, y: e.clientY, node: chosen[0] })}
             >
               <Icon glyph="more" size={18} />
             </Tappable>
@@ -858,8 +895,10 @@ export function FilesBrowser({
       {/* what the phone folds away, rather than cramming into the row */}
       <Menu
         open={Boolean(overflow)}
-        x={overflow?.x ?? 0}
-        y={overflow?.y ?? 0}
+        anchorRect={overflow?.anchorRect}
+        x={overflow?.x}
+        y={overflow?.y}
+        title={t.moreActions}
         onClose={() => setOverflow(null)}
         items={[
           {
@@ -870,7 +909,7 @@ export function FilesBrowser({
           {
             label: t.sortBy,
             glyph: "sort",
-            onClick: () => setSortMenu({ x: 120, y: 120 }),
+            onClick: () => setSortMenu({ anchorRect: overflow?.anchorRect, x: overflow?.x, y: overflow?.y }),
           },
           { label: t.newFolder, glyph: "folder-plus", onClick: () => { setFolderName(""); setCreateFolderOpen(true); } },
           { label: t.upload, glyph: "upload", onClick: () => fileInput.current?.click() },
@@ -881,8 +920,10 @@ export function FilesBrowser({
       {/* Sort Menu */}
       <Menu
         open={Boolean(sortMenu)}
-        x={sortMenu?.x ?? 0}
-        y={sortMenu?.y ?? 0}
+        anchorRect={sortMenu?.anchorRect}
+        x={sortMenu?.x}
+        y={sortMenu?.y}
+        title={t.sortBy}
         onClose={() => setSortMenu(null)}
         items={[
           {
@@ -923,8 +964,11 @@ export function FilesBrowser({
 
       <Menu
         open={Boolean(menu)}
-        x={menu?.x ?? 0}
-        y={menu?.y ?? 0}
+        anchorRect={menu?.anchorRect}
+        x={menu?.x}
+        y={menu?.y}
+        title={menu?.node.name}
+        subtitle={menu ? subtitleFor(menu.node) : undefined}
         onClose={() => setMenu(null)}
         items={
           menu
@@ -1272,7 +1316,12 @@ function Grid({
   selection: Set<string>;
   onToggle: (id: string, additive: boolean, range?: boolean) => void;
   onActivate: (n: NodeModel) => void;
-  onMenu: (m: { x: number; y: number; node: NodeModel }) => void;
+  onMenu: (m: {
+    x?: number;
+    y?: number;
+    anchorRect?: { left: number; right: number; top: number; bottom: number };
+    node: NodeModel;
+  }) => void;
   dragProps: (id: string, sel: Set<string>) => Record<string, unknown>;
   folderProps: (id: string) => Record<string, unknown>;
   over: string;
@@ -1323,7 +1372,12 @@ function Tile({
   selected: boolean;
   onToggle: (id: string, additive: boolean, range?: boolean) => void;
   onActivate: (n: NodeModel) => void;
-  onMenu: (m: { x: number; y: number; node: NodeModel }) => void;
+  onMenu: (m: {
+    x?: number;
+    y?: number;
+    anchorRect?: { left: number; right: number; top: number; bottom: number };
+    node: NodeModel;
+  }) => void;
   dragProps: (id: string, sel: Set<string>) => Record<string, unknown>;
   folderProps: (id: string) => Record<string, unknown>;
   over: string;
@@ -1547,7 +1601,12 @@ function List({
   selection: Set<string>;
   onToggle: (id: string, additive: boolean, range?: boolean) => void;
   onActivate: (n: NodeModel) => void;
-  onMenu: (m: { x: number; y: number; node: NodeModel }) => void;
+  onMenu: (m: {
+    x?: number;
+    y?: number;
+    anchorRect?: { left: number; right: number; top: number; bottom: number };
+    node: NodeModel;
+  }) => void;
   dragProps: (id: string, sel: Set<string>) => Record<string, unknown>;
   folderProps: (id: string) => Record<string, unknown>;
   over: string;
@@ -1703,7 +1762,12 @@ function List({
                   onClick={(e) => {
                     e.stopPropagation();
                     const rect = e.currentTarget.getBoundingClientRect();
-                    onMenu({ x: rect.right, y: rect.bottom, node });
+                    onMenu({
+                      anchorRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+                      x: rect.right,
+                      y: rect.bottom,
+                      node,
+                    });
                   }}
                   style={{ padding: 8, color: "var(--fg-secondary)" }}
                   title={t.moreActions}

@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { Icon, type Glyph } from "./Icon";
 import { useL10n } from "@/lib/l10n";
 
@@ -1139,15 +1140,28 @@ export function Menu({
   open,
   x,
   y,
+  anchorRect,
+  title,
+  subtitle,
   onClose,
   items,
 }: {
   open: boolean;
-  x: number;
-  y: number;
+  x?: number;
+  y?: number;
+  anchorRect?: { left: number; right: number; top: number; bottom: number };
+  title?: string;
+  subtitle?: string;
   onClose: () => void;
   items: { label: string; glyph?: Glyph; onClick: () => void; danger?: boolean }[];
 }) {
+  const { isMobile } = useDeviceClass();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -1155,22 +1169,88 @@ export function Menu({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
+
+  if (isMobile) {
+    return (
+      <Sheet open={open} onClose={onClose} title={title} subtitle={subtitle}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "4px 0" }}>
+          {items.map((item) => {
+            const itemColor = item.danger ? "var(--warning)" : "var(--fg-primary)";
+            return (
+              <Tappable
+                key={item.label}
+                radius={12}
+                onClick={() => {
+                  onClose();
+                  item.onClick();
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                  width: "100%",
+                  padding: "14px 4px",
+                  color: itemColor,
+                  boxSizing: "border-box",
+                }}
+              >
+                {item.glyph && <Icon glyph={item.glyph} size={20} color={itemColor} />}
+                <span
+                  className="t-body-lg"
+                  style={{
+                    color: itemColor,
+                    flex: 1,
+                    textAlign: "left",
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {item.label}
+                </span>
+              </Tappable>
+            );
+          })}
+        </div>
+      </Sheet>
+    );
+  }
 
   const panelWidth = 240;
   const estimatedHeight = items.length * 46 + 12;
   const winW = typeof window !== "undefined" ? window.innerWidth : 800;
   const winH = typeof window !== "undefined" ? window.innerHeight : 600;
 
-  const left = (x > winW / 2 || x + panelWidth > winW)
-    ? Math.max(8, Math.min(x - panelWidth, winW - panelWidth - 8))
-    : Math.max(8, Math.min(x, winW - panelWidth - 8));
+  let left = 8;
+  let top = 8;
 
-  const top = (y + estimatedHeight > winH)
-    ? Math.max(8, Math.min(y - estimatedHeight, winH - estimatedHeight - 8))
-    : Math.max(8, Math.min(y, winH - estimatedHeight - 8));
+  if (anchorRect) {
+    // If the button is in the right half of the window OR opening right overflows:
+    // Align menu right edge to button's right edge
+    const alignEnd = anchorRect.right > winW / 2 || anchorRect.left + panelWidth > winW - 8;
+    const targetLeft = alignEnd ? anchorRect.right - panelWidth : anchorRect.left;
+    left = Math.max(8, Math.min(targetLeft, winW - panelWidth - 8));
 
-  return (
+    const fitsBelow = anchorRect.bottom + estimatedHeight <= winH - 8;
+    top = fitsBelow
+      ? Math.max(8, Math.min(anchorRect.bottom, winH - estimatedHeight - 8))
+      : Math.max(8, anchorRect.top - estimatedHeight);
+  } else {
+    const posX = x ?? 0;
+    const posY = y ?? 0;
+
+    // Follow Flutter _showFloating:
+    // (anchor.dx > size.width / 2 || anchor.dx + panelWidth > size.width)
+    const flipH = posX > winW / 2 || posX + panelWidth > winW - 8;
+    const targetLeft = flipH ? posX - panelWidth : posX;
+    left = Math.max(8, Math.min(targetLeft, winW - panelWidth - 8));
+
+    const fitsBelow = posY + estimatedHeight <= winH - 8;
+    top = fitsBelow
+      ? Math.max(8, Math.min(posY, winH - estimatedHeight - 8))
+      : Math.max(8, posY - estimatedHeight);
+  }
+
+  return createPortal(
     <>
       <div
         style={{
@@ -1190,7 +1270,6 @@ export function Menu({
         }}
       />
       <div
-        className="ld-enter"
         onClick={(e) => e.stopPropagation()}
         style={{
           position: "fixed",
@@ -1247,7 +1326,8 @@ export function Menu({
           );
         })}
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
 
@@ -1265,9 +1345,9 @@ export function useDeviceClass() {
   return useMemo(
     () => ({
       width,
-      isMobile: width <= 600,
-      isTablet: width > 600 && width <= 1024,
-      isDesktop: width > 1024,
+      isMobile: width < 600,
+      isTablet: width >= 600 && width < 1024,
+      isDesktop: width >= 1024,
     }),
     [width],
   );
