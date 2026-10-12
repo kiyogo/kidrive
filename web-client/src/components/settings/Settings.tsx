@@ -824,7 +824,6 @@ function UsersSection({ onBack, embedded }: { onBack?: () => void; embedded?: bo
               value={inviteLabel}
               onChange={setInviteLabel}
               hint={t.usersInviteHint}
-              label={t.usersInviteLabel}
               autoFocus
             />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>

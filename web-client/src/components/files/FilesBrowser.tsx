@@ -510,7 +510,10 @@ export function FilesBrowser({
               <UtilityButton
                 glyph="more"
                 title={t.moreActions}
-                onClick={(e) => setOverflow({ x: e.clientX, y: e.clientY })}
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setOverflow({ x: rect.right, y: rect.bottom });
+                }}
               />
             </span>
           )
@@ -528,7 +531,14 @@ export function FilesBrowser({
             ) : null
           ) : filter === "shared" ? (
             <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-              <UtilityButton glyph="sort" title={t.sortBy} onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })} />
+              <UtilityButton
+                glyph="sort"
+                title={t.sortBy}
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setSortMenu({ x: rect.right, y: rect.bottom });
+                }}
+              />
               <UtilityButton
                 glyph={view === "grid" ? "list" : "grid"}
                 title={view === "grid" ? t.viewList : t.viewGrid}
@@ -538,7 +548,14 @@ export function FilesBrowser({
           ) : (
             <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
               <UtilityButton glyph="search" title={t.search} onClick={onSearch ?? (() => setSearching((s) => !s))} />
-              <UtilityButton glyph="sort" title={t.sortBy} onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })} />
+              <UtilityButton
+                glyph="sort"
+                title={t.sortBy}
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setSortMenu({ x: rect.right, y: rect.bottom });
+                }}
+              />
               <UtilityButton
                 glyph={view === "grid" ? "list" : "grid"}
                 title={view === "grid" ? t.viewList : t.viewGrid}
@@ -562,33 +579,25 @@ export function FilesBrowser({
                 onClick={() => setConfirmEmptyTrash(true)}
               />
             ) : null
-          ) : filter === "shared" ? (
-            <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-              <UtilityButton glyph="sort" title={t.sortBy} onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })} />
-              <UtilityButton
-                glyph={view === "grid" ? "list" : "grid"}
-                title={view === "grid" ? t.viewList : t.viewGrid}
-                onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
-              />
-            </span>
           ) : (
-            <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-              <span
+            <>
+              {/* Centered Search Field */}
+              <div
                 style={{
+                  flex: "1 1 360px",
+                  maxWidth: 480,
+                  margin: "0 24px",
                   display: "flex",
                   alignItems: "center",
-                  gap: 8,
                   height: 44,
-                  padding: "0 14px",
-                  width: 320,
+                  padding: "0 16px",
                   background: "var(--bg-elevated)",
                   border: `1px solid ${desktopSearchFocused ? "var(--accent)" : "var(--stroke)"}`,
                   borderRadius: "var(--r-pill)",
-                  marginInlineEnd: 4,
                   transition: "border-color var(--d-hover) var(--ease)",
                 }}
               >
-                <Icon glyph="search" size={17} color={desktopSearchFocused ? "var(--accent)" : "var(--fg-secondary)"} />
+                <Icon glyph="search" size={18} color="var(--fg-secondary)" />
                 <input
                   value={query}
                   onFocus={() => setDesktopSearchFocused(true)}
@@ -598,26 +607,50 @@ export function FilesBrowser({
                   style={{
                     flex: 1,
                     minWidth: 0,
+                    marginInlineStart: 10,
                     background: "transparent",
                     border: 0,
                     outline: "none",
                     color: "var(--fg-primary)",
                     font: "inherit",
-                    fontSize: 14,
+                    fontSize: 15,
                   }}
                 />
+                {query && (
+                  <Tappable radius={16} onClick={() => setQuery("")} style={{ padding: 4, color: "var(--fg-secondary)" }}>
+                    <Icon glyph="close" size={16} />
+                  </Tappable>
+                )}
+              </div>
+
+              {/* Action Buttons on Right */}
+              <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                <UtilityButton
+                  glyph="sort"
+                  title={t.sortBy}
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setSortMenu({ x: rect.right, y: rect.bottom });
+                  }}
+                />
+                <UtilityButton
+                  glyph={view === "grid" ? "list" : "grid"}
+                  title={view === "grid" ? t.viewList : t.viewGrid}
+                  onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
+                />
+                {filter === "none" && (
+                  <UtilityButton
+                    glyph="folder"
+                    title={t.newFolder}
+                    onClick={() => {
+                      setFolderName("");
+                      setCreateFolderOpen(true);
+                    }}
+                  />
+                )}
+                <Button label={t.upload} glyph="upload" compact expand={false} onClick={() => fileInput.current?.click()} />
               </span>
-              <UtilityButton glyph="sort" title={t.sortBy} onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })} />
-              <UtilityButton
-                glyph={view === "grid" ? "list" : "grid"}
-                title={view === "grid" ? t.viewList : t.viewGrid}
-                onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
-              />
-              {filter === "none" && (
-                <UtilityButton glyph="folder" title={t.newFolder} onClick={() => { setFolderName(""); setCreateFolderOpen(true); }} />
-              )}
-              <Button label={t.upload} glyph="upload" compact expand={false} onClick={() => fileInput.current?.click()} />
-            </span>
+            </>
           )
         )}
       </header>
@@ -853,8 +886,8 @@ export function FilesBrowser({
         onClose={() => setSortMenu(null)}
         items={[
           {
-            label: `${t.sortName} (${sortBy === "name" && sortDir === "asc" ? "Z→A" : "A→Z"})`,
-            glyph: "sort",
+            label: t.sortName,
+            glyph: sortBy === "name" ? (sortDir === "desc" ? "arrow-down" : "arrow-up") : "sort",
             onClick: () => {
               if (sortBy === "name") setSortDir((d) => (d === "asc" ? "desc" : "asc"));
               else {
@@ -864,8 +897,8 @@ export function FilesBrowser({
             },
           },
           {
-            label: `${t.sortUpdated} (${sortBy === "updated" && sortDir === "desc" ? "Cũ nhất" : "Mới nhất"})`,
-            glyph: "sort",
+            label: t.sortUpdated,
+            glyph: sortBy === "updated" ? (sortDir === "desc" ? "arrow-down" : "arrow-up") : "recent",
             onClick: () => {
               if (sortBy === "updated") setSortDir((d) => (d === "asc" ? "desc" : "asc"));
               else {
@@ -875,8 +908,8 @@ export function FilesBrowser({
             },
           },
           {
-            label: `${t.sortSize} (${sortBy === "size" && sortDir === "desc" ? "Nhỏ nhất" : "Lớn nhất"})`,
-            glyph: "sort",
+            label: t.sortSize,
+            glyph: sortBy === "size" ? (sortDir === "desc" ? "arrow-down" : "arrow-up") : "filter",
             onClick: () => {
               if (sortBy === "size") setSortDir((d) => (d === "asc" ? "desc" : "asc"));
               else {
@@ -926,7 +959,20 @@ export function FilesBrowser({
                   },
                 ]
               : [
-                  { label: t.actionOpen, glyph: "eye", onClick: () => activate(menu.node) },
+                  {
+                    label: t.actionOpen,
+                    glyph: (isFolder(menu.node) ? "folder" : "eye") as Glyph,
+                    onClick: () => activate(menu.node),
+                  },
+                  {
+                    label: t.starred,
+                    glyph: (menu.node.starred ? "star-filled" : "star") as Glyph,
+                    onClick: async () => {
+                      if (menu.node.starred) await api.del(Api.star(menu.node.id));
+                      else await api.post(Api.star(menu.node.id), {});
+                      void load();
+                    },
+                  },
                   ...(!isFolder(menu.node)
                     ? [
                         {
@@ -937,22 +983,8 @@ export function FilesBrowser({
                       ]
                     : []),
                   {
-                    label: menu.node.starred ? t.starred : t.starred,
-                    glyph: (menu.node.starred ? "star-filled" : "star") as Glyph,
-                    onClick: async () => {
-                      if (menu.node.starred) await api.del(Api.star(menu.node.id));
-                      else await api.post(Api.star(menu.node.id), {});
-                      void load();
-                    },
-                  },
-                  {
-                    label: t.actionShare,
-                    glyph: "share",
-                    onClick: () => setSharing(menu.node),
-                  },
-                  {
                     label: t.actionRename,
-                    glyph: "rename",
+                    glyph: "edit" as Glyph,
                     onClick: () => {
                       setRenamingNode(menu.node);
                       setRenameName(menu.node.name);
@@ -973,12 +1005,17 @@ export function FilesBrowser({
                     onClick: () => void openMoveDialog(menu.node),
                   },
                   {
-                    label: t.confirmTrashTitle,
-                    glyph: "trash",
+                    label: t.actionShare,
+                    glyph: "share" as Glyph,
+                    onClick: () => setSharing(menu.node),
+                  },
+                  {
+                    label: t.trash,
+                    glyph: "trash" as Glyph,
                     danger: true,
                     onClick: async () => {
                       await api.del(Api.node(menu.node.id));
-                      toast(t.confirmTrashTitle, "success");
+                      toast(t.trash, "success");
                       void load();
                     },
                   },
@@ -1665,7 +1702,8 @@ function List({
                   radius={18}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onMenu({ x: e.clientX, y: e.clientY, node });
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    onMenu({ x: rect.right, y: rect.bottom, node });
                   }}
                   style={{ padding: 8, color: "var(--fg-secondary)" }}
                   title={t.moreActions}

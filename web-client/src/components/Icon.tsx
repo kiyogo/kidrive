@@ -41,6 +41,11 @@ export type Glyph =
   | "chevron-left"
   | "chevron-down"
   | "arrow-left"
+  | "arrow-up"
+  | "arrow-down"
+  | "arrowUp"
+  | "arrowDown"
+  | "filter"
   | "plus"
   | "grid"
   | "list"
@@ -293,6 +298,31 @@ function renderGlyph(glyph: Glyph, color: string, strokeWidth: number): React.Re
 
     case "chevron-down":
       return <path d="M5.5 9.5 L12 16 L18.5 9.5" />;
+
+    case "arrow-up":
+    case "arrowUp":
+      return (
+        <>
+          <line x1="12" y1="19" x2="12" y2="5" />
+          <path d="M6.5 10.5 L12 5 L17.5 10.5" />
+        </>
+      );
+
+    case "arrow-down":
+    case "arrowDown":
+      return (
+        <>
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <path d="M6.5 13.5 L12 19 L17.5 13.5" />
+        </>
+      );
+
+    case "filter":
+      return (
+        <path
+          d="M3.5 6 L20.5 6 L14 13 V19.5 L10 17.5 V13 Z"
+        />
+      );
 
     case "close":
       return (

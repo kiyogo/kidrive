@@ -518,10 +518,79 @@ export function Spinner({ size = 22, color = "var(--accent)" }: { size?: number;
   );
 }
 
+export function LayeredBadge({
+  glyph,
+  tint,
+  size = 88,
+}: {
+  glyph: Glyph;
+  tint?: string;
+  size?: number;
+}) {
+  const actualTint = tint ?? "var(--fg-secondary)";
+  const isWarning = tint === "var(--warning)" || tint === "#EE7759";
+  const isAccent = tint === "var(--accent)" || tint === "#4C8DFF";
+
+  const backBg = isWarning
+    ? "rgba(238, 119, 89, 0.35)"
+    : isAccent
+      ? "rgba(76, 141, 255, 0.25)"
+      : "rgba(128, 128, 128, 0.22)";
+
+  const frontBorder = isWarning
+    ? "rgba(238, 119, 89, 0.45)"
+    : isAccent
+      ? "rgba(76, 141, 255, 0.45)"
+      : "var(--stroke)";
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        width: size,
+        height: size,
+        flexShrink: 0,
+      }}
+    >
+      {/* back panel, offset and darker */}
+      <div
+        style={{
+          position: "absolute",
+          left: Math.round(size * 0.08),
+          top: Math.round(size * 0.12),
+          width: Math.round(size * 0.78),
+          height: Math.round(size * 0.66),
+          borderRadius: 14,
+          background: backBg,
+        }}
+      />
+      {/* front panel */}
+      <div
+        style={{
+          position: "absolute",
+          right: Math.round(size * 0.06),
+          bottom: Math.round(size * 0.08),
+          width: Math.round(size * 0.8),
+          height: Math.round(size * 0.68),
+          borderRadius: 14,
+          background: "var(--bg-elevated)",
+          border: `1px solid ${frontBorder}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Icon glyph={glyph} size={Math.round(size * 0.32)} color={actualTint} />
+      </div>
+    </div>
+  );
+}
+
 export function EmptyState({
   glyph = "folder",
   title,
   message,
+  tint,
   actionLabel,
   onAction,
   compact = false,
@@ -529,6 +598,7 @@ export function EmptyState({
   glyph?: Glyph;
   title: string;
   message?: string;
+  tint?: string;
   actionLabel?: string;
   onAction?: () => void;
   compact?: boolean;
@@ -542,33 +612,37 @@ export function EmptyState({
         alignItems: "center",
         justifyContent: "center",
         textAlign: "center",
-        padding: compact ? "24px 16px" : "56px 24px",
-        gap: 6,
+        padding: compact ? "24px 32px" : "48px 32px",
+        maxWidth: 340,
+        margin: "0 auto",
       }}
     >
+      <LayeredBadge glyph={glyph} tint={tint} size={compact ? 64 : 88} />
       <div
+        className="t-title-md"
         style={{
-          width: 64,
-          height: 64,
-          borderRadius: "var(--r-tile)",
-          border: "1px solid var(--stroke)",
-          background: "var(--bg-elevated)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          marginBottom: 14,
+          marginTop: compact ? 16 : 24,
+          textAlign: "center",
+          lineHeight: 1.3,
         }}
       >
-        <Icon glyph={glyph} size={26} color="var(--fg-secondary)" />
+        {title}
       </div>
-      <div className="t-title-md">{title}</div>
       {message && (
-        <div className="t-body-md" style={{ color: "var(--fg-secondary)", maxWidth: 380 }}>
+        <div
+          className="t-body-md"
+          style={{
+            color: "var(--fg-secondary)",
+            marginTop: 8,
+            textAlign: "center",
+            lineHeight: 1.4,
+          }}
+        >
           {message}
         </div>
       )}
       {actionLabel && onAction && (
-        <div style={{ marginTop: 16 }}>
+        <div style={{ marginTop: 24 }}>
           <Button label={actionLabel} onClick={onAction} expand={false} compact />
         </div>
       )}
@@ -580,18 +654,22 @@ export function ErrorState({
   message,
   onRetry,
   title,
+  compact = false,
 }: {
   message: string;
   onRetry?: () => void;
   title?: string;
+  compact?: boolean;
 }) {
   return (
     <EmptyState
-      glyph="alert"
-      title={title ?? "Something went wrong"}
+      glyph="warning"
+      tint="var(--warning)"
+      title={title ?? "Có lỗi bất ngờ xảy ra"}
       message={message}
-      actionLabel={onRetry ? "Try again" : undefined}
+      actionLabel={onRetry ? "Thử lại" : undefined}
       onAction={onRetry}
+      compact={compact}
     />
   );
 }
@@ -1057,8 +1135,6 @@ export function ConfirmDialog({
   );
 }
 
-/** A menu anchored to the pointer, which is what a right click opens on
- *  desktop and what the overflow button opens everywhere. */
 export function Menu({
   open,
   x,
@@ -1074,57 +1150,104 @@ export function Menu({
 }) {
   useEffect(() => {
     if (!open) return;
-    const close = () => onClose();
-    window.addEventListener("click", close);
-    window.addEventListener("resize", close);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("resize", close);
-    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
   if (!open) return null;
-  const left = Math.min(x, (typeof window !== "undefined" ? window.innerWidth : 0) - 230);
-  const top = Math.min(y, (typeof window !== "undefined" ? window.innerHeight : 0) - items.length * 44 - 24);
+
+  const panelWidth = 240;
+  const estimatedHeight = items.length * 46 + 12;
+  const winW = typeof window !== "undefined" ? window.innerWidth : 800;
+  const winH = typeof window !== "undefined" ? window.innerHeight : 600;
+
+  const left = (x > winW / 2 || x + panelWidth > winW)
+    ? Math.max(8, Math.min(x - panelWidth, winW - panelWidth - 8))
+    : Math.max(8, Math.min(x, winW - panelWidth - 8));
+
+  const top = (y + estimatedHeight > winH)
+    ? Math.max(8, Math.min(y - estimatedHeight, winH - estimatedHeight - 8))
+    : Math.max(8, Math.min(y, winH - estimatedHeight - 8));
 
   return (
-    <div
-      className="ld-enter"
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        position: "fixed",
-        left,
-        top,
-        zIndex: 850,
-        minWidth: 210,
-        background: "var(--bg-elevated)",
-        border: "1px solid var(--stroke)",
-        borderRadius: "var(--r-card)",
-        padding: 6,
-      }}
-    >
-      {items.map((item) => (
-        <Tappable
-          key={item.label}
-          radius={10}
-          onClick={() => {
-            onClose();
-            item.onClick();
-          }}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            width: "100%",
-            padding: "10px 12px",
-            color: item.danger ? "var(--warning)" : "var(--fg-primary)",
-          }}
-        >
-          {item.glyph && <Icon glyph={item.glyph} size={17} />}
-          <span className="t-body-md">{item.label}</span>
-        </Tappable>
-      ))}
-    </div>
+    <>
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 848,
+          background: "transparent",
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onClose();
+        }}
+      />
+      <div
+        className="ld-enter"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: "fixed",
+          left,
+          top,
+          zIndex: 850,
+          width: panelWidth,
+          background: "var(--bg-elevated)",
+          border: "1px solid var(--stroke)",
+          borderRadius: 14,
+          padding: "6px 0",
+          boxShadow: "none",
+          maxHeight: winH - 16,
+          overflowY: "auto",
+        }}
+      >
+        {items.map((item) => {
+          const itemColor = item.danger ? "var(--warning)" : "var(--fg-primary)";
+          return (
+            <Tappable
+              key={item.label}
+              radius={10}
+              onClick={() => {
+                onClose();
+                item.onClick();
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                width: "100%",
+                padding: "11px 14px",
+                color: itemColor,
+                boxSizing: "border-box",
+              }}
+            >
+              {item.glyph && <Icon glyph={item.glyph} size={19} color={itemColor} />}
+              <span
+                style={{
+                  fontSize: 16,
+                  fontWeight: 400,
+                  color: itemColor,
+                  flex: 1,
+                  textAlign: "left",
+                  lineHeight: 1.3,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {item.label}
+              </span>
+            </Tappable>
+          );
+        })}
+      </div>
+    </>
   );
 }
 
