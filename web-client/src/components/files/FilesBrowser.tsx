@@ -674,9 +674,9 @@ export function FilesBrowser({
           onClick={(e) => e.stopPropagation()}
           className="ld-enter"
           style={{
-            position: "absolute",
-            insetInline: 16,
-            top: isDesktop ? 84 : 92,
+            position: "sticky",
+            top: isDesktop ? 72 : 8,
+            margin: "8px 16px -48px",
             zIndex: 70,
             display: "flex",
             alignItems: "center",
@@ -729,7 +729,7 @@ export function FilesBrowser({
       )}
 
       {/* listing */}
-      <div ref={listRef} style={{ flex: 1, minHeight: 0, paddingTop: chosen.length ? 56 : 0 }}>
+      <div ref={listRef} style={{ flex: 1, minHeight: 0, paddingTop: chosen.length ? 72 : 0 }}>
         {error ? (
           <ErrorState message={error} onRetry={() => void load()} />
         ) : nodes === null ? (

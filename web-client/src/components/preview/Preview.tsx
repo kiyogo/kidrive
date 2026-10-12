@@ -233,8 +233,8 @@ export function Preview({
             width: 42,
             height: 42,
             borderRadius: "50%",
-            background: "rgba(255,255,255,0.12)",
-            border: "none",
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--stroke)",
             color: "#FFFFFF",
             display: "grid",
             placeItems: "center",
@@ -242,7 +242,7 @@ export function Preview({
             flexShrink: 0,
           }}
         >
-          <Icon glyph="chevron-left" size={22} color="#FFFFFF" />
+          <Icon glyph="chevron-left" size={20} color="#FFFFFF" />
         </button>
 
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
@@ -259,120 +259,126 @@ export function Preview({
             {node.name}
           </span>
           <span style={{ fontSize: 12, color: "rgba(255,255,255,0.72)", marginTop: 2 }}>
-            {nodes && total > 1
-              ? `${currentIndex + 1} trên ${total}`
-              : bytes(node.size_bytes)}
+            {t.galleryPositionOf({
+              position: String(currentIndex >= 0 ? currentIndex + 1 : 1),
+              total: String(total),
+            })}
           </span>
         </div>
 
-        <a
-          href={src}
-          download={node.name}
-          title={t.download}
-          style={{
-            width: 42,
-            height: 42,
-            borderRadius: "50%",
-            background: "rgba(255,255,255,0.12)",
-            display: "grid",
-            placeItems: "center",
-            color: "#FFFFFF",
-            textDecoration: "none",
-            cursor: "pointer",
-            flexShrink: 0,
-          }}
-        >
-          <Icon glyph="download" size={20} color="#FFFFFF" />
-        </a>
-
-        <div style={{ position: "relative" }}>
-          <button
-            type="button"
-            onClick={() => setMenuOpen((v) => !v)}
-            title={t.moreActions}
-            style={{
-              width: 42,
-              height: 42,
-              borderRadius: "50%",
-              background: "rgba(255,255,255,0.12)",
-              border: "none",
-              color: "#FFFFFF",
-              display: "grid",
-              placeItems: "center",
-              cursor: "pointer",
-              flexShrink: 0,
-            }}
-          >
-            <Icon glyph="more" size={20} color="#FFFFFF" />
-          </button>
-
-          {menuOpen && (
-            <div
-              onClick={(e) => e.stopPropagation()}
+        {category !== "image" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <a
+              href={src}
+              download={node.name}
+              title={t.download}
               style={{
-                position: "absolute",
-                top: 50,
-                right: 0,
-                width: 220,
+                width: 42,
+                height: 42,
+                borderRadius: "50%",
                 background: "var(--bg-elevated)",
                 border: "1px solid var(--stroke)",
-                borderRadius: 14,
-                padding: "6px 0",
-                zIndex: 60,
+                display: "grid",
+                placeItems: "center",
+                color: "#FFFFFF",
+                textDecoration: "none",
+                cursor: "pointer",
+                flexShrink: 0,
               }}
             >
+              <Icon glyph="download" size={20} color="#FFFFFF" />
+            </a>
+
+            <div style={{ position: "relative" }}>
               <button
                 type="button"
-                onClick={() => {
-                  void handleToggleStar();
-                  setMenuOpen(false);
+                onClick={() => setMenuOpen((v) => !v)}
+                title={t.moreActions}
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: "50%",
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--stroke)",
+                  color: "#FFFFFF",
+                  display: "grid",
+                  placeItems: "center",
+                  cursor: "pointer",
+                  flexShrink: 0,
                 }}
-                style={menuItemStyle}
               >
-                <Icon glyph={starred ? "star-filled" : "star"} size={18} color={starred ? "#E8935C" : "currentColor"} />
-                <span>{t.starred}</span>
+                <Icon glyph="more" size={20} color="#FFFFFF" />
               </button>
-              <a
-                href={src}
-                download={node.name}
-                onClick={() => setMenuOpen(false)}
-                style={{ ...menuItemStyle, textDecoration: "none" }}
-              >
-                <Icon glyph="download" size={18} />
-                <span>{t.download}</span>
-              </a>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleShare();
-                  setMenuOpen(false);
-                }}
-                style={menuItemStyle}
-              >
-                <Icon glyph="share" size={18} />
-                <span>{t.actionShare}</span>
-              </button>
-              <div style={{ height: 1, background: "var(--stroke)", margin: "4px 0" }} />
-              <button
-                type="button"
-                onClick={async () => {
-                  setMenuOpen(false);
-                  try {
-                    await api.del(Api.node(node.id));
-                    toast(t.confirmTrashTitle, "success");
-                    onClose();
-                  } catch (e) {
-                    toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
-                  }
-                }}
-                style={{ ...menuItemStyle, color: "var(--warning)" }}
-              >
-                <Icon glyph="trash" size={18} color="var(--warning)" />
-                <span>{t.trash}</span>
-              </button>
+
+              {menuOpen && (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: "absolute",
+                    top: 50,
+                    right: 0,
+                    width: 220,
+                    background: "var(--bg-elevated)",
+                    border: "1px solid var(--stroke)",
+                    borderRadius: 14,
+                    padding: "6px 0",
+                    zIndex: 60,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleToggleStar();
+                      setMenuOpen(false);
+                    }}
+                    style={menuItemStyle}
+                  >
+                    <Icon glyph={starred ? "star-filled" : "star"} size={18} color={starred ? "#4C8DFF" : "currentColor"} />
+                    <span>{t.starred}</span>
+                  </button>
+                  <a
+                    href={src}
+                    download={node.name}
+                    onClick={() => setMenuOpen(false)}
+                    style={{ ...menuItemStyle, textDecoration: "none" }}
+                  >
+                    <Icon glyph="download" size={18} />
+                    <span>{t.download}</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleShare();
+                      setMenuOpen(false);
+                    }}
+                    style={menuItemStyle}
+                  >
+                    <Icon glyph="share" size={18} />
+                    <span>{t.actionShare}</span>
+                  </button>
+                  <div style={{ height: 1, background: "var(--stroke)", margin: "4px 0" }} />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setMenuOpen(false);
+                      try {
+                        await api.del(Api.node(node.id));
+                        toast(t.confirmTrashTitle, "success");
+                        onClose();
+                      } catch (e) {
+                        toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
+                      }
+                    }}
+                    style={{ ...menuItemStyle, color: "var(--warning)" }}
+                  >
+                    <Icon glyph="trash" size={18} color="var(--warning)" />
+                    <span>{t.trash}</span>
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* ----------------- MEDIA CANVAS ----------------- */}
@@ -492,11 +498,11 @@ export function Preview({
               left: 16,
               top: "50%",
               transform: "translateY(-50%)",
-              width: 44,
-              height: 44,
+              width: 42,
+              height: 42,
               borderRadius: "50%",
-              background: "rgba(255,255,255,0.18)",
-              border: "none",
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--stroke)",
               color: "#FFFFFF",
               display: "grid",
               placeItems: "center",
@@ -506,7 +512,7 @@ export function Preview({
               transition: "opacity 0.2s ease",
             }}
           >
-            <Icon glyph="chevron-left" size={24} color="#FFFFFF" />
+            <Icon glyph="chevron-left" size={20} color="#FFFFFF" />
           </button>
         )}
 
@@ -523,11 +529,11 @@ export function Preview({
               right: 16,
               top: "50%",
               transform: "translateY(-50%)",
-              width: 44,
-              height: 44,
+              width: 42,
+              height: 42,
               borderRadius: "50%",
-              background: "rgba(255,255,255,0.18)",
-              border: "none",
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--stroke)",
               color: "#FFFFFF",
               display: "grid",
               placeItems: "center",
@@ -537,7 +543,7 @@ export function Preview({
               transition: "opacity 0.2s ease",
             }}
           >
-            <Icon glyph="chevron-right" size={24} color="#FFFFFF" />
+            <Icon glyph="chevron-right" size={20} color="#FFFFFF" />
           </button>
         )}
       </div>
@@ -1017,7 +1023,10 @@ function ActionRow({
     if (isDragging.current) {
       isDragging.current = false;
       try {
-        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+        const el = e.currentTarget as HTMLElement;
+        if (el?.hasPointerCapture?.(e.pointerId)) {
+          el.releasePointerCapture(e.pointerId);
+        }
       } catch {}
     }
   };
@@ -1070,16 +1079,6 @@ function ActionRow({
             }
           }}
         />
-        {!isFolder(node) && (
-          <ActionButton
-            glyph={kept ? "offlineReady" : "offline"}
-            label={kept ? t.offlineRemoveDownload : t.offlineMakeAvailable}
-            active={kept}
-            onClick={() => {
-              if (!didDrag.current) handleToggleOffline();
-            }}
-          />
-        )}
         <ActionButton
           glyph={starred ? "star-filled" : "star"}
           label={t.starred}
@@ -1299,7 +1298,10 @@ function InteractiveImage({
     if (isDragging.current) {
       isDragging.current = false;
       try {
-        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+        const el = e.currentTarget as HTMLElement;
+        if (el?.hasPointerCapture?.(e.pointerId)) {
+          el.releasePointerCapture(e.pointerId);
+        }
       } catch {}
     }
   };
@@ -1341,6 +1343,8 @@ function InteractiveImage({
         alt={alt}
         draggable={false}
         style={{
+          width: "100%",
+          height: "100%",
           maxWidth: "100%",
           maxHeight: "100%",
           objectFit: "contain",

@@ -76,14 +76,20 @@ export function relative(ms: number, locale = current): string {
 
 export function dateTime(ms: number, locale = current): string {
   if (!ms) return "";
-  const dateLocale = locale === "vi" ? "vi-VN" : locale === "ar" ? "ar" : "en-GB";
-  return new Date(ms).toLocaleString(dateLocale, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const d = new Date(ms);
+  if (locale === "vi") {
+    // Matches Flutter intl DateFormat.yMMMd('vi').add_Hm() -> "11 thg 10, 2026 12:04"
+    const day = d.getDate();
+    const month = d.getMonth() + 1;
+    const year = d.getFullYear();
+    const hours = d.getHours().toString().padStart(2, "0");
+    const minutes = d.getMinutes().toString().padStart(2, "0");
+    return `${day} thg ${month}, ${year} ${hours}:${minutes}`;
+  }
+  const dateLocale = locale === "ar" ? "ar" : "en-GB";
+  const dateStr = d.toLocaleDateString(dateLocale, { day: "numeric", month: "short", year: "numeric" });
+  const timeStr = d.toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${dateStr} ${timeStr}`;
 }
 
 /** The extension, uppercased, for the badge on a tile with no preview. */

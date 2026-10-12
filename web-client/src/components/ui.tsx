@@ -328,63 +328,87 @@ export function SettingRow({
 }) {
   const color = destructive ? "var(--warning)" : "var(--fg-primary)";
 
+  const rowContent = (
+    <>
+      {glyph && (
+        <div style={{ flex: "none", display: "flex", alignItems: "center" }}>
+          <Icon glyph={glyph} size={19} color={destructive ? "var(--warning)" : "var(--fg-secondary)"} />
+        </div>
+      )}
+      <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+        <div
+          className="t-body-lg"
+          style={{
+            color,
+            fontWeight: 400,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {label}
+        </div>
+        {description && (
+          <div
+            className="t-body-sm"
+            style={{
+              color: "var(--fg-secondary)",
+              marginTop: 2,
+              lineHeight: 1.4,
+            }}
+          >
+            {description}
+          </div>
+        )}
+      </div>
+      {trailing ? (
+        <div style={{ flex: "none", marginInlineStart: 12 }}>{trailing}</div>
+      ) : onTap ? (
+        <div style={{ flex: "none", marginInlineStart: 8, color: "var(--fg-secondary)" }}>
+          <Icon glyph="chevron-right" size={18} />
+        </div>
+      ) : null}
+    </>
+  );
+
   return (
     <>
       {showDivider && (
         <div style={{ height: 1, background: "var(--stroke)", margin: "0 -14px" }} />
       )}
-      <Tappable
-        onClick={onTap}
-        radius={12}
-        style={{
-          width: "100%",
-          padding: "14px 4px",
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          cursor: onTap ? "pointer" : "default",
-          boxSizing: "border-box",
-        }}
-      >
-        {glyph && (
-          <div style={{ flex: "none", display: "flex", alignItems: "center" }}>
-            <Icon glyph={glyph} size={19} color={destructive ? "var(--warning)" : "var(--fg-secondary)"} />
-          </div>
-        )}
-        <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
-          <div
-            className="t-body-lg"
-            style={{
-              color,
-              fontWeight: 400,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {label}
-          </div>
-          {description && (
-            <div
-              className="t-body-sm"
-              style={{
-                color: "var(--fg-secondary)",
-                marginTop: 2,
-                lineHeight: 1.4,
-              }}
-            >
-              {description}
-            </div>
-          )}
+      {trailing ? (
+        <div
+          onClick={onTap}
+          style={{
+            width: "100%",
+            padding: "14px 4px",
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            cursor: onTap ? "pointer" : "default",
+            boxSizing: "border-box",
+            borderRadius: 12,
+          }}
+        >
+          {rowContent}
         </div>
-        {trailing ? (
-          <div style={{ flex: "none", marginInlineStart: 12 }}>{trailing}</div>
-        ) : onTap ? (
-          <div style={{ flex: "none", marginInlineStart: 8, color: "var(--fg-secondary)" }}>
-            <Icon glyph="chevron-right" size={18} />
-          </div>
-        ) : null}
-      </Tappable>
+      ) : (
+        <Tappable
+          onClick={onTap}
+          radius={12}
+          style={{
+            width: "100%",
+            padding: "14px 4px",
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            cursor: onTap ? "pointer" : "default",
+            boxSizing: "border-box",
+          }}
+        >
+          {rowContent}
+        </Tappable>
+      )}
     </>
   );
 }
