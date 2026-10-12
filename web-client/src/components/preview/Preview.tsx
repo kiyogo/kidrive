@@ -38,53 +38,9 @@ export function Preview({
   // Video playback states
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [buffered, setBuffered] = useState(0);
-  const [volume, setVolume] = useState(100);
-  const [muted, setMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isScrubbing, setIsScrubbing] = useState(false);
-  const [scrubberHover, setScrubberHover] = useState(false);
   const idleTimer = useRef<NodeJS.Timeout | null>(null);
-
-  // 60 FPS smooth interpolation loop matching YouTube's exact progress bar behavior
-  useEffect(() => {
-    let animId: number;
-    const loop = () => {
-      if (videoRef.current && !videoRef.current.paused && !isScrubbing) {
-        setCurrentTime(videoRef.current.currentTime);
-        const dur = videoRef.current.duration;
-        if (dur && !isNaN(dur) && dur > 0) {
-          setDuration(dur);
-        }
-        if (videoRef.current.buffered.length > 0) {
-          setBuffered(videoRef.current.buffered.end(videoRef.current.buffered.length - 1));
-        }
-      }
-      animId = requestAnimationFrame(loop);
-    };
-
-    if (playing) {
-      animId = requestAnimationFrame(loop);
-    }
-    return () => {
-      if (animId) cancelAnimationFrame(animId);
-    };
-  }, [playing, isScrubbing]);
-
-  const seekFromPointer = useCallback(
-    (clientX: number, target: HTMLDivElement) => {
-      const rect = target.getBoundingClientRect();
-      const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      if (videoRef.current && duration > 0) {
-        const targetTime = pos * duration;
-        videoRef.current.currentTime = targetTime;
-        setCurrentTime(targetTime);
-      }
-    },
-    [duration],
-  );
+  const actionScrollRef = useRef<HTMLDivElement | null>(null);
 
   const currentIndex = nodes ? nodes.findIndex((n) => n.id === node.id) : -1;
   const total = nodes ? nodes.length : 1;
@@ -466,15 +422,6 @@ export function Preview({
                 setPlaying(false);
                 wakeVideoControls();
               }}
-              onTimeUpdate={() => {
-                if (videoRef.current) {
-                  setCurrentTime(videoRef.current.currentTime);
-                  setDuration(videoRef.current.duration || 0);
-                  if (videoRef.current.buffered.length > 0) {
-                    setBuffered(videoRef.current.buffered.end(videoRef.current.buffered.length - 1));
-                  }
-                }
-              }}
               style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
             />
           </div>
@@ -597,214 +544,15 @@ export function Preview({
 
       {/* ----------------- BOTTOM SCRIM (PHOTO / MEDIA) ----------------- */}
       {category === "video" ? (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            position: "absolute",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            zIndex: 40,
-            background: "linear-gradient(to top, rgba(0,0,0,0.90) 0%, transparent 100%)",
-            padding: "28px 16px max(16px, env(safe-area-inset-bottom))",
-            opacity: chrome ? 1 : 0,
-            pointerEvents: chrome ? "auto" : "none",
-            transition: "opacity 0.2s ease",
-          }}
-        >
-          {/* Scrubber slider matching Flutter MediaScrubber and YouTube 60 FPS smoothness */}
-          <div
-            style={{
-              position: "relative",
-              height: 24,
-              display: "flex",
-              alignItems: "center",
-              cursor: "pointer",
-              touchAction: "none",
-            }}
-            onPointerEnter={() => setScrubberHover(true)}
-            onPointerLeave={() => setScrubberHover(false)}
-            onPointerDown={(e) => {
-              e.currentTarget.setPointerCapture(e.pointerId);
-              setIsScrubbing(true);
-              seekFromPointer(e.clientX, e.currentTarget);
-            }}
-            onPointerMove={(e) => {
-              if (isScrubbing) {
-                seekFromPointer(e.clientX, e.currentTarget);
-              }
-            }}
-            onPointerUp={(e) => {
-              if (isScrubbing) {
-                try {
-                  e.currentTarget.releasePointerCapture(e.pointerId);
-                } catch {}
-                setIsScrubbing(false);
-              }
-            }}
-          >
-            {/* Background track */}
-            <div
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                height: scrubberHover || isScrubbing ? 6 : 4,
-                background: "rgba(255,255,255,0.25)",
-                borderRadius: 3,
-                transition: "height 0.15s ease",
-              }}
-            />
-            {/* Buffer track */}
-            <div
-              style={{
-                position: "absolute",
-                left: 0,
-                width: `${duration ? (buffered / duration) * 100 : 0}%`,
-                height: scrubberHover || isScrubbing ? 6 : 4,
-                background: "rgba(255,255,255,0.45)",
-                borderRadius: 3,
-                transition: "height 0.15s ease",
-              }}
-            />
-            {/* Played track (60 FPS smooth matching YouTube) */}
-            <div
-              style={{
-                position: "absolute",
-                left: 0,
-                width: `${duration ? (currentTime / duration) * 100 : 0}%`,
-                height: scrubberHover || isScrubbing ? 6 : 4,
-                background: "#4C8DFF",
-                borderRadius: 3,
-                transition: "height 0.15s ease",
-              }}
-            />
-            {/* Scrubber thumb */}
-            {(scrubberHover || isScrubbing) && (
-              <div
-                style={{
-                  position: "absolute",
-                  left: `${duration ? (currentTime / duration) * 100 : 0}%`,
-                  width: 12,
-                  height: 12,
-                  borderRadius: "50%",
-                  background: "#4C8DFF",
-                  boxShadow: "0 0 4px rgba(0,0,0,0.4)",
-                  transform: "translateX(-50%)",
-                  pointerEvents: "none",
-                }}
-              />
-            )}
-          </div>
-
-          {/* Controls Bar matching Flutter _Bar */}
-          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 10 }}>
-            <button
-              type="button"
-              onClick={togglePlay}
-              title={playing ? t.actionPause : t.actionPlay}
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: "50%",
-                background: "transparent",
-                border: "none",
-                color: "#FFFFFF",
-                display: "grid",
-                placeItems: "center",
-                cursor: "pointer",
-              }}
-            >
-              <Icon glyph={playing ? "pause" : "play"} size={20} color="#FFFFFF" />
-            </button>
-
-            {/* Elapsed / Total time matching Flutter exactly */}
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#FFFFFF" }}>
-                {formatClock(currentTime)}
-              </span>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "#FFFFFF" }}>
-                {"  /  " + formatClock(duration)}
-              </span>
-            </div>
-
-            <span style={{ flex: 1 }} />
-
-            {/* Time left matching Flutter exactly */}
-            <span style={{ fontSize: 13, fontWeight: 600, color: "#FFFFFF" }}>
-              {"-" + formatClock(Math.max(0, duration - currentTime))}
-            </span>
-
-            {/* Volume control */}
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  if (videoRef.current) {
-                    const next = !muted;
-                    setMuted(next);
-                    videoRef.current.muted = next;
-                  }
-                }}
-                title={muted ? t.actionUnmute : t.actionMute}
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: "50%",
-                  background: "transparent",
-                  border: "none",
-                  color: "#FFFFFF",
-                  display: "grid",
-                  placeItems: "center",
-                  cursor: "pointer",
-                }}
-              >
-                <Icon glyph={muted ? "volume-off" : "volume"} size={20} color="#FFFFFF" />
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={muted ? 0 : volume}
-                onChange={(e) => {
-                  const val = Number(e.target.value);
-                  setVolume(val);
-                  setMuted(val === 0);
-                  if (videoRef.current) {
-                    videoRef.current.volume = val / 100;
-                    videoRef.current.muted = val === 0;
-                  }
-                }}
-                style={{
-                  width: 60,
-                  height: 4,
-                  accentColor: "#4C8DFF",
-                  cursor: "pointer",
-                }}
-              />
-            </div>
-
-            {/* Fullscreen button */}
-            <button
-              type="button"
-              onClick={toggleFullscreen}
-              title={isFullscreen ? t.actionExitFullscreen : t.actionFullscreen}
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: "50%",
-                background: "transparent",
-                border: "none",
-                color: "#FFFFFF",
-                display: "grid",
-                placeItems: "center",
-                cursor: "pointer",
-              }}
-            >
-              <Icon glyph={isFullscreen ? "fullscreenExit" : "fullscreen"} size={20} color="#FFFFFF" />
-            </button>
-          </div>
-        </div>
+        <VideoScrubberBar
+          videoRef={videoRef}
+          playing={playing}
+          onTogglePlay={togglePlay}
+          onToggleFullscreen={toggleFullscreen}
+          isFullscreen={isFullscreen}
+          chrome={chrome}
+          wakeControls={wakeVideoControls}
+        />
       ) : (
         <div
           onClick={(e) => e.stopPropagation()}
@@ -833,60 +581,521 @@ export function Preview({
               : bytes(node.size_bytes)}
           </div>
 
-          {/* Horizontally touch/mouse scrollable action row */}
-          <div
-            style={{
-              width: "100%",
-              maxWidth: 480,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-around",
-              gap: 8,
-              overflowX: "auto",
-              WebkitOverflowScrolling: "touch",
-              scrollbarWidth: "none",
-              whiteSpace: "nowrap",
-              touchAction: "pan-x",
-            }}
-          >
-            <ActionButton
-              glyph="shared"
-              label={t.actionShare}
-              onClick={handleShare}
-            />
-            <ActionButton
-              glyph="download"
-              label={t.download}
-              onClick={() => {
-                const a = document.createElement("a");
-                a.href = src;
-                a.download = node.name;
-                a.click();
-              }}
-            />
-            {!isFolder(node) && (
-              <ActionButton
-                glyph={kept ? "offlineReady" : "offline"}
-                label={kept ? t.offlineRemoveDownload : t.offlineMakeAvailable}
-                active={kept}
-                onClick={handleToggleOffline}
-              />
-            )}
-            <ActionButton
-              glyph={starred ? "star-filled" : "star"}
-              label={t.starred}
-              active={starred}
-              onClick={handleToggleStar}
-            />
-          </div>
+          {/* Horizontally touch/mouse scrollable action row matching Flutter SingleChildScrollView */}
+          <ActionRow
+            actionScrollRef={actionScrollRef}
+            src={src}
+            node={node}
+            kept={kept}
+            starred={starred}
+            t={t}
+            handleShare={handleShare}
+            handleToggleOffline={handleToggleOffline}
+            handleToggleStar={handleToggleStar}
+          />
         </div>
       )}
     </div>
   );
 }
 
+function VideoScrubberBar({
+  videoRef,
+  playing,
+  onTogglePlay,
+  onToggleFullscreen,
+  isFullscreen,
+  chrome,
+  wakeControls,
+}: {
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  playing: boolean;
+  onTogglePlay: () => void;
+  onToggleFullscreen: () => void;
+  isFullscreen: boolean;
+  chrome: boolean;
+  wakeControls: () => void;
+}) {
+  const t = useL10n();
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const playedBarRef = useRef<HTMLDivElement | null>(null);
+  const bufferBarRef = useRef<HTMLDivElement | null>(null);
+  const hoverBarRef = useRef<HTMLDivElement | null>(null);
+  const thumbRef = useRef<HTMLDivElement | null>(null);
+  const elapsedRef = useRef<HTMLSpanElement | null>(null);
+  const totalRef = useRef<HTMLSpanElement | null>(null);
+  const leftRef = useRef<HTMLSpanElement | null>(null);
+
+  const [active, setActive] = useState(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [volume, setVolume] = useState(100);
+  const [muted, setMuted] = useState(false);
+  const isDraggingRef = useRef(false);
+
+  // 60 FPS smooth animation loop matching YouTube and Flutter MediaScrubber
+  useEffect(() => {
+    let animId: number;
+    const loop = () => {
+      const v = videoRef.current;
+      if (v && !v.paused && !isDraggingRef.current) {
+        const cur = v.currentTime || 0;
+        const dur = v.duration || 0;
+        const pct = dur > 0 ? Math.min(100, Math.max(0, (cur / dur) * 100)) : 0;
+        if (playedBarRef.current) playedBarRef.current.style.width = `${pct}%`;
+        if (thumbRef.current) thumbRef.current.style.left = `${pct}%`;
+        if (elapsedRef.current) elapsedRef.current.textContent = formatClock(cur);
+        if (totalRef.current) totalRef.current.textContent = `  /  ${formatClock(dur)}`;
+        if (leftRef.current) leftRef.current.textContent = `-${formatClock(Math.max(0, dur - cur))}`;
+        if (v.buffered.length > 0 && bufferBarRef.current && dur > 0) {
+          const bufEnd = v.buffered.end(v.buffered.length - 1);
+          bufferBarRef.current.style.width = `${Math.min(100, (bufEnd / dur) * 100)}%`;
+        }
+      }
+      animId = requestAnimationFrame(loop);
+    };
+
+    animId = requestAnimationFrame(loop);
+    return () => {
+      cancelAnimationFrame(animId);
+    };
+  }, [videoRef]);
+
+  // Sync static values on metadata loaded or pause
+  const syncStatic = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const cur = v.currentTime || 0;
+    const dur = v.duration || 0;
+    const pct = dur > 0 ? Math.min(100, Math.max(0, (cur / dur) * 100)) : 0;
+    if (playedBarRef.current) playedBarRef.current.style.width = `${pct}%`;
+    if (thumbRef.current) thumbRef.current.style.left = `${pct}%`;
+    if (elapsedRef.current) elapsedRef.current.textContent = formatClock(cur);
+    if (totalRef.current) totalRef.current.textContent = `  /  ${formatClock(dur)}`;
+    if (leftRef.current) leftRef.current.textContent = `-${formatClock(Math.max(0, dur - cur))}`;
+    if (v.buffered.length > 0 && bufferBarRef.current && dur > 0) {
+      const bufEnd = v.buffered.end(v.buffered.length - 1);
+      bufferBarRef.current.style.width = `${Math.min(100, (bufEnd / dur) * 100)}%`;
+    }
+  }, [videoRef]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const onMeta = () => syncStatic();
+    const onPause = () => syncStatic();
+    const onProgress = () => {
+      if (v.buffered.length > 0 && bufferBarRef.current && v.duration > 0) {
+        const bufEnd = v.buffered.end(v.buffered.length - 1);
+        bufferBarRef.current.style.width = `${Math.min(100, (bufEnd / v.duration) * 100)}%`;
+      }
+    };
+    v.addEventListener("loadedmetadata", onMeta);
+    v.addEventListener("durationchange", onMeta);
+    v.addEventListener("pause", onPause);
+    v.addEventListener("progress", onProgress);
+    syncStatic();
+    return () => {
+      v.removeEventListener("loadedmetadata", onMeta);
+      v.removeEventListener("durationchange", onMeta);
+      v.removeEventListener("pause", onPause);
+      v.removeEventListener("progress", onProgress);
+    };
+  }, [videoRef, syncStatic]);
+
+  const seek = useCallback(
+    (clientX: number) => {
+      const el = trackRef.current;
+      const v = videoRef.current;
+      if (!el || !v || !v.duration) return;
+      const rect = el.getBoundingClientRect();
+      const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const targetTime = fraction * v.duration;
+      v.currentTime = targetTime;
+      const pct = fraction * 100;
+      if (playedBarRef.current) playedBarRef.current.style.width = `${pct}%`;
+      if (thumbRef.current) thumbRef.current.style.left = `${pct}%`;
+      if (elapsedRef.current) elapsedRef.current.textContent = formatClock(targetTime);
+      if (leftRef.current) leftRef.current.textContent = `-${formatClock(Math.max(0, v.duration - targetTime))}`;
+    },
+    [videoRef],
+  );
+
+  const updateHover = useCallback((clientX: number) => {
+    const el = trackRef.current;
+    if (!el || !hoverBarRef.current) return;
+    const rect = el.getBoundingClientRect();
+    const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    hoverBarRef.current.style.width = `${fraction * 100}%`;
+  }, []);
+
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: "absolute",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 40,
+        background: "linear-gradient(to top, rgba(0,0,0,0.90) 0%, transparent 100%)",
+        padding: "28px 16px max(16px, env(safe-area-inset-bottom))",
+        opacity: chrome ? 1 : 0,
+        pointerEvents: chrome ? "auto" : "none",
+        transition: "opacity 0.2s ease",
+      }}
+    >
+      {/* Scrubber slider matching Flutter MediaScrubber and YouTube */}
+      <div
+        ref={trackRef}
+        style={{
+          position: "relative",
+          height: 24,
+          display: "flex",
+          alignItems: "center",
+          cursor: "pointer",
+          touchAction: "none",
+        }}
+        onPointerEnter={(e) => {
+          setActive(true);
+          updateHover(e.clientX);
+        }}
+        onPointerLeave={() => {
+          if (!isDraggingRef.current) {
+            setActive(false);
+            if (hoverBarRef.current) hoverBarRef.current.style.width = "0%";
+          }
+        }}
+        onPointerMove={(e) => {
+          wakeControls();
+          updateHover(e.clientX);
+          if (isDraggingRef.current) {
+            seek(e.clientX);
+          }
+        }}
+        onPointerDown={(e) => {
+          wakeControls();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          isDraggingRef.current = true;
+          setIsScrubbing(true);
+          seek(e.clientX);
+        }}
+        onPointerUp={(e) => {
+          if (isDraggingRef.current) {
+            try {
+              e.currentTarget.releasePointerCapture(e.pointerId);
+            } catch {}
+            isDraggingRef.current = false;
+            setIsScrubbing(false);
+            seek(e.clientX);
+          }
+        }}
+      >
+        {/* Background track */}
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            height: active || isScrubbing ? 6 : 3.5,
+            background: "rgba(255,255,255,0.25)",
+            borderRadius: 3,
+            transition: "height 0.15s ease",
+          }}
+        />
+        {/* Buffer track */}
+        <div
+          ref={bufferBarRef}
+          style={{
+            position: "absolute",
+            left: 0,
+            width: "0%",
+            height: active || isScrubbing ? 6 : 3.5,
+            background: "rgba(255,255,255,0.45)",
+            borderRadius: 3,
+            transition: "height 0.15s ease",
+          }}
+        />
+        {/* Hover ghost track (YouTube parity) */}
+        <div
+          ref={hoverBarRef}
+          style={{
+            position: "absolute",
+            left: 0,
+            width: "0%",
+            height: active || isScrubbing ? 6 : 3.5,
+            background: "rgba(255,255,255,0.22)",
+            borderRadius: 3,
+            transition: "height 0.15s ease",
+          }}
+        />
+        {/* Played track */}
+        <div
+          ref={playedBarRef}
+          style={{
+            position: "absolute",
+            left: 0,
+            width: "0%",
+            height: active || isScrubbing ? 6 : 3.5,
+            background: "#4C8DFF",
+            borderRadius: 3,
+            transition: "height 0.15s ease",
+          }}
+        />
+        {/* Scrubber thumb */}
+        <div
+          ref={thumbRef}
+          style={{
+            position: "absolute",
+            left: "0%",
+            width: 14,
+            height: 14,
+            borderRadius: "50%",
+            background: "#4C8DFF",
+            transform: `translateX(-50%) scale(${active || isScrubbing ? 1 : 0})`,
+            transition: "transform 0.14s ease",
+            pointerEvents: "none",
+          }}
+        />
+      </div>
+
+      {/* Controls Bar matching Flutter _Bar */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 10 }}>
+        <button
+          type="button"
+          onClick={onTogglePlay}
+          title={playing ? t.actionPause : t.actionPlay}
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: "50%",
+            background: "transparent",
+            border: "none",
+            color: "#FFFFFF",
+            display: "grid",
+            placeItems: "center",
+            cursor: "pointer",
+          }}
+        >
+          <Icon glyph={playing ? "pause" : "play"} size={20} color="#FFFFFF" />
+        </button>
+
+        {/* Elapsed / Total time matching Flutter exactly */}
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span ref={elapsedRef} style={{ fontSize: 13, fontWeight: 600, color: "#FFFFFF" }}>
+            0:00
+          </span>
+          <span ref={totalRef} style={{ fontSize: 13, fontWeight: 500, color: "#FFFFFF" }}>
+            {"  /  0:00"}
+          </span>
+        </div>
+
+        <span style={{ flex: 1 }} />
+
+        {/* Time left matching Flutter exactly */}
+        <span ref={leftRef} style={{ fontSize: 13, fontWeight: 600, color: "#FFFFFF" }}>
+          -0:00
+        </span>
+
+        {/* Volume control */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button
+            type="button"
+            onClick={() => {
+              if (videoRef.current) {
+                const next = !muted;
+                setMuted(next);
+                videoRef.current.muted = next;
+              }
+            }}
+            title={muted ? t.actionUnmute : t.actionMute}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: "50%",
+              background: "transparent",
+              border: "none",
+              color: "#FFFFFF",
+              display: "grid",
+              placeItems: "center",
+              cursor: "pointer",
+            }}
+          >
+            <Icon glyph={muted ? "volume-off" : "volume"} size={20} color="#FFFFFF" />
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={muted ? 0 : volume}
+            onChange={(e) => {
+              const val = Number(e.target.value);
+              setVolume(val);
+              setMuted(val === 0);
+              if (videoRef.current) {
+                videoRef.current.volume = val / 100;
+                videoRef.current.muted = val === 0;
+              }
+            }}
+            style={{
+              width: 60,
+              height: 4,
+              accentColor: "#4C8DFF",
+              cursor: "pointer",
+            }}
+          />
+        </div>
+
+        {/* Fullscreen button */}
+        <button
+          type="button"
+          onClick={onToggleFullscreen}
+          title={isFullscreen ? t.actionExitFullscreen : t.actionFullscreen}
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: "50%",
+            background: "transparent",
+            border: "none",
+            color: "#FFFFFF",
+            display: "grid",
+            placeItems: "center",
+            cursor: "pointer",
+          }}
+        >
+          <Icon glyph={isFullscreen ? "fullscreenExit" : "fullscreen"} size={20} color="#FFFFFF" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ActionRow({
+  actionScrollRef,
+  src,
+  node,
+  kept,
+  starred,
+  t,
+  handleShare,
+  handleToggleOffline,
+  handleToggleStar,
+}: {
+  actionScrollRef: React.RefObject<HTMLDivElement | null>;
+  src: string;
+  node: NodeModel;
+  kept: boolean;
+  starred: boolean;
+  t: ReturnType<typeof useL10n>;
+  handleShare: () => void;
+  handleToggleOffline: () => void;
+  handleToggleStar: () => void;
+}) {
+  const isDragging = useRef(false);
+  const startX = useRef(0);
+  const scrollStart = useRef(0);
+  const didDrag = useRef(false);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "mouse") {
+      isDragging.current = true;
+      didDrag.current = false;
+      startX.current = e.clientX;
+      scrollStart.current = actionScrollRef.current?.scrollLeft || 0;
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    }
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isDragging.current && actionScrollRef.current) {
+      const dx = e.clientX - startX.current;
+      if (Math.abs(dx) > 3) didDrag.current = true;
+      actionScrollRef.current.scrollLeft = scrollStart.current - dx;
+    }
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isDragging.current) {
+      isDragging.current = false;
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {}
+    }
+  };
+
+  return (
+    <div
+      ref={actionScrollRef}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      style={{
+        width: "100%",
+        maxWidth: 480,
+        overflowX: "auto",
+        WebkitOverflowScrolling: "touch",
+        scrollbarWidth: "none",
+        touchAction: "pan-x",
+        cursor: "grab",
+        userSelect: "none",
+      }}
+    >
+      <div
+        style={{
+          minWidth: "100%",
+          width: "max-content",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-evenly",
+          gap: 8,
+          padding: "0 12px",
+        }}
+      >
+        <ActionButton
+          glyph="shared"
+          label={t.actionShare}
+          onClick={() => {
+            if (!didDrag.current) handleShare();
+          }}
+        />
+        <ActionButton
+          glyph="download"
+          label={t.download}
+          onClick={() => {
+            if (!didDrag.current) {
+              const a = document.createElement("a");
+              a.href = src;
+              a.download = node.name;
+              a.click();
+            }
+          }}
+        />
+        {!isFolder(node) && (
+          <ActionButton
+            glyph={kept ? "offlineReady" : "offline"}
+            label={kept ? t.offlineRemoveDownload : t.offlineMakeAvailable}
+            active={kept}
+            onClick={() => {
+              if (!didDrag.current) handleToggleOffline();
+            }}
+          />
+        )}
+        <ActionButton
+          glyph={starred ? "star-filled" : "star"}
+          label={t.starred}
+          active={starred}
+          onClick={() => {
+            if (!didDrag.current) handleToggleStar();
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 /**
- * Interactive image viewer supporting zoom and pan matching Flutter's PhotoViewGallery / ZoomOnScroll.
+ * Interactive image viewer supporting pinch zoom, double-tap zoom, wheel zoom towards cursor,
+ * and pan matching Flutter's PhotoViewGallery / ZoomOnScroll.
  */
 function InteractiveImage({
   src,
@@ -900,58 +1109,176 @@ function InteractiveImage({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
+
+  // Pointer/touch tracking refs
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const startPos = useRef({ x: 0, y: 0 });
-  const didDrag = useRef(false);
+  const didMove = useRef(false);
 
-  // Reset zoom on src change
+  // Multi-touch pinch tracking
+  const pinchStartDist = useRef(0);
+  const pinchStartScale = useRef(1);
+  const isPinching = useRef(false);
+
+  // Tap tracking for single vs double tap
+  const lastTapTime = useRef(0);
+  const lastTapPos = useRef({ x: 0, y: 0 });
+  const singleTapTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Reset zoom when image src changes
   useEffect(() => {
     setScale(1);
     setPosition({ x: 0, y: 0 });
   }, [src]);
 
-  // Double click / double tap
-  const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  // Clean up single tap timer on unmount
+  useEffect(() => {
+    return () => {
+      if (singleTapTimer.current) clearTimeout(singleTapTimer.current);
+    };
+  }, []);
+
+  // Mouse wheel zoom towards mouse position (matching Flutter's ZoomOnScroll)
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    if (scale > 1) {
+    const factor = e.deltaY > 0 ? 0.88 : 1 / 0.88;
+    setScale((prevScale) => {
+      const nextScale = Math.min(Math.max(1, prevScale * factor), 8);
+      if (nextScale === 1) {
+        setPosition({ x: 0, y: 0 });
+        return 1;
+      }
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        const mouseX = e.clientX - rect.left - rect.width / 2;
+        const mouseY = e.clientY - rect.top - rect.height / 2;
+        setPosition((prevPos) => ({
+          x: mouseX - (mouseX - prevPos.x) * (nextScale / prevScale),
+          y: mouseY - (mouseY - prevPos.y) * (nextScale / prevScale),
+        }));
+      }
+      return nextScale;
+    });
+  };
+
+  // Perform double-tap or double-click zoom toggle
+  const triggerZoomAt = (clientX: number, clientY: number) => {
+    if (scale > 1.05) {
       setScale(1);
       setPosition({ x: 0, y: 0 });
     } else {
       const rect = containerRef.current?.getBoundingClientRect();
+      const targetScale = 2.5;
       if (!rect) {
-        setScale(2.5);
+        setScale(targetScale);
         return;
       }
-      const clickX = e.clientX - rect.left - rect.width / 2;
-      const clickY = e.clientY - rect.top - rect.height / 2;
-      setScale(2.5);
-      setPosition({ x: -clickX * 1.5, y: -clickY * 1.5 });
+      const clickX = clientX - rect.left - rect.width / 2;
+      const clickY = clientY - rect.top - rect.height / 2;
+      setScale(targetScale);
+      setPosition({
+        x: -clickX * (targetScale - 1),
+        y: -clickY * (targetScale - 1),
+      });
     }
   };
 
-  // Mouse wheel zoom
-  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+  // Double click for mouse users
+  const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
-    setScale((prev) => {
-      const next = Math.min(Math.max(1, prev * zoomFactor), 5);
-      if (next === 1) {
-        setPosition({ x: 0, y: 0 });
-      }
-      return next;
-    });
+    if (singleTapTimer.current) clearTimeout(singleTapTimer.current);
+    triggerZoomAt(e.clientX, e.clientY);
   };
 
-  // Mouse/touch dragging
+  // Touch handlers for mobile pinch & tap
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2) {
+      isPinching.current = true;
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+      pinchStartDist.current = dist;
+      pinchStartScale.current = scale;
+    } else if (e.touches.length === 1) {
+      isPinching.current = false;
+      dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      startPos.current = { ...position };
+      didMove.current = false;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2 && isPinching.current && pinchStartDist.current > 0) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+      const ratio = dist / pinchStartDist.current;
+      const newScale = Math.min(Math.max(0.5, pinchStartScale.current * ratio), 8);
+      setScale(newScale);
+      didMove.current = true;
+    } else if (e.touches.length === 1 && scale > 1) {
+      const dx = e.touches[0].clientX - dragStart.current.x;
+      const dy = e.touches[0].clientY - dragStart.current.y;
+      if (Math.hypot(dx, dy) > 5) {
+        didMove.current = true;
+      }
+      setPosition({
+        x: startPos.current.x + dx,
+        y: startPos.current.y + dy,
+      });
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (isPinching.current && e.touches.length < 2) {
+      isPinching.current = false;
+      if (scale < 1) {
+        setScale(1);
+        setPosition({ x: 0, y: 0 });
+      }
+      return;
+    }
+
+    if (e.changedTouches.length === 1 && !didMove.current) {
+      const touch = e.changedTouches[0];
+      const now = Date.now();
+      const dist = Math.hypot(
+        touch.clientX - lastTapPos.current.x,
+        touch.clientY - lastTapPos.current.y,
+      );
+
+      if (now - lastTapTime.current < 280 && dist < 30) {
+        // Double tap!
+        if (singleTapTimer.current) {
+          clearTimeout(singleTapTimer.current);
+          singleTapTimer.current = null;
+        }
+        lastTapTime.current = 0;
+        triggerZoomAt(touch.clientX, touch.clientY);
+      } else {
+        // First tap: delay to see if a second tap comes
+        lastTapTime.current = now;
+        lastTapPos.current = { x: touch.clientX, y: touch.clientY };
+        if (singleTapTimer.current) clearTimeout(singleTapTimer.current);
+        singleTapTimer.current = setTimeout(() => {
+          onTap();
+        }, 260);
+      }
+    }
+  };
+
+  // Mouse pointer pan/drag when zoomed
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (scale <= 1) return;
+    if (e.pointerType === "touch" || scale <= 1) return;
     e.stopPropagation();
     isDragging.current = true;
-    didDrag.current = false;
+    didMove.current = false;
     dragStart.current = { x: e.clientX, y: e.clientY };
     startPos.current = { ...position };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -960,7 +1287,7 @@ function InteractiveImage({
     const dx = e.clientX - dragStart.current.x;
     const dy = e.clientY - dragStart.current.y;
     if (Math.hypot(dx, dy) > 3) {
-      didDrag.current = true;
+      didMove.current = true;
     }
     setPosition({
       x: startPos.current.x + dx,
@@ -972,14 +1299,16 @@ function InteractiveImage({
     if (isDragging.current) {
       isDragging.current = false;
       try {
-        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
       } catch {}
     }
   };
 
-  const handleClick = () => {
-    if (didDrag.current) return;
-    onTap();
+  const handleMouseClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (didMove.current) return;
+    if (e.detail <= 1) {
+      onTap();
+    }
   };
 
   return (
@@ -987,11 +1316,14 @@ function InteractiveImage({
       ref={containerRef}
       onWheel={handleWheel}
       onDoubleClick={handleDoubleClick}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
-      onClick={handleClick}
+      onClick={handleMouseClick}
       style={{
         width: "100%",
         height: "100%",
@@ -1000,7 +1332,7 @@ function InteractiveImage({
         justifyContent: "center",
         overflow: "hidden",
         cursor: scale > 1 ? (isDragging.current ? "grabbing" : "grab") : "default",
-        touchAction: scale > 1 ? "none" : "pan-y",
+        touchAction: "none",
       }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1013,7 +1345,7 @@ function InteractiveImage({
           maxHeight: "100%",
           objectFit: "contain",
           transform: `translate3d(${position.x}px, ${position.y}px, 0) scale(${scale})`,
-          transition: isDragging.current ? "none" : "transform 0.15s ease-out",
+          transition: isDragging.current || isPinching.current ? "none" : "transform 0.15s ease-out",
           userSelect: "none",
           pointerEvents: "auto",
         }}
@@ -1053,7 +1385,7 @@ function ActionButton({
       }}
     >
       <Icon glyph={glyph} size={21} color={active ? "#4C8DFF" : "#FFFFFF"} />
-      <span style={{ fontSize: 11, fontWeight: 500, color: active ? "#4C8DFF" : "#FFFFFF" }}>
+      <span style={{ fontSize: 11.5, fontWeight: 500, color: active ? "#4C8DFF" : "#FFFFFF", whiteSpace: "nowrap" }}>
         {label}
       </span>
     </button>

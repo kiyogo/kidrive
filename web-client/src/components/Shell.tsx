@@ -84,7 +84,7 @@ export function Shell({
             background: "var(--bg-elevated)",
             border: "1.2px solid var(--stroke)",
             borderRadius: 34,
-            boxShadow: "0 8px 28px rgba(0, 0, 0, 0.4)",
+            boxShadow: "var(--nav-shadow)",
             zIndex: 500,
             padding: "0 6px",
           }}
@@ -247,22 +247,39 @@ function BottomItem({
   onClick: () => void;
 }) {
   const t = useL10n();
+  const color = active ? "var(--accent)" : "var(--fg-secondary)";
   return (
     <Tappable
       onClick={onClick}
-      radius={14}
+      radius={24}
       style={{
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 3,
-        padding: "6px 12px",
-        color: active ? "var(--accent)" : "var(--fg-secondary)",
-        minWidth: 60,
+        justifyContent: "center",
+        gap: 4,
+        padding: "6px 8px",
+        color,
+        minWidth: 56,
+        flex: 1,
       }}
     >
-      <Icon glyph={item.glyph} size={20} />
-      <span className="t-label-sm">{String(t[item.key])}</span>
+      <Icon glyph={item.glyph} size={22} color={color} strokeWidth={active ? 2.1 : 1.9} />
+      <span
+        style={{
+          fontSize: 11.5,
+          fontWeight: active ? 700 : 500,
+          color,
+          letterSpacing: 0.1,
+          lineHeight: 1.2,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          maxWidth: 68,
+        }}
+      >
+        {String(t[item.key])}
+      </span>
     </Tappable>
   );
 }

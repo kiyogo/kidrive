@@ -64,11 +64,8 @@ export function Mark({
 /** The mark beside the product name, for a header or a sign in screen. */
 export function Wordmark({ size = 28 }: { size?: number }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+    <span style={{ display: "inline-flex", alignItems: "center" }}>
       <Mark size={size} />
-      <span className="t-title-md" style={{ letterSpacing: "-0.01em" }}>
-        Local Drive
-      </span>
     </span>
   );
 }

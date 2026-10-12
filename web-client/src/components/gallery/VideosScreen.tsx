@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useL10n } from "@/lib/l10n";
 import { Icon } from "@/components/Icon";
-import { EmptyState, ErrorState, GridSkeleton, Tappable } from "@/components/ui";
+import { EmptyState, ErrorState, GridSkeleton, SizeSlider, Tappable, useDeviceClass } from "@/components/ui";
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { bytes, relative } from "@/lib/format";
@@ -14,8 +14,10 @@ import type { NodeModel } from "@/lib/models";
  */
 export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeModel[]) => void }) {
   const t = useL10n();
+  const { isDesktop } = useDeviceClass();
   const [nodes, setNodes] = useState<NodeModel[] | null>(null);
   const [error, setError] = useState("");
+  const [columns, setColumns] = useState(4);
 
   useEffect(() => {
     void (async () => {
@@ -54,6 +56,10 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
             </span>
           )}
         </div>
+
+        {isDesktop && (
+          <SizeSlider columns={columns} onChanged={setColumns} steps={[3, 4, 5]} />
+        )}
       </header>
 
       {error ? (
@@ -66,7 +72,7 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+            gridTemplateColumns: isDesktop ? `repeat(${columns}, 1fr)` : "repeat(auto-fill, minmax(260px, 1fr))",
             gap: 16,
             padding: "16px 20px 120px",
           }}

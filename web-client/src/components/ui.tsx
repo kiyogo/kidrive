@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { Icon, type Glyph } from "./Icon";
+import { useL10n } from "@/lib/l10n";
 
 /*
   The shared widgets, matching the Ld* set in the Flutter client.
@@ -574,6 +575,40 @@ export function initialsOf(name: string): string {
     .toUpperCase();
 }
 
+/* ----------------------------------------------------------------- banner */
+
+export function Banner({
+  message,
+  glyph = "warning",
+  tint = "var(--fg-secondary)",
+  action,
+}: {
+  message: string;
+  glyph?: Glyph;
+  tint?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        background: "rgba(255, 255, 255, 0.05)",
+        padding: "10px 16px",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        boxSizing: "border-box",
+      }}
+    >
+      <Icon glyph={glyph} size={17} color={tint} />
+      <span className="t-body-sm" style={{ flex: 1, color: "var(--fg-primary)" }}>
+        {message}
+      </span>
+      {action}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ sheet */
 
 export function Sheet({
@@ -589,7 +624,7 @@ export function Sheet({
   subtitle?: string;
   children: ReactNode;
 }) {
-  const { isDesktop } = useDeviceClass();
+  const { isMobile } = useDeviceClass();
 
   useEffect(() => {
     if (!open) return;
@@ -600,7 +635,7 @@ export function Sheet({
 
   if (!open) return null;
 
-  if (isDesktop) {
+  if (!isMobile) {
     return (
       <div
         onClick={onClose}
@@ -779,6 +814,54 @@ export function Dialog({
   );
 }
 
+export function ConfirmDialog({
+  open,
+  onClose,
+  title,
+  message,
+  confirmLabel,
+  cancelLabel,
+  destructive = false,
+  onConfirm,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  message: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  destructive?: boolean;
+  onConfirm: () => void | Promise<void>;
+}) {
+  return (
+    <Dialog open={open} onClose={onClose} title={title}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+        <div className="t-body-md" style={{ color: "var(--fg-primary)", lineHeight: 1.5 }}>
+          {message}
+        </div>
+        <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+          <Button
+            label={cancelLabel}
+            variant="quiet"
+            expand={false}
+            compact
+            onClick={onClose}
+          />
+          <Button
+            label={confirmLabel}
+            variant={destructive ? "danger" : "primary"}
+            expand={false}
+            compact
+            onClick={() => {
+              void onConfirm();
+              onClose();
+            }}
+          />
+        </div>
+      </div>
+    </Dialog>
+  );
+}
 
 /** A menu anchored to the pointer, which is what a right click opens on
  *  desktop and what the overflow button opens everywhere. */
@@ -870,5 +953,79 @@ export function useDeviceClass() {
       isDesktop: width > 1024,
     }),
     [width],
+  );
+}
+
+/**
+ * Density size slider for photo/video grids, matching Flutter's _SizeSlider in gallery_page_desktop.dart.
+ */
+export function SizeSlider({
+  columns,
+  onChanged,
+  steps = [3, 4, 5, 6, 8],
+}: {
+  columns: number;
+  onChanged: (n: number) => void;
+  steps?: number[];
+}) {
+  const t = useL10n();
+  return (
+    <div
+      title={t.galleryColumns}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: 3,
+        background: "var(--bg-elevated)",
+        borderRadius: "var(--r-pill)",
+        border: "1px solid var(--stroke)",
+      }}
+    >
+      {steps.map((step) => {
+        const active = step === columns;
+        return (
+          <button
+            key={step}
+            type="button"
+            onClick={() => onChanged(step)}
+            style={{
+              width: 30,
+              height: 26,
+              display: "grid",
+              placeItems: "center",
+              background: active ? "var(--accent)" : "transparent",
+              borderRadius: "var(--r-pill)",
+              border: "none",
+              cursor: "pointer",
+              color: active ? "#FFFFFF" : "var(--fg-secondary)",
+              transition: "background var(--d-hover) var(--ease), color var(--d-hover) var(--ease)",
+            }}
+          >
+            <svg width={13} height={13} viewBox="0 0 13 13" fill="none">
+              {step >= 6 ? (
+                <>
+                  <rect x="0.5" y="0.5" width="3" height="3" fill="currentColor" rx="0.5" />
+                  <rect x="5" y="0.5" width="3" height="3" fill="currentColor" rx="0.5" />
+                  <rect x="9.5" y="0.5" width="3" height="3" fill="currentColor" rx="0.5" />
+                  <rect x="0.5" y="5" width="3" height="3" fill="currentColor" rx="0.5" />
+                  <rect x="5" y="5" width="3" height="3" fill="currentColor" rx="0.5" />
+                  <rect x="9.5" y="5" width="3" height="3" fill="currentColor" rx="0.5" />
+                  <rect x="0.5" y="9.5" width="3" height="3" fill="currentColor" rx="0.5" />
+                  <rect x="5" y="9.5" width="3" height="3" fill="currentColor" rx="0.5" />
+                  <rect x="9.5" y="9.5" width="3" height="3" fill="currentColor" rx="0.5" />
+                </>
+              ) : (
+                <>
+                  <rect x="1" y="1" width="4.5" height="4.5" fill="currentColor" rx="0.5" />
+                  <rect x="7.5" y="1" width="4.5" height="4.5" fill="currentColor" rx="0.5" />
+                  <rect x="1" y="7.5" width="4.5" height="4.5" fill="currentColor" rx="0.5" />
+                  <rect x="7.5" y="7.5" width="4.5" height="4.5" fill="currentColor" rx="0.5" />
+                </>
+              )}
+            </svg>
+          </button>
+        );
+      })}
+    </div>
   );
 }

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useL10n } from "@/lib/l10n";
 import { Icon } from "@/components/Icon";
-import { EmptyState, ErrorState, GridSkeleton, Tappable } from "@/components/ui";
+import { EmptyState, ErrorState, GridSkeleton, SizeSlider, Tappable, useDeviceClass } from "@/components/ui";
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { bytes } from "@/lib/format";
@@ -19,8 +19,10 @@ import { transfers, type Transfer } from "@/lib/upload";
  */
 export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeModel[]) => void }) {
   const t = useL10n();
+  const { isDesktop } = useDeviceClass();
   const [nodes, setNodes] = useState<NodeModel[] | null>(null);
   const [error, setError] = useState("");
+  const [columns, setColumns] = useState(5);
 
   useEffect(() => {
     void (async () => {
@@ -42,8 +44,8 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
       <header
         style={{
           display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
+          alignItems: "center",
+          justifyContent: "space-between",
           height: 64,
           padding: "0 24px",
           borderBottom: "1px solid var(--stroke)",
@@ -53,12 +55,18 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
           zIndex: 60,
         }}
       >
-        <h1 className="t-title-lg" style={{ margin: 0, fontSize: 20 }}>
-          {t.gallery}
-        </h1>
-        <div style={{ fontSize: 13, color: "var(--fg-secondary)", marginTop: 2 }}>
-          {photoCount} ảnh, {videoCount} video
+        <div style={{ display: "flex", flexDirection: "column", justifyContent: "center" }}>
+          <h1 className="t-title-lg" style={{ margin: 0, fontSize: 20 }}>
+            {t.gallery}
+          </h1>
+          <div style={{ fontSize: 13, color: "var(--fg-secondary)", marginTop: 2 }}>
+            {t.gallerySummary({ photos: photoCount, videos: videoCount })}
+          </div>
         </div>
+
+        {isDesktop && (
+          <SizeSlider columns={columns} onChanged={setColumns} steps={[3, 4, 5, 6, 8]} />
+        )}
       </header>
 
       {error ? (
@@ -77,7 +85,7 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
+                  gridTemplateColumns: isDesktop ? `repeat(${columns}, 1fr)` : "repeat(auto-fill, minmax(170px, 1fr))",
                   gap: 14,
                 }}
               >

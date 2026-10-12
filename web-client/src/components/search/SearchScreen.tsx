@@ -31,6 +31,7 @@ export function SearchScreen({
   const [results, setResults] = useState<NodeModel[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -110,15 +111,18 @@ export function SearchScreen({
             gap: 10,
             padding: "8px 14px",
             background: "var(--bg-sunken)",
-            border: "1px solid var(--stroke)",
+            border: `1px solid ${focused ? "var(--accent)" : "var(--stroke)"}`,
             borderRadius: "var(--r-pill)",
+            transition: "border-color var(--d-hover) var(--ease)",
           }}
         >
-          <Icon glyph="search" size={18} color="var(--fg-secondary)" />
+          <Icon glyph="search" size={18} color={focused ? "var(--accent)" : "var(--fg-secondary)"} />
           <input
             ref={inputRef}
             type="text"
             value={term}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             onChange={(e) => setTerm(e.target.value)}
             placeholder={t.search}
             style={{

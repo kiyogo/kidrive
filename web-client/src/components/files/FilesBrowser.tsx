@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon, type Glyph } from "@/components/Icon";
 import {
   Avatar,
+  Banner,
   Button,
+  ConfirmDialog,
   Dialog,
   EmptyState,
   ErrorState,
@@ -84,6 +86,7 @@ export function FilesBrowser({
   const [sortBy, setSortBy] = useState<"name" | "updated" | "size">("updated");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [sortMenu, setSortMenu] = useState<{ x: number; y: number } | null>(null);
+  const [desktopSearchFocused, setDesktopSearchFocused] = useState(false);
   const toast = useToast();
   const { isDesktop, isMobile } = useDeviceClass();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -95,6 +98,8 @@ export function FilesBrowser({
   const [renamingNode, setRenamingNode] = useState<NodeModel | null>(null);
   const [renameName, setRenameName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [confirmDeleteNode, setConfirmDeleteNode] = useState<NodeModel | null>(null);
+  const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
 
   useEffect(() => {
     if (createFolderTrigger && createFolderTrigger > 0) {
@@ -276,6 +281,16 @@ export function FilesBrowser({
     void load();
   }, [visible, selection, toast, load]);
 
+  const handleRestore = useCallback(async (node: NodeModel) => {
+    try {
+      await api.post(Api.restore(node.id), {});
+      toast(t.restore, "success");
+      void load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
+    }
+  }, [load, t, toast]);
+
   // the rubber band, and the keys a file manager is expected to answer to
   const band = useMarquee({
     containerRef: listRef,
@@ -323,6 +338,13 @@ export function FilesBrowser({
       [upload],
     ),
   );
+
+  const subtitle =
+    filter === "trash"
+      ? t.trashRetentionNote({ days: 30 })
+      : filter === "shared"
+        ? t.sharePeopleHint
+        : undefined;
 
   return (
     <div
@@ -406,157 +428,203 @@ export function FilesBrowser({
                   {t.myFiles}
                 </span>
               </Tappable>
-              {trail?.map((item, index) => {
-                const isLast = index === trail.length - 1;
-                return (
-                  <span key={item.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <Icon glyph="chevron-right" size={14} color="var(--fg-muted)" />
-                    <Tappable
-                      onClick={() => (!isLast ? onNavigateTrail?.(index) : undefined)}
-                      radius={10}
-                      style={{
-                        padding: "4px 6px",
-                        color: isLast ? "var(--fg-primary)" : "var(--fg-secondary)",
-                        cursor: isLast ? "default" : "pointer",
-                      }}
-                    >
-                      <span className={isLast ? "t-title-sm" : "t-body-md"}>
-                        {item.name}
+              {(() => {
+                if (!trail || trail.length === 0) return null;
+                const visibleTrail: ({ id: string; name: string } | null)[] =
+                  trail.length > 3
+                    ? [trail[0], null, trail[trail.length - 2], trail[trail.length - 1]]
+                    : trail;
+
+                return visibleTrail.map((item, idx) => {
+                  if (item === null) {
+                    return (
+                      <span key="ellipsis" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <Icon glyph="chevron-right" size={14} color="var(--fg-muted)" />
+                        <span className="t-body-md" style={{ color: "var(--fg-secondary)", padding: "4px 2px" }}>
+                          ...
+                        </span>
                       </span>
-                    </Tappable>
-                  </span>
-                );
-              })}
+                    );
+                  }
+                  const isLast = idx === visibleTrail.length - 1;
+                  const realIndex = trail.findIndex((tr) => tr.id === item.id);
+                  return (
+                    <span key={item.id} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <Icon glyph="chevron-right" size={14} color="var(--fg-muted)" />
+                      <Tappable
+                        onClick={() => (!isLast ? onNavigateTrail?.(realIndex) : undefined)}
+                        radius={10}
+                        style={{
+                          padding: "4px 6px",
+                          color: isLast ? "var(--fg-primary)" : "var(--fg-secondary)",
+                          cursor: isLast ? "default" : "pointer",
+                        }}
+                      >
+                        <span className={isLast ? "t-title-sm" : "t-body-md"} style={{ fontWeight: isLast ? 600 : 400 }}>
+                          {item.name}
+                        </span>
+                      </Tappable>
+                    </span>
+                  );
+                });
+              })()}
             </div>
           ) : (
-            <h1
-              className="t-title-lg"
-              style={{
-                margin: 0,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {title}
-            </h1>
+            <div>
+              <h1
+                className="t-title-lg"
+                style={{
+                  margin: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {title}
+              </h1>
+              {subtitle && isDesktop && (
+                <div className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 2 }}>
+                  {subtitle}
+                </div>
+              )}
+            </div>
           )}
         </div>
         <span style={{ flex: 1, minWidth: 16 }} />
 
         {isMobile ? (
-          <span style={{ display: "inline-flex", gap: 4 }}>
-            <UtilityButton glyph="search" title={t.search} onClick={onSearch ?? (() => setSearching((s) => !s))} />
-            <UtilityButton
-              glyph="more"
-              title={t.moreActions}
-              onClick={(e) => setOverflow({ x: e.clientX, y: e.clientY })}
-            />
-          </span>
-        ) : !isDesktop ? (
-          /* tablet: the same controls as desktop but with search as an icon.
-             The wide field belongs to the desktop scaffold, and forcing it in
-             here squeezes the folder name down to an ellipsis. */
-          <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-            <UtilityButton glyph="search" title={t.search} onClick={onSearch ?? (() => setSearching((s) => !s))} />
-            <UtilityButton glyph="sort" title={t.sortBy} onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })} />
-            <UtilityButton
-              glyph={view === "grid" ? "list" : "grid"}
-              title={view === "grid" ? t.viewList : t.viewGrid}
-              onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
-            />
-            {filter === "trash" && nodes && nodes.length > 0 ? (
+          filter === "trash" ? (
+            nodes && nodes.length > 0 ? (
               <Button
                 label={t.emptyTrashAction}
                 glyph="trash"
                 variant="danger"
                 compact
                 expand={false}
-                onClick={async () => {
-                  try {
-                    await api.del(Api.trash);
-                    toast(t.emptyTrashAction, "success");
-                    void load();
-                  } catch (e) {
-                    toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
-                  }
-                }}
+                onClick={() => setConfirmEmptyTrash(true)}
               />
-            ) : (
-              <>
-                <UtilityButton glyph="folder-plus" title={t.newFolder} onClick={() => { setFolderName(""); setCreateFolderOpen(true); }} />
-                <Button label={t.upload} glyph="upload" compact expand={false} onClick={() => fileInput.current?.click()} />
-              </>
-            )}
-          </span>
-        ) : (
-          <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-            {/* the desktop scaffold carries a persistent search field, not an
-                icon: a wide window has the room, and leaving the folder to see
-                matches means losing the breadcrumb and the place you were */}
-            <span
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                height: 44,
-                padding: "0 14px",
-                width: 320,
-                background: "var(--bg-elevated)",
-                border: "1px solid var(--stroke)",
-                borderRadius: "var(--r-pill)",
-                marginInlineEnd: 4,
-              }}
-            >
-              <Icon glyph="search" size={17} color="var(--fg-secondary)" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={t.search}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  background: "transparent",
-                  border: 0,
-                  outline: "none",
-                  color: "var(--fg-primary)",
-                  font: "inherit",
-                  fontSize: 14,
-                }}
+            ) : null
+          ) : (
+            <span style={{ display: "inline-flex", gap: 4 }}>
+              <UtilityButton glyph="search" title={t.search} onClick={onSearch ?? (() => setSearching((s) => !s))} />
+              <UtilityButton
+                glyph="more"
+                title={t.moreActions}
+                onClick={(e) => setOverflow({ x: e.clientX, y: e.clientY })}
               />
             </span>
-            <UtilityButton glyph="sort" title={t.sortBy} onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })} />
-            <UtilityButton
-              glyph={view === "grid" ? "list" : "grid"}
-              title={view === "grid" ? t.viewList : t.viewGrid}
-              onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
-            />
-            {filter === "trash" && nodes && nodes.length > 0 ? (
+          )
+        ) : !isDesktop ? (
+          filter === "trash" ? (
+            nodes && nodes.length > 0 ? (
               <Button
                 label={t.emptyTrashAction}
                 glyph="trash"
                 variant="danger"
                 compact
                 expand={false}
-                onClick={async () => {
-                  try {
-                    await api.del(Api.trash);
-                    toast(t.emptyTrashAction, "success");
-                    void load();
-                  } catch (e) {
-                    toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
-                  }
-                }}
+                onClick={() => setConfirmEmptyTrash(true)}
               />
-            ) : (
-              <>
-                <UtilityButton glyph="folder-plus" title={t.newFolder} onClick={() => { setFolderName(""); setCreateFolderOpen(true); }} />
-                <Button label={t.upload} glyph="upload" compact expand={false} onClick={() => fileInput.current?.click()} />
-              </>
-            )}
-          </span>
+            ) : null
+          ) : filter === "shared" ? (
+            <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+              <UtilityButton glyph="sort" title={t.sortBy} onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })} />
+              <UtilityButton
+                glyph={view === "grid" ? "list" : "grid"}
+                title={view === "grid" ? t.viewList : t.viewGrid}
+                onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
+              />
+            </span>
+          ) : (
+            <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+              <UtilityButton glyph="search" title={t.search} onClick={onSearch ?? (() => setSearching((s) => !s))} />
+              <UtilityButton glyph="sort" title={t.sortBy} onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })} />
+              <UtilityButton
+                glyph={view === "grid" ? "list" : "grid"}
+                title={view === "grid" ? t.viewList : t.viewGrid}
+                onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
+              />
+              {filter === "none" && (
+                <UtilityButton glyph="folder" title={t.newFolder} onClick={() => { setFolderName(""); setCreateFolderOpen(true); }} />
+              )}
+              <Button label={t.upload} glyph="upload" compact expand={false} onClick={() => fileInput.current?.click()} />
+            </span>
+          )
+        ) : (
+          filter === "trash" ? (
+            nodes && nodes.length > 0 ? (
+              <Button
+                label={t.emptyTrashAction}
+                glyph="trash"
+                variant="danger"
+                compact
+                expand={false}
+                onClick={() => setConfirmEmptyTrash(true)}
+              />
+            ) : null
+          ) : filter === "shared" ? (
+            <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+              <UtilityButton glyph="sort" title={t.sortBy} onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })} />
+              <UtilityButton
+                glyph={view === "grid" ? "list" : "grid"}
+                title={view === "grid" ? t.viewList : t.viewGrid}
+                onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
+              />
+            </span>
+          ) : (
+            <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+              <span
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  height: 44,
+                  padding: "0 14px",
+                  width: 320,
+                  background: "var(--bg-elevated)",
+                  border: `1px solid ${desktopSearchFocused ? "var(--accent)" : "var(--stroke)"}`,
+                  borderRadius: "var(--r-pill)",
+                  marginInlineEnd: 4,
+                  transition: "border-color var(--d-hover) var(--ease)",
+                }}
+              >
+                <Icon glyph="search" size={17} color={desktopSearchFocused ? "var(--accent)" : "var(--fg-secondary)"} />
+                <input
+                  value={query}
+                  onFocus={() => setDesktopSearchFocused(true)}
+                  onBlur={() => setDesktopSearchFocused(false)}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={t.search}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    background: "transparent",
+                    border: 0,
+                    outline: "none",
+                    color: "var(--fg-primary)",
+                    font: "inherit",
+                    fontSize: 14,
+                  }}
+                />
+              </span>
+              <UtilityButton glyph="sort" title={t.sortBy} onClick={(e) => setSortMenu({ x: e.clientX, y: e.clientY })} />
+              <UtilityButton
+                glyph={view === "grid" ? "list" : "grid"}
+                title={view === "grid" ? t.viewList : t.viewGrid}
+                onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
+              />
+              {filter === "none" && (
+                <UtilityButton glyph="folder" title={t.newFolder} onClick={() => { setFolderName(""); setCreateFolderOpen(true); }} />
+              )}
+              <Button label={t.upload} glyph="upload" compact expand={false} onClick={() => fileInput.current?.click()} />
+            </span>
+          )
         )}
       </header>
+
+      {filter === "trash" && isMobile && (
+        <Banner glyph="recent" message={t.trashRetentionNote({ days: 30 })} tint="var(--fg-secondary)" />
+      )}
 
       {searching && (
         <div style={{ padding: "0 16px 8px" }}>
@@ -665,19 +733,43 @@ export function FilesBrowser({
         {error ? (
           <ErrorState message={error} onRetry={() => void load()} />
         ) : nodes === null ? (
-          view === "grid" ? <GridSkeleton /> : <ListSkeleton />
+          view === "grid" && filter !== "trash" ? <GridSkeleton /> : <ListSkeleton />
         ) : visible.length === 0 ? (
           <EmptyState
-            glyph={filter === "trash" ? "trash" : filter === "starred" ? "star" : "folder"}
-            title={emptyTitle(filter, t)}
-            message={emptyBody(filter, t)}
-            actionLabel={filter === "none" ? "Upload a file" : undefined}
-            onAction={filter === "none" ? () => fileInput.current?.click() : undefined}
+            glyph={
+              query
+                ? "search"
+                : filter === "trash"
+                  ? "trash"
+                  : filter === "starred"
+                    ? "star"
+                    : filter === "recent"
+                      ? "recent"
+                      : filter === "shared"
+                        ? "shared"
+                        : "folder"
+            }
+            title={query ? t.emptySearchTitle : emptyTitle(filter, t)}
+            message={query ? t.emptySearchBody : emptyBody(filter, t)}
+            actionLabel={filter === "none" && !query ? t.upload : undefined}
+            onAction={filter === "none" && !query ? () => fileInput.current?.click() : undefined}
           />
-        ) : view === "grid" ? (
+        ) : view === "grid" && filter !== "trash" ? (
           <Grid nodes={visible} selection={selection} onToggle={toggle} onActivate={activate} onMenu={setMenu} dragProps={dragProps} folderProps={folderProps} over={over} />
         ) : (
-          <List nodes={visible} selection={selection} onToggle={toggle} onActivate={activate} onMenu={setMenu} dragProps={dragProps} folderProps={folderProps} over={over} />
+          <List
+            nodes={visible}
+            selection={selection}
+            onToggle={toggle}
+            onActivate={activate}
+            onMenu={setMenu}
+            dragProps={dragProps}
+            folderProps={folderProps}
+            over={over}
+            isTrash={filter === "trash"}
+            onRestore={handleRestore}
+            onDeleteForever={(n) => setConfirmDeleteNode(n)}
+          />
         )}
       </div>
 
@@ -1047,6 +1139,52 @@ export function FilesBrowser({
           </div>
         )}
       </Dialog>
+
+      {/* Permanent delete single node confirmation */}
+      <ConfirmDialog
+        open={Boolean(confirmDeleteNode)}
+        onClose={() => setConfirmDeleteNode(null)}
+        title={t.confirmDeleteTitle}
+        message={confirmDeleteNode ? t.confirmDeleteBody({ name: confirmDeleteNode.name }) : ""}
+        confirmLabel={t.permanentlyDelete}
+        cancelLabel={t.actionCancel}
+        destructive
+        onConfirm={async () => {
+          if (!confirmDeleteNode) return;
+          try {
+            await api.del(Api.permanent(confirmDeleteNode.id));
+            toast(t.permanentlyDelete, "success");
+            setConfirmDeleteNode(null);
+            void load();
+          } catch (e) {
+            toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
+          }
+        }}
+      />
+
+      {/* Empty trash confirmation */}
+      <ConfirmDialog
+        open={confirmEmptyTrash}
+        onClose={() => setConfirmEmptyTrash(false)}
+        title={t.emptyTrashAction}
+        message={t.confirmDeleteBody({ name: t.trash })}
+        confirmLabel={t.permanentlyDelete}
+        cancelLabel={t.actionCancel}
+        destructive
+        onConfirm={async () => {
+          if (!nodes || nodes.length === 0) return;
+          for (const node of nodes) {
+            try {
+              await api.del(Api.permanent(node.id));
+            } catch {
+              // ignore individual fails
+            }
+          }
+          toast(t.emptyTrashAction, "success");
+          setConfirmEmptyTrash(false);
+          void load();
+        }}
+      />
     </div>
   );
 }
@@ -1108,9 +1246,9 @@ function Grid({
       style={{
         display: "grid",
         // sized by how wide a tile should be, not by how many should fit
-        gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
-        gap: 16,
-        padding: "20px 20px 120px",
+        gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+        gap: 13,
+        padding: "13px 13px 120px",
       }}
     >
       {nodes.map((node) => (
@@ -1364,6 +1502,9 @@ function List({
   dragProps,
   folderProps,
   over,
+  isTrash = false,
+  onRestore,
+  onDeleteForever,
 }: {
   nodes: NodeModel[];
   selection: Set<string>;
@@ -1373,26 +1514,33 @@ function List({
   dragProps: (id: string, sel: Set<string>) => Record<string, unknown>;
   folderProps: (id: string) => Record<string, unknown>;
   over: string;
+  isTrash?: boolean;
+  onRestore?: (n: NodeModel) => void;
+  onDeleteForever?: (n: NodeModel) => void;
 }) {
+  const t = useL10n();
   const kept = useKeptIds();
   return (
-    <div style={{ padding: "12px 16px 120px" }}>
+    <div style={{ padding: "13px 13px 120px" }}>
       {nodes.map((node) => {
         const cat = categoryOfNode(node);
-        const selected = selection.has(node.id);
-        const selecting = selection.size > 0;
+        const selected = !isTrash && selection.has(node.id);
+        const selecting = !isTrash && selection.size > 0;
         return (
           <div
             key={node.id}
             data-node-id={node.id}
-            {...dragProps(node.id, selection)}
-            {...(isFolder(node) ? folderProps(node.id) : {})}
+            {...(isTrash ? {} : dragProps(node.id, selection))}
+            {...(!isTrash && isFolder(node) ? folderProps(node.id) : {})}
             onClick={(e) => {
               e.stopPropagation();
+              if (isTrash) return;
               if (e.detail >= 2) onActivate(node);
               else onToggle(node.id, e.ctrlKey || e.metaKey, e.shiftKey);
             }}
-            onDoubleClick={() => onActivate(node)}
+            onDoubleClick={() => {
+              if (!isTrash) onActivate(node);
+            }}
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -1407,7 +1555,7 @@ function List({
               borderRadius: "var(--r-tile)",
               border: `1px solid ${over === node.id || selected ? "var(--accent)" : "transparent"}`,
               background: over === node.id || selected ? "rgba(76, 141, 255, 0.1)" : "transparent",
-              cursor: "pointer",
+              cursor: isTrash ? "default" : "pointer",
             }}
           >
             {selecting && (
@@ -1472,13 +1620,13 @@ function List({
                 >
                   {node.name}
                 </span>
-                {node.starred && (
+                {!isTrash && node.starred && (
                   <Icon glyph="star-filled" size={13} color="#E8935C" />
                 )}
-                {node.shared && (
+                {!isTrash && node.shared && (
                   <Icon glyph="link" size={13} color="var(--accent)" />
                 )}
-                {kept.has(node.id) && (
+                {!isTrash && kept.has(node.id) && (
                   <Icon glyph="offline" size={13} color="var(--accent)" />
                 )}
               </span>
@@ -1486,18 +1634,45 @@ function List({
                 {subtitleFor(node)}
               </span>
             </span>
-            {!selecting && (
-              <Tappable
-                radius={18}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onMenu({ x: e.clientX, y: e.clientY, node });
-                }}
-                style={{ padding: 8, color: "var(--fg-secondary)" }}
-                title="More"
-              >
-                <Icon glyph="more" size={18} />
-              </Tappable>
+            {isTrash ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <Tappable
+                  radius={18}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRestore?.(node);
+                  }}
+                  style={{ padding: 8, color: "var(--fg-secondary)" }}
+                  title={t.restore}
+                >
+                  <Icon glyph="restore" size={18} />
+                </Tappable>
+                <Tappable
+                  radius={18}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteForever?.(node);
+                  }}
+                  style={{ padding: 8, color: "var(--warning)" }}
+                  title={t.permanentlyDelete}
+                >
+                  <Icon glyph="trash" size={18} color="var(--warning)" />
+                </Tappable>
+              </div>
+            ) : (
+              !selecting && (
+                <Tappable
+                  radius={18}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMenu({ x: e.clientX, y: e.clientY, node });
+                  }}
+                  style={{ padding: 8, color: "var(--fg-secondary)" }}
+                  title={t.moreActions}
+                >
+                  <Icon glyph="more" size={18} />
+                </Tappable>
+              )
             )}
           </div>
         );

@@ -442,37 +442,25 @@ function TwoFactorSection({ onBack, embedded }: { onBack?: () => void; embedded?
   const { user } = useSession();
 
   if (user?.totp_enabled) {
-    return (
-      <Page title={t.twoFactorTitle} onBack={onBack} embedded={embedded}>
-        <div style={{ maxWidth: 640 }}>
-          {embedded && (
-            <h2 className="t-title-md" style={{ margin: "0 0 40px", fontWeight: 600 }}>
-              {t.twoFactorTitle}
-            </h2>
-          )}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              textAlign: "center",
-              padding: "40px 20px",
-            }}
-          >
-            <div style={{ marginBottom: 14 }}>
-              <Icon glyph="lock" size={40} color="var(--accent)" />
-            </div>
-            <div className="t-title-sm" style={{ fontWeight: 600, marginBottom: 6 }}>
-              {t.twoFactorOn}
-            </div>
-            <div className="t-body-md" style={{ color: "var(--fg-secondary)", maxWidth: 420 }}>
-              {t.twoFactorAlreadyOnBody}
-            </div>
-          </div>
-        </div>
-      </Page>
+    const done = (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: 320,
+          padding: 24,
+          width: "100%",
+        }}
+      >
+        <EmptyState
+          glyph="lock"
+          title={t.twoFactorOn}
+          message={t.twoFactorAlreadyOnBody}
+        />
+      </div>
     );
+    return embedded ? done : <Page title={t.twoFactorTitle} onBack={onBack}>{done}</Page>;
   }
 
   return <TwoFactorSetup required={false} onDone={onBack ?? (() => {})} onBack={onBack} embedded={embedded} />;
