@@ -8,9 +8,6 @@ import '../../widgets/shared/files_toolbar.dart';
 import '../../widgets/shared/rename_sheet.dart';
 import '../files_page.dart';
 
-/// Room the floating selection bar needs: 8 margin, 10 padding, a 20 high
-/// row, 10 padding, 8 margin.
-const double _selectionBarHeight = 56;
 
 /// Desktop files, laid out for a pointer and a wide window.
 ///
@@ -58,10 +55,17 @@ class FilesPageDesktop extends HookConsumerWidget {
           )
         : null;
 
+    final nodes = listing.maybeWhen(
+      data: (nodes) => nodes,
+      orElse: () => const <NodeModel>[],
+    );
+
     return LdDesktopScaffold(
       titleWidget: Align(
         alignment: AlignmentDirectional.centerStart,
-        child: DesktopBreadcrumb(folderId: folderId, filter: filter),
+        child: selection.isNotEmpty
+            ? SelectionActionBar(nodes: nodes)
+            : DesktopBreadcrumb(folderId: folderId, filter: filter),
       ),
       search: LdSearchField(
         controller: searchController,
@@ -114,9 +118,7 @@ class FilesPageDesktop extends HookConsumerWidget {
             Positioned.fill(
               child: FilesBrowser(
                 query: query,
-                // the bar floats over the listing, so the first row has to
-                // start below it
-                topInset: selection.isEmpty ? 0 : _selectionBarHeight,
+                topInset: 0,
                 emptyGlyph: term.isNotEmpty
                     ? LdGlyph.search
                     : switch (filter) {
@@ -140,18 +142,6 @@ class FilesPageDesktop extends HookConsumerWidget {
                       },
               ),
             ),
-            if (selection.isNotEmpty)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: focused == null ? 0 : Breakpoints.detailPaneWidth,
-                child: SelectionActionBar(
-                  nodes: listing.maybeWhen(
-                    data: (nodes) => nodes,
-                    orElse: () => const <NodeModel>[],
-                  ),
-                ),
-              ),
             if (focused != null)
               Positioned(
                 top: 0,

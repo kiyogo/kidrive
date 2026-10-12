@@ -114,6 +114,12 @@ class _SelectionBar extends ConsumerWidget {
         ),
       ),
     );
-    return SelectionActionBar(nodes: nodes);
+    return Padding(
+      padding: const EdgeInsets.all(13),
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: SelectionActionBar(nodes: nodes),
+      ),
+    );
   }
 }

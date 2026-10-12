@@ -417,7 +417,53 @@ export function FilesBrowser({
             </Tappable>
           )}
 
-          {isDesktop && filter === "none" ? (
+          {chosen.length > 0 ? (
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                minWidth: 0,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <Tappable onClick={() => setSelection(new Set())} radius={999} style={{ padding: 6, marginRight: 2 }} title={t.actionCancel}>
+                <Icon glyph="close" size={18} />
+              </Tappable>
+              <span className="t-title-lg" style={{ marginRight: 4 }}>
+                {t.selectedCount({ count: chosen.length })}
+              </span>
+              <Tappable onClick={() => setSelection(new Set(visible.map((n) => n.id)))} radius={999} style={{ padding: 6 }} title={t.actionSelect}>
+                <Icon glyph="check" size={18} />
+              </Tappable>
+              {chosen.length === 1 && (
+                <Tappable
+                  radius={999}
+                  style={{ padding: 6 }}
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setMenu({
+                      anchorRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+                      x: rect.right,
+                      y: rect.bottom,
+                      node: chosen[0],
+                    });
+                  }}
+                  title={t.moreActions}
+                >
+                  <Icon glyph="more" size={18} />
+                </Tappable>
+              )}
+              <Tappable
+                radius={999}
+                style={{ padding: 6, color: "var(--warning)" }}
+                title={t.confirmTrashTitle}
+                onClick={() => void trashChosen()}
+              >
+                <Icon glyph="trash" size={18} />
+              </Tappable>
+            </div>
+          ) : isDesktop && filter === "none" ? (
             <div
               style={{
                 display: "flex",
@@ -729,76 +775,8 @@ export function FilesBrowser({
         onChange={(e) => void upload(e.target.files)}
       />
 
-      {/* the selection bar floats over the listing, so the listing starts below it */}
-      {chosen.length > 0 && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="ld-enter"
-          style={{
-            position: "sticky",
-            top: isDesktop ? 72 : 8,
-            margin: "8px 16px -48px",
-            zIndex: 70,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "10px 12px",
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--accent)",
-            borderRadius: "var(--r-pill)",
-          }}
-        >
-          <Tappable onClick={() => setSelection(new Set())} radius={999} style={{ padding: 6 }}>
-            <Icon glyph="close" size={18} />
-          </Tappable>
-          <span className="t-title-sm" style={{ flex: 1 }}>
-            {t.selectedCount({ count: chosen.length })}
-          </span>
-          <Tappable onClick={() => setSelection(new Set(visible.map((n) => n.id)))} radius={999} style={{ padding: 6 }} title={t.actionSelect}>
-            <Icon glyph="check" size={18} />
-          </Tappable>
-          {chosen.length === 1 && (
-            <Tappable
-              radius={999}
-              style={{ padding: 6 }}
-              onClick={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                setMenu({
-                  anchorRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
-                  x: rect.right,
-                  y: rect.bottom,
-                  node: chosen[0],
-                });
-              }}
-              title={t.moreActions}
-            >
-              <Icon glyph="more" size={18} />
-            </Tappable>
-          )}
-          <Tappable
-            radius={999}
-            style={{ padding: 6, color: "var(--warning)" }}
-            title={t.confirmTrashTitle}
-            onClick={async () => {
-              for (const node of chosen) {
-                try {
-                  await api.del(Api.node(node.id));
-                } catch {
-                  /* reported below, once */
-                }
-              }
-              toast(t.confirmTrashTitle, "success");
-              setSelection(new Set());
-              void load();
-            }}
-          >
-            <Icon glyph="trash" size={18} />
-          </Tappable>
-        </div>
-      )}
-
       {/* listing */}
-      <div ref={listRef} style={{ flex: 1, minHeight: 0, paddingTop: chosen.length ? 72 : 0 }}>
+      <div ref={listRef} style={{ flex: 1, minHeight: 0 }}>
         {error ? (
           <ErrorState message={error} onRetry={() => void load()} />
         ) : nodes === null ? (

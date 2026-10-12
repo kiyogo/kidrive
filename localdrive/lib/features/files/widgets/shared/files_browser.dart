@@ -331,85 +331,81 @@ class SelectionActionBar extends ConsumerWidget {
     final canTrash =
         chosen.isNotEmpty && chosen.every((node) => node.role.canTrash);
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: context.surfaces.backgroundElevated,
-        borderRadius: LdRadii.pillRadius,
-        border: Border.all(color: LdColors.accentPrimary),
-      ),
-      child: Row(
-        children: <Widget>[
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: <Widget>[
+        LdTappable(
+          onTap: () => ref.read(selectionProvider.notifier).clear(),
+          borderRadius: BorderRadius.circular(20),
+          child: const Padding(
+            padding: EdgeInsets.all(6),
+            child: LdIcon(LdGlyph.close, size: 18),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          l10n.selectedCount(selection.length),
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(width: 10),
+        LdTappable(
+          onTap: () => ref
+              .read(selectionProvider.notifier)
+              .selectAll(nodes.map((n) => n.id)),
+          borderRadius: BorderRadius.circular(20),
+          child: const Padding(
+            padding: EdgeInsets.all(6),
+            child: LdIcon(LdGlyph.check, size: 18),
+          ),
+        ),
+        // the full menu for one item, which a touch screen has no other way
+        // to reach: long press starts a selection, and there is no right
+        // click. It only makes sense for a single item, since rename, share
+        // and the rest each act on one node.
+        if (chosen.length == 1) ...<Widget>[
+          const SizedBox(width: 4),
           LdTappable(
-            onTap: () => ref.read(selectionProvider.notifier).clear(),
+            onTap: () => showNodeActions(context, ref, chosen.first, Offset.zero),
             borderRadius: BorderRadius.circular(20),
             child: const Padding(
               padding: EdgeInsets.all(6),
-              child: LdIcon(LdGlyph.close, size: 18),
+              child: LdIcon(LdGlyph.more, size: 18),
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              l10n.selectedCount(selection.length),
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-          ),
-          LdTappable(
-            onTap: () => ref
-                .read(selectionProvider.notifier)
-                .selectAll(nodes.map((n) => n.id)),
-            borderRadius: BorderRadius.circular(20),
-            child: const Padding(
-              padding: EdgeInsets.all(6),
-              child: LdIcon(LdGlyph.check, size: 18),
-            ),
-          ),
-          // the full menu for one item, which a touch screen has no other way
-          // to reach: long press starts a selection, and there is no right
-          // click. It only makes sense for a single item, since rename, share
-          // and the rest each act on one node.
-          if (chosen.length == 1)
-            LdTappable(
-              onTap: () => showNodeActions(context, ref, chosen.first, Offset.zero),
-              borderRadius: BorderRadius.circular(20),
-              child: const Padding(
-                padding: EdgeInsets.all(6),
-                child: LdIcon(LdGlyph.more, size: 18),
-              ),
-            ),
-          if (canTrash)
-            LdTappable(
-              onTap: () async {
-                final confirmed = await LdBottomSheet.confirm(
-                  context,
-                  title: l10n.confirmTrashTitle,
-                  message: l10n.confirmTrashBody(
-                    l10n.selectedCount(chosen.length),
-                  ),
-                  confirmLabel: l10n.actionDelete,
-                  cancelLabel: l10n.actionCancel,
-                  destructive: true,
-                );
-                if (!confirmed || !context.mounted) return;
-                await ref
-                    .read(filesControllerProvider.notifier)
-                    .trashMany(chosen);
-                ref.read(selectionProvider.notifier).clear();
-              },
-              borderRadius: BorderRadius.circular(20),
-              child: const Padding(
-                padding: EdgeInsets.all(6),
-                child: LdIcon(
-                  LdGlyph.trash,
-                  size: 18,
-                  color: LdColors.accentWarning,
-                ),
-              ),
-            ),
         ],
-      ),
+        if (canTrash) ...<Widget>[
+          const SizedBox(width: 4),
+          LdTappable(
+            onTap: () async {
+              final confirmed = await LdBottomSheet.confirm(
+                context,
+                title: l10n.confirmTrashTitle,
+                message: l10n.confirmTrashBody(
+                  l10n.selectedCount(chosen.length),
+                ),
+                confirmLabel: l10n.actionDelete,
+                cancelLabel: l10n.actionCancel,
+                destructive: true,
+              );
+              if (!confirmed || !context.mounted) return;
+              await ref
+                  .read(filesControllerProvider.notifier)
+                  .trashMany(chosen);
+              ref.read(selectionProvider.notifier).clear();
+            },
+            borderRadius: BorderRadius.circular(20),
+            child: const Padding(
+              padding: EdgeInsets.all(6),
+              child: LdIcon(
+                LdGlyph.trash,
+                size: 18,
+                color: LdColors.accentWarning,
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
