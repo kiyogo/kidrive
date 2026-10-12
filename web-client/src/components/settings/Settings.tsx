@@ -197,7 +197,7 @@ export function SettingsScreen() {
                   gap: 10,
                   width: "100%",
                   color: isSelected ? "var(--fg-primary)" : "var(--fg-secondary)",
-                  fontWeight: isSelected ? 600 : 400,
+                  fontWeight: 400,
                   cursor: "pointer",
                 }}
               >

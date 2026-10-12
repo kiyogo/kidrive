@@ -84,7 +84,7 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
             }}
           >
             <Icon glyph={opt.glyph} size={18} color={active ? "var(--accent)" : "var(--fg-secondary)"} />
-            <span className="t-body-md" style={{ flex: 1, minWidth: 0, fontWeight: active ? 600 : 400 }}>
+            <span className="t-body-md" style={{ flex: 1, minWidth: 0, fontWeight: 400 }}>
               {opt.label}
             </span>
             {active && <Icon glyph="check" size={18} color="var(--accent)" />}

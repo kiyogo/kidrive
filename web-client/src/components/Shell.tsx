@@ -217,7 +217,7 @@ export function Shell({
                 }}
               >
                 <Icon glyph={item.glyph} size={19} color={active ? "var(--accent)" : "var(--fg-secondary)"} />
-                <span className="t-body-lg" style={{ fontWeight: active ? 600 : 400, flex: 1 }}>
+                <span className="t-body-lg" style={{ fontWeight: 400, flex: 1 }}>
                   {String(t[item.key])}
                 </span>
               </Tappable>
@@ -268,7 +268,7 @@ function BottomItem({
       <span
         style={{
           fontSize: 11.5,
-          fontWeight: active ? 700 : 500,
+          fontWeight: 500,
           color,
           letterSpacing: 0.1,
           lineHeight: 1.2,
