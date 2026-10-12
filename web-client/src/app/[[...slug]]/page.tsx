@@ -179,7 +179,7 @@ function parsePathToSection(
   const first = parts[0]?.toLowerCase() || "";
 
   if (first === "storage") return { section: "storage" };
-  if (first === "gallery" || first === "image") return { section: "gallery" };
+  if (first === "image" || first === "gallery") return { section: "image" };
   if (first === "videos") return { section: "videos" };
   if (first === "shared") return { section: "shared", folderId: parts[1] };
   if (first === "recent") return { section: "recent" };
@@ -226,8 +226,12 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
   }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined" && window.location.pathname === "/") {
-      window.history.replaceState(null, "", "/files");
+    if (typeof window !== "undefined") {
+      if (window.location.pathname === "/") {
+        window.history.replaceState(null, "", "/files");
+      } else if (window.location.pathname === "/gallery") {
+        window.history.replaceState(null, "", "/image");
+      }
     }
   }, []);
 
@@ -262,7 +266,7 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
 
   const titles: Record<Section, string> = {
     files: current.name,
-    gallery: t.gallery,
+    image: t.gallery,
     videos: t.videos,
     shared: t.sharedWithMe,
     recent: t.recent,
@@ -305,7 +309,7 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
         <StorageScreen />
       ) : section === "activity" ? (
         <ActivityScreen />
-      ) : section === "gallery" ? (
+      ) : section === "image" ? (
         <GalleryScreen onOpen={openPreview} />
       ) : section === "videos" ? (
         <VideosScreen onOpen={openPreview} />

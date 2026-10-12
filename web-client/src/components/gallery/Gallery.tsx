@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useL10n } from "@/lib/l10n";
 import { Icon } from "@/components/Icon";
-import { EmptyState, ErrorState, GridSkeleton, SizeSlider, Tappable, useDeviceClass } from "@/components/ui";
+import { Button, EmptyState, ErrorState, GridSkeleton, SizeSlider, Tappable, useDeviceClass } from "@/components/ui";
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { bytes } from "@/lib/format";
@@ -11,11 +11,8 @@ import type { NodeModel } from "@/lib/models";
 import { transfers, type Transfer } from "@/lib/upload";
 
 /**
- * The gallery: every photo and video in one timeline, grouped by month and
- * ordered by when it was taken rather than when it was uploaded.
- *
- * The grid is masonry, so a panorama stays a panorama instead of being cropped
- * to a square. That is the whole reason it is not the files grid with a filter.
+ * The image gallery: strictly photos/images only in one timeline.
+ * Calls `/api/v1/nodes?filter=image` and strictly renders images.
  */
 export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeModel[]) => void }) {
   const t = useL10n();
@@ -23,21 +20,47 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
   const [nodes, setNodes] = useState<NodeModel[] | null>(null);
   const [error, setError] = useState("");
   const [columns, setColumns] = useState(5);
+  const [sortBy, setSortBy] = useState<"taken" | "created" | "updated" | "name" | "size">("taken");
+  const [sortDesc, setSortDesc] = useState(true);
 
   useEffect(() => {
     void (async () => {
       try {
-        const data = await api.get<{ nodes: NodeModel[] }>(Api.nodes, { filter: "media" });
-        setNodes(data?.nodes ?? []);
+        const data = await api.get<{ nodes: NodeModel[] }>(Api.nodes, {
+          filter: "image",
+          sort: sortBy,
+          order: sortDesc ? "desc" : "asc",
+        });
+        const imagesOnly = (data?.nodes ?? []).filter((n) => n.mime_type?.startsWith("image/"));
+        setNodes(imagesOnly);
       } catch (e) {
         setError(e instanceof Error ? e.message : t.errorUnexpectedBody);
       }
     })();
-  }, [t]);
+  }, [t, sortBy, sortDesc]);
 
-  const photoCount = (nodes ?? []).filter((n) => !n.mime_type?.startsWith("video/")).length;
-  const videoCount = (nodes ?? []).filter((n) => n.mime_type?.startsWith("video/")).length;
-  const groups = groupByMonth(nodes ?? []);
+  const count = nodes?.length ?? 0;
+
+  const sortLabel = (() => {
+    switch (sortBy) {
+      case "taken":
+        return t.gallerySortTaken;
+      case "created":
+        return t.gallerySortAdded;
+      case "updated":
+        return t.gallerySortModified;
+      case "name":
+        return t.gallerySortName;
+      case "size":
+        return t.gallerySortSize;
+      default:
+        return t.gallerySortTaken;
+    }
+  })();
+
+  const toggleSort = () => {
+    setSortDesc((d) => !d);
+  };
 
   return (
     <div style={{ minHeight: "100dvh" }}>
@@ -60,13 +83,23 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
             {t.gallery}
           </h1>
           <div style={{ fontSize: 13, color: "var(--fg-secondary)", marginTop: 2 }}>
-            {t.gallerySummary({ photos: photoCount, videos: videoCount })}
+            {t.gallerySummary({ photos: count, videos: 0 })}
           </div>
         </div>
 
-        {isDesktop && (
-          <SizeSlider columns={columns} onChanged={setColumns} steps={[3, 4, 5, 6, 8]} />
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {isDesktop && (
+            <SizeSlider columns={columns} onChanged={setColumns} steps={[3, 4, 5, 6, 8]} />
+          )}
+          <Button
+            label={sortLabel}
+            glyph={sortDesc ? "arrow-down" : "arrow-up"}
+            variant="secondary"
+            compact
+            expand={false}
+            onClick={toggleSort}
+          />
+        </div>
       </header>
 
       {error ? (
@@ -77,121 +110,58 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
         <EmptyState glyph="gallery" title={t.galleryEmptyTitle} message={t.galleryEmptyBody} />
       ) : (
         <div style={{ padding: "16px 24px 120px" }}>
-          {groups.map(([month, items]) => (
-            <section key={month} style={{ marginBottom: 32 }}>
-              <h2 className="t-label-md" style={{ color: "var(--fg-secondary)", margin: "0 0 12px", fontWeight: 600 }}>
-                {month}
-              </h2>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: isDesktop ? `repeat(${columns}, 1fr)` : "repeat(auto-fill, minmax(170px, 1fr))",
-                  gap: 14,
-                }}
-              >
-                {items.map((n) => {
-                  const isVid = Boolean(n.mime_type?.startsWith("video/"));
-                  return (
-                    <Tappable
-                      key={n.id}
-                      onClick={() => onOpen(n, items)}
-                      radius={14}
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        aspectRatio: "1 / 1",
-                        overflow: "hidden",
-                        border: "1px solid var(--stroke)",
-                        background: isVid ? "#13161C" : "var(--bg-elevated)",
-                        position: "relative",
-                      }}
-                    >
-                      {n.has_thumbnail ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={api.media(Api.thumbnail(n.id))}
-                          alt={n.name}
-                          loading="lazy"
-                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                        />
-                      ) : (
-                        <span style={{ display: "grid", placeItems: "center", height: "100%" }}>
-                          <Icon glyph={isVid ? "video" : "image"} size={36} color="#4CC6C6" />
-                        </span>
-                      )}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isDesktop ? `repeat(${columns}, 1fr)` : "repeat(auto-fill, minmax(170px, 1fr))",
+              gap: 14,
+            }}
+          >
+            {nodes.map((n) => {
+              const ratio =
+                n.image_width && n.image_height && n.image_height > 0
+                  ? Math.min(Math.max(n.image_width / n.image_height, 0.3), 3.0)
+                  : 1;
 
-                      {/* Video Center Play Overlay */}
-                      {isVid && (
-                        <div
-                          style={{
-                            position: "absolute",
-                            inset: 0,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            pointerEvents: "none",
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: 40,
-                              height: 40,
-                              borderRadius: "50%",
-                              background: "rgba(0, 0, 0, 0.62)",
-                              border: "1px solid rgba(255, 255, 255, 0.5)",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                          >
-                            <Icon glyph="play" size={18} strokeWidth={2.4} color="#FFFFFF" />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Video Bottom-Left Play Badge matching media_1791702934970.png */}
-                      {isVid && (
-                        <span
-                          style={{
-                            position: "absolute",
-                            insetInlineStart: 8,
-                            bottom: 8,
-                            background: "rgba(255, 255, 255, 0.25)",
-                            borderRadius: 999,
-                            width: 24,
-                            height: 24,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: "#FFFFFF",
-                          }}
-                        >
-                          <Icon glyph="play" size={12} strokeWidth={2.6} color="#FFFFFF" />
-                        </span>
-                      )}
-                    </Tappable>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
+              return (
+                <Tappable
+                  key={n.id}
+                  onClick={() => onOpen(n, nodes)}
+                  radius={14}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    aspectRatio: `${ratio}`,
+                    overflow: "hidden",
+                    border: "1px solid var(--stroke)",
+                    background: "var(--bg-elevated)",
+                    position: "relative",
+                  }}
+                >
+                  {n.has_thumbnail ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={api.media(Api.thumbnail(n.id))}
+                      alt={n.name}
+                      loading="lazy"
+                      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                    />
+                  ) : (
+                    <span style={{ display: "grid", placeItems: "center", height: "100%" }}>
+                      <Icon glyph="image" size={36} color="#4CC6C6" />
+                    </span>
+                  )}
+                </Tappable>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-/** Grouped by the month it was taken, falling back to when it arrived. */
-function groupByMonth(nodes: NodeModel[]): [string, NodeModel[]][] {
-  const map = new Map<string, NodeModel[]>();
-  const sorted = [...nodes].sort((a, b) => (b.taken_at || b.created_at) - (a.taken_at || a.created_at));
-  for (const n of sorted) {
-    const when = new Date(n.taken_at || n.created_at);
-    const key = when.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
-    map.set(key, [...(map.get(key) ?? []), n]);
-  }
-  return [...map.entries()];
-}
+export const ImageScreen = GalleryScreen;
 
 /* -------------------------------------------------------------- transfers */
 

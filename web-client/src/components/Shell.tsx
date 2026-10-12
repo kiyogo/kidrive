@@ -9,7 +9,7 @@ import { useSession } from "@/lib/session";
 
 export type Section =
   | "files"
-  | "gallery"
+  | "image"
   | "videos"
   | "shared"
   | "recent"
@@ -26,7 +26,7 @@ export type Section =
    happened to be current then. */
 const primary: { id: Section; key: keyof Strings; glyph: Glyph }[] = [
   { id: "files", key: "myFiles", glyph: "home" },
-  { id: "gallery", key: "gallery", glyph: "gallery" },
+  { id: "image", key: "gallery", glyph: "image" },
   { id: "videos", key: "videos", glyph: "video" },
   { id: "shared", key: "sharedWithMe", glyph: "shared" },
   { id: "recent", key: "recent", glyph: "recent" },
@@ -39,7 +39,7 @@ const primary: { id: Section; key: keyof Strings; glyph: Glyph }[] = [
 /** What the bottom bar shows on a phone, where eight destinations do not fit. */
 const compact: { id: Section; key: keyof Strings; glyph: Glyph }[] = [
   { id: "files", key: "navHome", glyph: "home" },
-  { id: "gallery", key: "gallery", glyph: "gallery" },
+  { id: "image", key: "gallery", glyph: "image" },
   { id: "shared", key: "navShared", glyph: "shared" },
   { id: "settings", key: "navSettings", glyph: "settings" },
 ];
