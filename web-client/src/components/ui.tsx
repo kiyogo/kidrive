@@ -1178,7 +1178,7 @@ export function Menu({
   open: boolean;
   x?: number;
   y?: number;
-  anchorRect?: { left: number; right: number; top: number; bottom: number };
+  anchorRect?: { left: number; right: number; top: number; bottom: number } | null;
   title?: string;
   subtitle?: string;
   onClose: () => void;
@@ -1257,7 +1257,8 @@ export function Menu({
   let posY = y ?? 0;
 
   if (anchorRect) {
-    posX = anchorRect.right;
+    const isRightHalf = anchorRect.left > winW / 2;
+    posX = isRightHalf ? anchorRect.right : anchorRect.left;
     posY = anchorRect.bottom;
   }
 

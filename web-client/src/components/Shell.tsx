@@ -3,7 +3,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { useL10n, type Strings } from "@/lib/l10n";
 import { Icon, type Glyph } from "./Icon";
-import { Sheet, Tappable, useDeviceClass } from "./ui";
+import { Menu, Sheet, Tappable, useDeviceClass } from "./ui";
 import { bytes, percent } from "@/lib/format";
 import { useSession } from "@/lib/session";
 
@@ -64,7 +64,7 @@ export function Shell({
   const { isDesktop } = useDeviceClass();
   const { user } = useSession();
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
-  const [desktopCreateOpen, setDesktopCreateOpen] = useState(false);
+  const [createMenuAnchor, setCreateMenuAnchor] = useState<{ left: number; right: number; top: number; bottom: number } | null>(null);
   const shellFileInput = useRef<HTMLInputElement>(null);
   const pick = () => shellFileInput.current?.click();
 
@@ -181,9 +181,14 @@ export function Shell({
           flexShrink: 0,
         }}
       >
-        <div style={{ padding: "0 20px 20px 20px", position: "relative" }}>
+        <div style={{ padding: "0 20px 20px 20px" }}>
           <Tappable
-            onClick={() => setDesktopCreateOpen((o) => !o)}
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              setCreateMenuAnchor((prev) =>
+                prev ? null : { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+              );
+            }}
             radius={24}
             style={{
               height: 38,
@@ -200,74 +205,33 @@ export function Shell({
             <span className="t-label-lg" style={{ color: "#FFFFFF" }}>{t.upload}</span>
           </Tappable>
 
-          {desktopCreateOpen && (
-            <>
-              <div
-                onClick={() => setDesktopCreateOpen(false)}
-                style={{
-                  position: "fixed",
-                  inset: 0,
-                  zIndex: 90,
-                }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  left: 20,
-                  right: 20,
-                  top: 44,
-                  zIndex: 100,
-                  background: "var(--bg-elevated)",
-                  border: "1px solid var(--stroke)",
-                  borderRadius: "var(--r-tile)",
-                  boxShadow: "var(--nav-shadow)",
-                  padding: "6px 0",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 2,
-                }}
-              >
-                <Tappable
-                  onClick={() => {
-                    setDesktopCreateOpen(false);
-                    onCreateFolder?.();
-                  }}
-                  radius={10}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 14,
-                    padding: "11px 14px",
-                    color: "var(--fg-primary)",
-                  }}
-                >
-                  <Icon glyph="folder" size={19} color="var(--fg-primary)" />
-                  <span className="t-body-lg" style={{ fontWeight: 400, flex: 1 }}>
-                    {t.newFolder}
-                  </span>
-                </Tappable>
-                <Tappable
-                  onClick={() => {
-                    setDesktopCreateOpen(false);
-                    pick();
-                  }}
-                  radius={10}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 14,
-                    padding: "11px 14px",
-                    color: "var(--fg-primary)",
-                  }}
-                >
-                  <Icon glyph="upload" size={19} color="var(--fg-primary)" />
-                  <span className="t-body-lg" style={{ fontWeight: 400, flex: 1 }}>
-                    {t.uploadFile}
-                  </span>
-                </Tappable>
-              </div>
-            </>
-          )}
+          <Menu
+            open={Boolean(createMenuAnchor)}
+            anchorRect={createMenuAnchor}
+            onClose={() => setCreateMenuAnchor(null)}
+            items={[
+              ...(onCreateFolder
+                ? [
+                    {
+                      label: t.newFolder,
+                      glyph: "folder" as const,
+                      onClick: () => {
+                        setCreateMenuAnchor(null);
+                        onCreateFolder();
+                      },
+                    },
+                  ]
+                : []),
+              {
+                label: t.uploadFile,
+                glyph: "upload" as const,
+                onClick: () => {
+                  setCreateMenuAnchor(null);
+                  pick();
+                },
+              },
+            ]}
+          />
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "0 12px", display: "flex", flexDirection: "column", gap: 4 }}>
