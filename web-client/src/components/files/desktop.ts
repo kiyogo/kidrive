@@ -73,6 +73,7 @@ export function useMarquee({
       from.current = { x: e.clientX, y: e.clientY };
       dragged.current = false;
       additive.current = e.ctrlKey || e.metaKey;
+      window.getSelection()?.removeAllRanges();
     };
 
     const move = (e: PointerEvent) => {
@@ -82,6 +83,8 @@ export function useMarquee({
       const dy = e.clientY - start.y;
       if (!dragged.current && Math.hypot(dx, dy) < SLOP) return;
       dragged.current = true;
+      e.preventDefault();
+      window.getSelection()?.removeAllRanges();
 
       const rect: Band = {
         x: Math.min(start.x, e.clientX),
@@ -108,20 +111,29 @@ export function useMarquee({
       from.current = null;
       dragged.current = false;
       setBand(null);
+      window.getSelection()?.removeAllRanges();
       // a click on nothing means "never mind". Ctrl is excluded because
       // holding it is how somebody adds to a selection, not clears it.
       if (!wasDrag && !wasAdditive) onEmptyClick();
+    };
+
+    const onSelectStart = (e: Event) => {
+      if (from.current || dragged.current) {
+        e.preventDefault();
+      }
     };
 
     host.addEventListener("pointerdown", down);
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
+    window.addEventListener("selectstart", onSelectStart);
     return () => {
       host.removeEventListener("pointerdown", down);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
+      window.removeEventListener("selectstart", onSelectStart);
     };
   }, [containerRef, itemSelector, onChange, onEmptyClick, enabled]);
 

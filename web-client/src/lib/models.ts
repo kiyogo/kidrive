@@ -76,12 +76,19 @@ export interface ShareModel {
 export interface LibraryModel {
   id: string;
   name: string;
-  path: string;
+  kind?: string;
+  path?: string;
   is_default: boolean;
-  online: boolean;
+  is_external?: boolean;
+  status?: string;
+  online?: boolean;
   removable?: boolean;
+  bytes_used?: number;
   total_bytes?: number;
   free_bytes?: number;
+  stats_known?: boolean;
+  members?: string[];
+  created_at?: number;
 }
 
 /** A signed-in device, as the server's session list sends it. */

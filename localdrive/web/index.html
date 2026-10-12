@@ -132,6 +132,26 @@
       overflow: hidden;
     }
 
+    *, *::before, *::after {
+      -webkit-user-select: none !important;
+      user-select: none !important;
+    }
+
+    input, textarea {
+      -webkit-user-select: text !important;
+      user-select: text !important;
+    }
+
+    ::selection {
+      background: transparent !important;
+      color: inherit !important;
+    }
+
+    input::selection, textarea::selection {
+      background: #4C8DFF !important;
+      color: #FFFFFF !important;
+    }
+
     /* Flutter CanvasKit host — ensure the root host element fills the viewport */
     flt-glass-pane,
     flutter-view {

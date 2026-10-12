@@ -296,12 +296,22 @@ export function ConnectScreen({ onBack }: { onBack?: () => void }) {
 
 /* --------------------------------------------------------------- sign in */
 
-export function SignInScreen() {
+export function SignInScreen({
+  createMode = false,
+  inviteCode: initialInviteCode = "",
+  onToggleMode,
+}: {
+  createMode?: boolean;
+  inviteCode?: string;
+  onToggleMode?: (createMode: boolean) => void;
+} = {}) {
   const t = useL10n();
-  const { signIn, server, forgetServer } = useSession();
+  const { signIn, register, server, forgetServer } = useSession();
   const toast = useToast();
+  const [creating, setCreating] = useState(createMode || Boolean(initialInviteCode));
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState(initialInviteCode);
   const [totp, setTotp] = useState("");
   const [needsTotp, setNeedsTotp] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -317,7 +327,11 @@ export function SignInScreen() {
     setBusy(true);
     setError("");
     try {
-      await signIn(username.trim(), password, needsTotp ? totp.trim() : undefined);
+      if (creating) {
+        await register(username.trim(), password, inviteCode.trim() || undefined);
+      } else {
+        await signIn(username.trim(), password, needsTotp ? totp.trim() : undefined);
+      }
     } catch (e) {
       const err = e as { code?: string; message?: string };
       if (!HIDE_TWO_FACTOR && (err.code === "totp_required" || err.code === "totp_invalid")) {
@@ -332,21 +346,31 @@ export function SignInScreen() {
     }
   };
 
+  const toggle = () => {
+    const next = !creating;
+    setCreating(next);
+    setError("");
+    onToggleMode?.(next);
+  };
+
   return (
     <Scaffold actions={<LanguageToggle />}>
       <div className="ld-enter" style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <Mark size={72} />
         <h1 className="t-headline" style={{ margin: "26px 0 8px", textAlign: "center" }}>
-          {t.signInTitle}
+          {creating ? t.createAccountTitle : t.signInTitle}
         </h1>
         <p className="t-body-md" style={{ color: "var(--fg-secondary)", margin: "0 0 26px", textAlign: "center" }}>
-          {t.signInBody({ serverName: name })}
+          {creating ? t.createAccountBody : t.signInBody({ serverName: name })}
         </p>
 
         <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
           <TextField value={username} onChange={setUsername} label={t.usernameLabel} hint={t.usernameHint} glyph="user" autoFocus onEnter={go} dir="ltr" />
-          <TextField value={password} onChange={setPassword} label={t.passwordLabel} hint={t.passwordHintExisting} type="password" glyph="lock" onEnter={go} dir="ltr" />
-          {!HIDE_TWO_FACTOR && needsTotp && (
+          <TextField value={password} onChange={setPassword} label={t.passwordLabel} hint={creating ? t.passwordHintNew : t.passwordHintExisting} type="password" glyph="lock" onEnter={go} dir="ltr" />
+          {creating && (
+            <TextField value={inviteCode} onChange={setInviteCode} label={t.inviteCodeLabel} hint={t.inviteCodeHint} glyph="lock" onEnter={go} dir="ltr" />
+          )}
+          {!creating && !HIDE_TWO_FACTOR && needsTotp && (
             <TextField value={totp} onChange={setTotp} label={t.twoFactorCode} hint={t.twoFactorHint} glyph="lock" autoFocus onEnter={go} dir="ltr" />
           )}
           {error && (
@@ -354,9 +378,16 @@ export function SignInScreen() {
               {error}
             </div>
           )}
-          <Button label={t.signIn} onClick={go} busy={busy} />
-          <Tappable onClick={forgetServer} radius={10} style={{ padding: 10, alignSelf: "center" }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "var(--accent)" }}>
+          <Button label={creating ? t.createAccount : t.signIn} onClick={go} busy={busy} />
+          
+          <Tappable onClick={toggle} radius={10} style={{ padding: 8, alignSelf: "center" }}>
+            <span className="t-label-lg" style={{ color: "var(--accent)" }}>
+              {creating ? t.signIn : t.createAccount}
+            </span>
+          </Tappable>
+
+          <Tappable onClick={forgetServer} radius={10} style={{ padding: 6, alignSelf: "center" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "var(--fg-secondary)" }}>
               <Icon glyph="server" size={17} />
               <span className="t-label-lg">{t.settingsSwitchNode}</span>
             </span>

@@ -164,19 +164,20 @@ export function Shell({
   }
 
   return (
-    <div style={{ minHeight: "100dvh", display: "flex" }}>
+    <div style={{ height: "100dvh", maxHeight: "100dvh", width: "100%", maxWidth: "100vw", display: "flex", overflow: "hidden" }}>
       <input ref={shellFileInput} type="file" multiple hidden onChange={(e) => { onUpload(e.target.files); e.target.value = ""; }} />
       <aside
         style={{
           width: 248,
-          flex: "none",
+          flex: "0 0 248px",
+          minWidth: 248,
+          maxWidth: 248,
           borderInlineEnd: "1px solid var(--stroke)",
           padding: "24px 0 20px 0",
           display: "flex",
           flexDirection: "column",
-          position: "sticky",
-          top: 0,
           height: "100dvh",
+          flexShrink: 0,
         }}
       >
         <div style={{ padding: "0 20px 20px 20px" }}>
@@ -239,7 +240,7 @@ export function Shell({
         )}
       </aside>
 
-      <main style={{ flex: 1, minWidth: 0 }}>{children}</main>
+      <main style={{ flex: 1, minWidth: 0, height: "100dvh", overflowY: "auto", overflowX: "hidden" }}>{children}</main>
     </div>
   );
 }

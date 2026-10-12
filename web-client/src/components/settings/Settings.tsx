@@ -7,6 +7,7 @@ import {
   Button,
   ConfirmDialog,
   EmptyState,
+  LayeredBadge,
   ListSkeleton,
   RadioRow,
   SettingGroup,
@@ -60,14 +61,36 @@ const sections: { id: SectionId; key: keyof Strings; glyph: Glyph; adminOnly?: b
   { id: "about", key: "settingsAbout", glyph: "info" },
 ];
 
-export function SettingsScreen() {
+export function SettingsScreen({
+  initialSection,
+  onSelectSection,
+}: {
+  initialSection?: string;
+  onSelectSection?: (id: string) => void;
+} = {}) {
   const t = useL10n();
   const { user, signOut, locale } = useSession();
   const { theme } = useTheme();
   const { isDesktop } = useDeviceClass();
-  const [mobileSection, setMobileSection] = useState<SectionId>("root");
-  const [desktopSection, setDesktopSection] = useState<SectionId>("account");
+  const [mobileSection, setMobileSection] = useState<SectionId>(
+    (initialSection as SectionId) || "root",
+  );
+  const [desktopSection, setDesktopSection] = useState<SectionId>(
+    (initialSection as SectionId) || "account",
+  );
   const isAdmin = user?.role === "admin";
+
+  useEffect(() => {
+    if (initialSection && initialSection !== "root") {
+      setDesktopSection(initialSection as SectionId);
+      setMobileSection(initialSection as SectionId);
+    }
+  }, [initialSection]);
+
+  const selectSection = (id: SectionId) => {
+    setDesktopSection(id);
+    onSelectSection?.(id);
+  };
 
   const visibleSections = sections
     .filter((s) => !s.adminOnly || isAdmin)
@@ -142,7 +165,7 @@ export function SettingsScreen() {
 
   // Desktop view: LdDesktopScaffold with 64px header and LdMasterDetail
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: "100dvh" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflowX: "hidden" }}>
       <header
         style={{
           height: 64,
@@ -168,17 +191,21 @@ export function SettingsScreen() {
         />
       </header>
 
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+      <div style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
         <aside
           style={{
             width: 220,
+            flex: "0 0 220px",
+            minWidth: 220,
+            maxWidth: 220,
+            flexShrink: 0,
             padding: 13,
             borderRight: "1px solid var(--stroke)",
             overflowY: "auto",
+            overflowX: "hidden",
             display: "flex",
             flexDirection: "column",
             gap: 2,
-            flex: "none",
           }}
         >
           {visibleSections.map((s) => {
@@ -186,7 +213,7 @@ export function SettingsScreen() {
             return (
               <Tappable
                 key={s.id}
-                onClick={() => setDesktopSection(s.id)}
+                onClick={() => selectSection(s.id)}
                 radius={14}
                 style={{
                   padding: "10px 12px",
@@ -214,7 +241,7 @@ export function SettingsScreen() {
           })}
         </aside>
 
-        <main style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+        <main style={{ flex: 1, minWidth: 0, overflowY: "auto", overflowX: "hidden", padding: 24 }}>
           <div style={{ maxWidth: 640 }}>
             <Detail section={desktopSection} embedded />
           </div>
@@ -1328,98 +1355,231 @@ function DownloadsSection({ onBack, embedded }: { onBack?: () => void; embedded?
 
 export function StorageScreen() {
   const t = useL10n();
-  const [items, setItems] = useState<LibraryModel[] | null>(null);
   const { user } = useSession();
+  const isAdmin = user?.role === "admin";
+  const { isDesktop } = useDeviceClass();
+  const [data, setData] = useState<{
+    libraries: LibraryModel[];
+    total_used: number;
+    total_free: number;
+    total_bytes: number;
+  } | null>(null);
+  const [drives, setDrives] = useState<{ drives: unknown[]; helper_available: boolean } | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await api.get<{
+        libraries: LibraryModel[];
+        total_used?: number;
+        total_free?: number;
+        total_bytes?: number;
+      }>(Api.libraries);
+      setData({
+        libraries: res?.libraries ?? [],
+        total_used: res?.total_used ?? 0,
+        total_free: res?.total_free ?? 0,
+        total_bytes: res?.total_bytes ?? 0,
+      });
+    } catch {
+      setData({ libraries: [], total_used: 0, total_free: 0, total_bytes: 0 });
+    }
+
+    if (isAdmin) {
+      try {
+        const dRes = await api.get<{ drives: unknown[]; helper_available: boolean }>(`${Api.prefix}/drives`);
+        setDrives(dRes ?? { drives: [], helper_available: false });
+      } catch {
+        setDrives({ drives: [], helper_available: false });
+      }
+    }
+  }, [isAdmin]);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const data = await api.get<{ libraries: LibraryModel[] }>(Api.libraries);
-        setItems(data?.libraries ?? []);
-      } catch {
-        setItems([]);
-      }
-    })();
-  }, []);
+    void load();
+  }, [load]);
+
+  if (!data) {
+    return (
+      <div style={{ padding: 24 }}>
+        <ListSkeleton rows={3} />
+      </div>
+    );
+  }
+
+  const used = isAdmin || !user ? data.total_used : user.quota_bytes_used;
+  const total = isAdmin || !user ? data.total_bytes : (user.quota_bytes || data.total_bytes);
+  const caption = isAdmin || !user ? t.storageTotal : t.storageYours;
+  const usedPercent = total > 0 ? (used / total) * 100 : 0;
 
   return (
-    <Page title={t.storage}>
-      {user && (
-        <div
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflowY: "auto", overflowX: "hidden" }}>
+      {/* 64px header matching DesktopScaffold */}
+      {isDesktop ? (
+        <header
           style={{
-            padding: 18,
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--stroke)",
-            borderRadius: "var(--r-card)",
-            marginBottom: 20,
+            height: 64,
+            padding: "0 16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            borderBottom: "1px solid var(--stroke)",
+            background: "var(--bg-primary)",
+            flex: "none",
           }}
         >
-          <div className="t-title-sm" style={{ marginBottom: 12 }}>
-            {user.quota_bytes
-              ? t.storageUsedOf({ used: bytes(user.quota_bytes_used), total: bytes(user.quota_bytes) })
-              : t.sidebarStorageUsed({ used: bytes(user.quota_bytes_used) })}
+          <h1 className="t-title-lg" style={{ margin: 0 }}>
+            {t.storage}
+          </h1>
+          <Tappable onClick={() => void load()} radius={999} style={{ padding: 8 }} title={t.actionRefresh}>
+            <Icon glyph="refresh" size={18} />
+          </Tappable>
+        </header>
+      ) : null}
+
+      <div style={{ padding: isDesktop ? 13 : "max(12px, env(safe-area-inset-top)) 16px 24px", maxWidth: isDesktop ? undefined : 640 }}>
+        {/* StorageTotalCard */}
+        <div
+          style={{
+            padding: 20,
+            background: "var(--bg-elevated)",
+            borderRadius: "var(--r-card)",
+            border: "1px solid var(--stroke)",
+            marginBottom: 13,
+          }}
+        >
+          <div className="t-label-sm" style={{ color: "var(--fg-secondary)", marginBottom: 10 }}>
+            {caption}
           </div>
-          <div style={{ height: 8, borderRadius: 999, background: "var(--bg-sunken)", overflow: "hidden" }}>
+          <div style={{ fontSize: 32, fontWeight: 700, lineHeight: "38px", color: "var(--fg-primary)", marginBottom: 16 }}>
+            {bytes(used)}
+          </div>
+          {/* LdUsageBar */}
+          <div style={{ height: 8, borderRadius: 999, background: "var(--bg-sunken)", overflow: "hidden", marginBottom: 8 }}>
             <div
               style={{
                 height: "100%",
-                width: user.quota_bytes ? `${percent(user.quota_bytes_used, user.quota_bytes)}%` : "12%",
+                width: `${Math.min(100, Math.max(0, usedPercent))}%`,
                 background: "var(--accent)",
               }}
             />
           </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
+              {t.storageUsedOf({ used: bytes(used), total: bytes(total) })}
+            </span>
+            <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
+              {t.libraryFreeSpace({ free: bytes(data.total_free) })}
+            </span>
+          </div>
         </div>
-      )}
 
-      {items === null ? (
-        <ListSkeleton rows={3} />
-      ) : items.length === 0 ? (
-        <EmptyState glyph="storage" title={t.storage} message={t.storageTotal} />
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {items.map((l) => (
-            <div
-              key={l.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                padding: "16px 18px",
-                background: "var(--bg-elevated)",
-                border: `1px solid ${l.online ? "var(--stroke)" : "#EE7759"}`,
-                borderRadius: "var(--r-card)",
-              }}
-            >
-              <Icon glyph="storage" size={20} color={l.online ? "var(--accent)" : "#EE7759"} />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span className="t-body-lg" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</span>
-                  {l.is_default && (
-                    <span
-                      style={{
-                        padding: "2px 8px",
-                        borderRadius: 9,
-                        background: "rgba(76, 141, 255, 0.12)",
-                        color: "var(--accent)",
-                        fontSize: 12,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {t.storageDefault}
-                    </span>
-                  )}
-                </span>
-                <span className="t-body-sm" style={{ color: l.online ? "var(--fg-secondary)" : "#EE7759", display: "block", marginTop: 2 }}>
-                  {l.online
-                    ? (l.free_bytes ? t.libraryFreeSpace({ free: bytes(l.free_bytes) }) : "")
-                    : t.storageOffline}
-                </span>
-              </span>
+        {/* 2 columns on desktop: libraries on left (flex 3), detected drives on right (flex 2) */}
+        <div style={{ display: "flex", flexDirection: isDesktop ? "row" : "column", gap: isDesktop ? 24 : 14, alignItems: "flex-start" }}>
+          {/* Left: Library Cards */}
+          <div style={{ flex: isDesktop ? 3 : undefined, width: "100%", minWidth: 0 }}>
+            {data.libraries.map((l) => {
+              const isOnline = l.online ?? (l.status === undefined || l.status === "online");
+              const libUsed = isAdmin ? (l.bytes_used ?? 0) : 0;
+              const libTotal = (l.stats_known ?? true) ? (l.total_bytes ?? 0) : 0;
+              const libFree = (l.stats_known ?? true) ? (l.free_bytes ?? 0) : 0;
+              const libPercent = libTotal > 0 ? (libUsed / libTotal) * 100 : 0;
+
+              return (
+                <div
+                  key={l.id}
+                  style={{
+                    padding: 18,
+                    background: "var(--bg-elevated)",
+                    borderRadius: "var(--r-card)",
+                    border: `1px solid ${isOnline ? "var(--stroke)" : "var(--warning)"}`,
+                    marginBottom: 14,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <Icon glyph="storage" size={20} color={isOnline ? "var(--fg-primary)" : "var(--warning)"} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="t-title-sm" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {l.name}
+                      </div>
+                      {!isOnline && (
+                        <div className="t-body-sm" style={{ color: "var(--warning)", marginTop: 2 }}>
+                          {t.storageOffline}
+                        </div>
+                      )}
+                    </div>
+                    {l.is_default && (
+                      <span
+                        style={{
+                          padding: "4px 9px",
+                          borderRadius: 9,
+                          background: "rgba(76, 141, 255, 0.12)",
+                          color: "var(--accent)",
+                          fontSize: 11,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {t.storageDefault}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* LdUsageBar inside library card */}
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ height: 6, borderRadius: 999, background: "var(--bg-sunken)", overflow: "hidden", marginBottom: 8 }}>
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${Math.min(100, Math.max(0, libPercent))}%`,
+                          background: "var(--accent)",
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
+                        {isAdmin && libUsed > 0 ? bytes(libUsed) : ""}
+                      </span>
+                      <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
+                        {(l.stats_known ?? true) ? t.libraryFreeSpace({ free: bytes(libFree) }) : t.storageOffline}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Right: Detected Drives (matching Flutter DetectedDrives) */}
+          {isAdmin && isDesktop && (
+            <div style={{ flex: 2, width: "100%", minWidth: 0 }}>
+              <div style={{ padding: "4px 8px 12px", fontSize: 12, fontWeight: 600, color: "var(--fg-secondary)", letterSpacing: 0.3 }}>
+                {t.storageDetectedDrives}
+              </div>
+              <div
+                style={{
+                  padding: "40px 20px",
+                  background: "transparent",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  textAlign: "center",
+                }}
+              >
+                <div style={{ marginBottom: 16 }}>
+                  <LayeredBadge glyph="storage" size={72} />
+                </div>
+                <div className="t-title-sm" style={{ fontWeight: 600, marginBottom: 8 }}>
+                  {t.storageDetectedDrives}
+                </div>
+                <div className="t-body-sm" style={{ color: "var(--fg-secondary)", maxWidth: 300, lineHeight: 1.5 }}>
+                  {t.storageHelperUnavailable}
+                </div>
+              </div>
             </div>
-          ))}
+          )}
         </div>
-      )}
-    </Page>
+      </div>
+    </div>
   );
 }
 

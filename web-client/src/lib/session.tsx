@@ -47,6 +47,7 @@ interface SessionValue {
     password: string;
     serverName: string;
   }): Promise<void>;
+  register(username: string, password: string, inviteCode?: string): Promise<void>;
   signOut(): Promise<void>;
   refreshUser(): Promise<void>;
   cancelPending(): void;
@@ -134,13 +135,37 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setStage("signedOut");
     });
 
-    const base = api.server;
-    setServer(base);
-    if (!base) {
-      setStage("needsServer");
-      return;
-    }
     void (async () => {
+      let base = api.server;
+      if (!base && typeof window !== "undefined") {
+        // Match Flutter web probe behavior: try origin, then http://localhost:7443
+        const candidates = [window.location.origin, "http://localhost:7443"];
+        for (const candidate of candidates) {
+          try {
+            const res = await fetch(`${candidate}${Api.status}`, {
+              method: "GET",
+              signal: AbortSignal.timeout(1500),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data && (data.server_id || data.server_name || data.version !== undefined)) {
+                base = candidate;
+                api.setServer(candidate);
+                break;
+              }
+            }
+          } catch {
+            // continue
+          }
+        }
+      }
+
+      setServer(base);
+      if (!base) {
+        setStage("needsServer");
+        return;
+      }
+
       try {
         const status = await api.get<{ setup_required?: boolean }>(Api.status);
         if (status?.setup_required) {
@@ -213,6 +238,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [refreshUser],
   );
 
+  const register = useCallback(
+    async (username: string, password: string, inviteCode?: string) => {
+      setError("");
+      const result = await api.post<LoginResult>(Api.register, {
+        username,
+        password,
+        ...(inviteCode ? { invite_code: inviteCode } : {}),
+        ...device(),
+      });
+      if (result.pending) {
+        setPendingSessionId(result.session_id ?? "");
+        setStage("pendingApproval");
+        return;
+      }
+      if (!result.access_token) throw new ApiError(0, "no_token", "The server sent no session.");
+      api.setTokens({ access: result.access_token, refresh: result.refresh_token ?? "" });
+      await refreshUser();
+    },
+    [refreshUser],
+  );
+
   const signOut = useCallback(async () => {
     try {
       await api.post(Api.logout, {});
@@ -251,6 +297,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       connect,
       signIn,
       setupFirstAdmin,
+      register,
       signOut,
       refreshUser,
       cancelPending,
@@ -267,10 +314,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       connect,
       signIn,
       setupFirstAdmin,
+      register,
       signOut,
       refreshUser,
       cancelPending,
-      forgetServer,
     ],
   );
 

@@ -152,13 +152,36 @@ html[lang="vi"] body {
 
 * {
   box-sizing: border-box;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+input,
+textarea,
+[contenteditable="true"],
+.allow-select {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+::selection {
+  background: transparent !important;
+  color: inherit !important;
+}
+
+input::selection,
+textarea::selection {
+  background: var(--accent) !important;
+  color: #ffffff !important;
 }
 
 html,
 body {
   margin: 0;
   padding: 0;
+  width: 100%;
   height: 100%;
+  overflow-x: hidden;
 }
 
 body {
