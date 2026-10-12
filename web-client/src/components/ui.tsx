@@ -1339,8 +1339,8 @@ export function useDeviceClass() {
     () => ({
       width,
       isMobile: width < 600,
-      isTablet: width >= 600 && width < 1024,
-      isDesktop: width >= 1024,
+      isTablet: width >= 600 && width < 768,
+      isDesktop: width >= 768,
     }),
     [width],
   );

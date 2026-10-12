@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { Mark } from "@/components/Mark";
-import { Button, Spinner, TextField, Tappable, useToast } from "@/components/ui";
+import { Button, Spinner, TextField, Tappable, useToast, useDeviceClass } from "@/components/ui";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Icon } from "@/components/Icon";
 import { normaliseServer } from "@/lib/api";
 import { useL10n, type Locale } from "@/lib/l10n";
@@ -65,7 +66,7 @@ function Scaffold({
 }
 
 /** LdLanguageToggle(compact: true): the globe and the current language. */
-function LanguageToggle() {
+export function LanguageToggle({ compact = false }: { compact?: boolean }) {
   const { locale, setLocale } = useSession();
   const next: Record<Locale, Locale> = { vi: "en", en: "ar", ar: "vi" };
   const labels: Record<Locale, string> = { vi: "Tiếng Việt", en: "English", ar: "العربية" };
@@ -77,14 +78,258 @@ function LanguageToggle() {
         display: "inline-flex",
         alignItems: "center",
         gap: 8,
-        padding: "8px 14px",
+        padding: compact ? "6px 12px" : "8px 14px",
         background: "var(--bg-elevated)",
         border: "1px solid var(--stroke)",
+        borderRadius: "var(--r-pill)",
       }}
     >
-      <Icon glyph="globe" size={17} color="var(--fg-secondary)" />
-      <span className="t-label-lg">{labels[locale] ?? "Tiếng Việt"}</span>
+      <Icon glyph="globe" size={16} color="var(--fg-secondary)" />
+      <span className="t-label-sm" style={{ color: "var(--fg-primary)", fontWeight: 500 }}>
+        {labels[locale] ?? "Tiếng Việt"}
+      </span>
     </Tappable>
+  );
+}
+
+export type OnboardingStep = "welcome" | "connect" | "language" | "account";
+
+/**
+ * The desktop frame for onboarding matching OnboardingDesktopShell in Flutter.
+ */
+export function OnboardingDesktopShell({
+  step,
+  title,
+  subtitle,
+  children,
+  onBack,
+}: {
+  step: OnboardingStep;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  onBack?: () => void;
+}) {
+  const t = useL10n();
+
+  const steps: { id: OnboardingStep; label: string; index: number }[] = [
+    { id: "welcome", label: t.welcomeTitle, index: 1 },
+    { id: "connect", label: t.connectTitle, index: 2 },
+    { id: "language", label: t.languageTitle, index: 3 },
+    { id: "account", label: t.signInTitle, index: 4 },
+  ];
+
+  const stepOrder: Record<OnboardingStep, number> = {
+    welcome: 1,
+    connect: 2,
+    language: 3,
+    account: 4,
+  };
+
+  const currentIdx = stepOrder[step];
+  const markStage =
+    step === "welcome"
+      ? "closed"
+      : step === "connect"
+      ? "connected"
+      : step === "language"
+      ? "syncing"
+      : "complete";
+
+  return (
+    <div
+      style={{
+        minHeight: "100dvh",
+        display: "flex",
+        backgroundColor: "var(--bg-primary)",
+      }}
+    >
+      {/* the rail: brand, then the full path through first run */}
+      <div
+        style={{
+          width: 340,
+          flexShrink: 0,
+          backgroundColor: "var(--bg-sunken)",
+          borderRight: "1px solid var(--stroke)",
+          padding: "40px 36px",
+          display: "flex",
+          flexDirection: "column",
+          boxSizing: "border-box",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <Mark size={40} stage={markStage} />
+          <span
+            className="t-title-md"
+            style={{ fontWeight: 600, color: "var(--fg-primary)", fontSize: 17 }}
+          >
+            {t.appName}
+          </span>
+        </div>
+
+        <div style={{ height: 48 }} />
+
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {steps.map((s) => {
+            const isDone = s.index < currentIdx;
+            const isCurrent = s.index === currentIdx;
+            const active = isDone || isCurrent;
+            const borderColor = isCurrent
+              ? "var(--accent)"
+              : isDone
+              ? "rgba(76, 141, 255, 0.45)"
+              : "var(--stroke)";
+
+            return (
+              <div
+                key={s.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                  marginBottom: 22,
+                }}
+              >
+                <div
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 999,
+                    display: "grid",
+                    placeItems: "center",
+                    backgroundColor: isCurrent ? "var(--accent)" : "transparent",
+                    border: `1.5px solid ${borderColor}`,
+                    flexShrink: 0,
+                    transition: "all var(--d-hover) var(--ease)",
+                  }}
+                >
+                  {isDone ? (
+                    <Icon glyph="check" size={14} color="var(--accent)" />
+                  ) : (
+                    <span
+                      className="t-label-sm"
+                      style={{
+                        color: isCurrent ? "#ffffff" : "var(--fg-muted)",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        lineHeight: 1,
+                      }}
+                    >
+                      {s.index}
+                    </span>
+                  )}
+                </div>
+                <span
+                  className="t-body-md"
+                  style={{
+                    color: active ? "var(--fg-primary)" : "var(--fg-muted)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    fontSize: 14,
+                  }}
+                >
+                  {s.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ flex: 1 }} />
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div>
+            <ThemeToggle compact />
+          </div>
+          <div>
+            <LanguageToggle compact />
+          </div>
+        </div>
+      </div>
+
+      {/* the step itself */}
+      <div
+        style={{
+          flex: 1,
+          position: "relative",
+          display: "flex",
+          flexDirection: "column",
+          minHeight: "100dvh",
+          overflowY: "auto",
+        }}
+      >
+        {onBack && (
+          <div style={{ position: "absolute", top: 24, left: 24, zIndex: 10 }}>
+            <Tappable
+              onClick={onBack}
+              radius={999}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 12px",
+                color: "var(--accent)",
+              }}
+            >
+              <Icon glyph="chevron-left" size={18} />
+              <span className="t-label-lg">{t.actionBack}</span>
+            </Tappable>
+          </div>
+        )}
+
+        <div
+          style={{
+            position: "absolute",
+            top: 24,
+            right: 24,
+            zIndex: 10,
+          }}
+        >
+          <ThemeToggle compact />
+        </div>
+
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "48px 64px",
+            boxSizing: "border-box",
+          }}
+        >
+          <div style={{ width: "100%", maxWidth: 480 }}>
+            <h1
+              className="t-display"
+              style={{
+                margin: 0,
+                fontSize: 32,
+                fontWeight: 700,
+                letterSpacing: "-0.02em",
+                color: "var(--fg-primary)",
+              }}
+            >
+              {title}
+            </h1>
+            {subtitle && (
+              <p
+                className="t-body-lg"
+                style={{
+                  margin: "12px 0 0",
+                  color: "var(--fg-secondary)",
+                  fontSize: 16,
+                  lineHeight: 1.5,
+                }}
+              >
+                {subtitle}
+              </p>
+            )}
+            <div style={{ marginTop: 36 }}>{children}</div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -92,6 +337,48 @@ function LanguageToggle() {
 
 export function WelcomeScreen({ onContinue }: { onContinue: () => void }) {
   const t = useL10n();
+  const { isDesktop } = useDeviceClass();
+
+  if (isDesktop) {
+    return (
+      <OnboardingDesktopShell
+        step="welcome"
+        title={t.welcomeTitle}
+        subtitle={t.welcomeBody}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+            <div style={{ marginTop: 2 }}>
+              <Icon glyph="server" size={20} color="var(--accent)" />
+            </div>
+            <p className="t-body-md" style={{ margin: 0, color: "var(--fg-secondary)", lineHeight: 1.5 }}>
+              {t.welcomePointHardware}
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+            <div style={{ marginTop: 2 }}>
+              <Icon glyph="lock" size={20} color="var(--accent)" />
+            </div>
+            <p className="t-body-md" style={{ margin: 0, color: "var(--fg-secondary)", lineHeight: 1.5 }}>
+              {t.welcomePointKeys}
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+            <div style={{ marginTop: 2 }}>
+              <Icon glyph="device" size={20} color="var(--accent)" />
+            </div>
+            <p className="t-body-md" style={{ margin: 0, color: "var(--fg-secondary)", lineHeight: 1.5 }}>
+              {t.welcomePointDevices}
+            </p>
+          </div>
+          <div style={{ marginTop: 24, alignSelf: "flex-start" }}>
+            <Button label={t.welcomeStart} onClick={onContinue} expand={false} />
+          </div>
+        </div>
+      </OnboardingDesktopShell>
+    );
+  }
+
   return (
     <Scaffold actions={<LanguageToggle />}>
       <div className="ld-enter" style={{ textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -115,11 +402,49 @@ export function WelcomeScreen({ onContinue }: { onContinue: () => void }) {
 export function LanguageScreen({ onDone, onBack }: { onDone: () => void; onBack?: () => void }) {
   const t = useL10n();
   const { locale, setLocale } = useSession();
-  const options: { id: Locale; label: string }[] = [
-    { id: "vi", label: "Tiếng Việt" },
-    { id: "en", label: "English" },
-    { id: "ar", label: "العربية" },
+  const { isDesktop } = useDeviceClass();
+  const options: { id: Locale; label: string; sample: string }[] = [
+    { id: "en", label: "English", sample: "Your files, on your machine" },
+    { id: "vi", label: "Tiếng Việt", sample: "Tệp của bạn, trên máy của bạn" },
+    { id: "ar", label: "العربية", sample: "ملفاتك، على جهازك" },
   ];
+
+  if (isDesktop) {
+    return (
+      <OnboardingDesktopShell
+        step="language"
+        title={t.languageTitle}
+        onBack={onBack}
+      >
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+          {options.map((o) => {
+            const active = locale === o.id;
+            return (
+              <Tappable
+                key={o.id}
+                onClick={() => setLocale(o.id)}
+                radius={16}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  padding: "20px 16px",
+                  border: `1px solid ${active ? "var(--accent)" : "var(--stroke)"}`,
+                  background: active ? "rgba(76,141,255,0.10)" : "var(--bg-elevated)",
+                }}
+              >
+                <span className="t-title-sm" style={{ fontWeight: 600 }}>{o.label}</span>
+                <span className="t-body-xs" style={{ color: "var(--fg-muted)" }}>{o.sample}</span>
+              </Tappable>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 32, alignSelf: "flex-start" }}>
+          <Button label={t.actionContinue} onClick={onDone} expand={false} />
+        </div>
+      </OnboardingDesktopShell>
+    );
+  }
 
   return (
     <Scaffold onBack={onBack}>
@@ -234,6 +559,7 @@ function DiscoveryRadar() {
 export function ConnectScreen({ onBack }: { onBack?: () => void }) {
   const t = useL10n();
   const { connect } = useSession();
+  const { isDesktop } = useDeviceClass();
   const [address, setAddress] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -254,6 +580,34 @@ export function ConnectScreen({ onBack }: { onBack?: () => void }) {
       setBusy(false);
     }
   };
+
+  if (isDesktop) {
+    return (
+      <OnboardingDesktopShell
+        step="connect"
+        title={t.connectTitle}
+        subtitle={t.connectBody}
+        onBack={onBack}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <TextField
+            value={address}
+            onChange={setAddress}
+            label={t.enterAddressManually}
+            hint={t.addressHint}
+            glyph="server"
+            error={error}
+            autoFocus
+            onEnter={go}
+            dir="ltr"
+          />
+          <div style={{ alignSelf: "flex-start" }}>
+            <Button label={t.connectAction} onClick={go} busy={busy} expand={false} />
+          </div>
+        </div>
+      </OnboardingDesktopShell>
+    );
+  }
 
   return (
     <Scaffold onBack={onBack} actions={<LanguageToggle />}>
@@ -307,6 +661,7 @@ export function SignInScreen({
 } = {}) {
   const t = useL10n();
   const { signIn, register, server, forgetServer } = useSession();
+  const { isDesktop } = useDeviceClass();
   const toast = useToast();
   const [creating, setCreating] = useState(createMode || Boolean(initialInviteCode));
   const [username, setUsername] = useState("");
@@ -317,7 +672,8 @@ export function SignInScreen({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const name = server.replace(/^https?:\/\//, "");
+  const isLocalhost = !server || server.includes("localhost") || server.includes("127.0.0.1");
+  const name = isLocalhost ? t.appName : server.replace(/^https?:\/\//, "");
 
   const go = async () => {
     if (!username.trim() || !password) {
@@ -331,6 +687,9 @@ export function SignInScreen({
         await register(username.trim(), password, inviteCode.trim() || undefined);
       } else {
         await signIn(username.trim(), password, needsTotp ? totp.trim() : undefined);
+      }
+      if (typeof window !== "undefined") {
+        window.history.replaceState(null, "", "/files");
       }
     } catch (e) {
       const err = e as { code?: string; message?: string };
@@ -352,6 +711,134 @@ export function SignInScreen({
     setError("");
     onToggleMode?.(next);
   };
+
+  if (isDesktop) {
+    return (
+      <OnboardingDesktopShell
+        step="account"
+        title={creating ? t.createAccountTitle : t.signInTitle}
+        subtitle={creating ? t.createAccountBody : undefined}
+      >
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {/* which server this is, and how to leave it */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "12px 16px",
+              backgroundColor: "var(--bg-elevated)",
+              borderRadius: "var(--r-card)",
+              border: "1px solid var(--stroke)",
+              marginBottom: 28,
+            }}
+          >
+            <Icon glyph="server" size={18} color="var(--accent)" />
+            <span
+              className="t-body-md"
+              style={{
+                flex: 1,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                color: "var(--fg-primary)",
+                fontSize: 14,
+              }}
+            >
+              {name}
+            </span>
+            <Tappable
+              onClick={forgetServer}
+              radius={999}
+              style={{
+                padding: "4px 8px",
+              }}
+            >
+              <span
+                className="t-label-md"
+                style={{ color: "var(--accent)", fontWeight: 600, fontSize: 14 }}
+              >
+                {t.settingsSwitchNode}
+              </span>
+            </Tappable>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {creating && (
+              <TextField
+                value={inviteCode}
+                onChange={setInviteCode}
+                label={t.inviteCodeLabel}
+                hint={t.inviteCodeHint}
+                glyph="lock"
+                onEnter={go}
+                dir="ltr"
+              />
+            )}
+            <TextField
+              value={username}
+              onChange={setUsername}
+              label={t.usernameLabel}
+              hint={t.usernameHint}
+              glyph="user"
+              autoFocus
+              onEnter={go}
+              dir="ltr"
+            />
+            <TextField
+              value={password}
+              onChange={setPassword}
+              label={t.passwordLabel}
+              hint={creating ? t.passwordHintNew : t.passwordHintExisting}
+              type="password"
+              glyph="lock"
+              error={needsTotp ? undefined : error}
+              onEnter={go}
+              dir="ltr"
+            />
+            {!creating && !HIDE_TWO_FACTOR && needsTotp && (
+              <TextField
+                value={totp}
+                onChange={setTotp}
+                label={t.twoFactorCode}
+                hint={t.twoFactorHint}
+                glyph="lock"
+                error={error}
+                autoFocus
+                onEnter={go}
+                dir="ltr"
+              />
+            )}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 28 }}>
+            <Button
+              label={creating ? t.createAccount : t.signIn}
+              onClick={go}
+              busy={busy}
+              expand={false}
+            />
+            {(creating || Boolean(inviteCode)) && (
+              <Tappable
+                onClick={toggle}
+                radius={999}
+                style={{
+                  padding: "8px 12px",
+                }}
+              >
+                <span
+                  className="t-label-lg"
+                  style={{ color: "var(--accent)", fontWeight: 600, fontSize: 14 }}
+                >
+                  {creating ? t.alreadyHaveAccount : t.noAccountYet}
+                </span>
+              </Tappable>
+            )}
+          </div>
+        </div>
+      </OnboardingDesktopShell>
+    );
+  }
 
   return (
     <Scaffold actions={<LanguageToggle />}>
@@ -403,6 +890,7 @@ export function SignInScreen({
 export function SetupScreen() {
   const t = useL10n();
   const { setupFirstAdmin } = useSession();
+  const { isDesktop } = useDeviceClass();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -425,6 +913,33 @@ export function SetupScreen() {
       setBusy(false);
     }
   };
+
+  if (isDesktop) {
+    return (
+      <OnboardingDesktopShell
+        step="account"
+        title={t.setupTitle}
+        subtitle={t.setupBody}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <TextField value={serverName} onChange={setServerName} label={t.serverNameLabel} glyph="server" dir="ltr" />
+          <TextField value={username} onChange={setUsername} label={t.usernameLabel} hint={t.usernameHint} glyph="user" dir="ltr" />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <TextField value={password} onChange={setPassword} label={t.passwordLabel} type="password" glyph="lock" dir="ltr" />
+            <TextField value={confirm} onChange={setConfirm} label={t.confirmPasswordHint} type="password" glyph="lock" onEnter={go} dir="ltr" />
+          </div>
+          {error && (
+            <div className="t-body-sm" style={{ color: "var(--warning)" }}>
+              {error}
+            </div>
+          )}
+          <div style={{ marginTop: 12, alignSelf: "flex-start" }}>
+            <Button label={t.createAccount} onClick={go} busy={busy} expand={false} />
+          </div>
+        </div>
+      </OnboardingDesktopShell>
+    );
+  }
 
   return (
     <Scaffold actions={<LanguageToggle />}>

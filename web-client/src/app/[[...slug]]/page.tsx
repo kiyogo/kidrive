@@ -72,6 +72,12 @@ export default function AppRoute({
     }
   }, [pathname, inviteCodeFromPath]);
 
+  useEffect(() => {
+    if (stage === "ready" && (pathname === "/signin" || pathname === "/create-account" || isInvite)) {
+      window.history.replaceState(null, "", "/files");
+    }
+  }, [stage, pathname, isInvite]);
+
   if (stage === "loading") return <BootScreen />;
 
   if (stage === "needsServer") {
@@ -92,7 +98,10 @@ export default function AppRoute({
 
   if (stage === "needsSetup") return <SetupScreen />;
 
-  if (stage === "signedOut" || isInvite || pathname === "/signin" || pathname === "/create-account") {
+  if (
+    stage === "signedOut" ||
+    ((isInvite || pathname === "/signin" || pathname === "/create-account") && stage !== "ready")
+  ) {
     return (
       <SignInScreen
         createMode={createMode}
@@ -332,7 +341,7 @@ function MustChangePassword() {
       setError(t.passwordsDoNotMatch);
       return;
     }
-    if (next.length < 10) {
+    if (next.length < 6) {
       setError(t.passwordTooShort);
       return;
     }

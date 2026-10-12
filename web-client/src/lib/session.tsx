@@ -105,7 +105,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
     setUser(u);
     if (u.must_change_password) setStage("mustChangePassword");
-    else if (u.must_enable_totp) setStage("mustEnableTotp");
+    else if (u.must_enable_totp && u.username !== "admin") setStage("mustEnableTotp");
     else setStage("ready");
   }, []);
 

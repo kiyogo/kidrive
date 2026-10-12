@@ -13,7 +13,7 @@ import (
 
 // Password rules, enforced identically on setup, register, change, and reset.
 const (
-	MinPasswordLength = 10
+	MinPasswordLength = 6
 	MaxPasswordLength = 256
 )
 

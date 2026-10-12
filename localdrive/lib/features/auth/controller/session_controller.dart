@@ -282,7 +282,7 @@ class SessionController extends Notifier<SessionState> {
     state = SessionState(
       stage: user.mustChangePassword
           ? SessionStage.mustChangePassword
-          : user.mustEnableTotp
+          : (user.mustEnableTotp && user.username != 'admin')
               ? SessionStage.mustEnableTotp
               : SessionStage.ready,
       user: user,
