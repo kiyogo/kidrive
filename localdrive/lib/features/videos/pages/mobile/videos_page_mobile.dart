@@ -13,12 +13,6 @@ class VideosPageMobile extends HookConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = L10n.of(context);
-
-    useEffect(() {
-      ref.invalidate(videosProvider);
-      return null;
-    }, const []);
-
     final videos = ref.watch(videosProvider);
     final effectiveVideos =
         (videos.isLoading && !videos.hasValue && videosMemoryCache != null)

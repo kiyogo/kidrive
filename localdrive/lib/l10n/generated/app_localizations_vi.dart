@@ -1298,7 +1298,7 @@ class L10nVi extends L10n {
   String get twoFactorUseQr => 'Quét mã QR';
 
   @override
-  String get twoFactorUseKey => 'Nhập khóa khóa bí mật';
+  String get twoFactorUseKey => 'Nhập khóa bí mật';
 
   @override
   String get twoFactorKeyBody =>
