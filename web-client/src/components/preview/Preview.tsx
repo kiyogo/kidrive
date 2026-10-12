@@ -194,6 +194,7 @@ export function Preview({
 
   return (
     <div
+      data-theme="dark"
       style={{
         position: "fixed",
         inset: 0,
@@ -203,6 +204,7 @@ export function Preview({
         flexDirection: "column",
         overflow: "hidden",
         userSelect: "none",
+        color: "#FFFFFF",
       }}
       onTouchStart={category === "image" ? handleTouchStart : undefined}
       onTouchEnd={category === "image" ? handleTouchEnd : undefined}
@@ -223,7 +225,6 @@ export function Preview({
           gap: 12,
           opacity: chrome ? 1 : 0,
           pointerEvents: chrome ? "auto" : "none",
-          transition: "opacity 0.2s ease",
         }}
       >
         <button
@@ -231,16 +232,22 @@ export function Preview({
           onClick={onClose}
           title={t.actionBack}
           style={{
-            width: 42,
-            height: 42,
+            width: category === "video" ? 38 : 42,
+            height: category === "video" ? 38 : 42,
             borderRadius: "50%",
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--stroke)",
+            background: category === "video" ? "transparent" : "rgba(30, 30, 30, 0.85)",
+            border: category === "video" ? "none" : "1px solid rgba(255, 255, 255, 0.15)",
             color: "#FFFFFF",
             display: "grid",
             placeItems: "center",
             cursor: "pointer",
             flexShrink: 0,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = category === "video" ? "rgba(255, 255, 255, 0.20)" : "rgba(50, 50, 50, 0.95)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = category === "video" ? "transparent" : "rgba(30, 30, 30, 0.85)";
           }}
         >
           <Icon glyph="chevron-left" size={20} color="#FFFFFF" />
@@ -259,7 +266,7 @@ export function Preview({
           >
             {node.name}
           </span>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.72)", marginTop: 2 }}>
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.72)", marginTop: 2, whiteSpace: "nowrap" }}>
             {category === "image"
               ? t.galleryPositionOf({
                   position: String(currentIndex >= 0 ? currentIndex + 1 : 1),
@@ -276,17 +283,23 @@ export function Preview({
               download={node.name}
               title={t.download}
               style={{
-                width: 42,
-                height: 42,
+                width: category === "video" ? 38 : 42,
+                height: category === "video" ? 38 : 42,
                 borderRadius: "50%",
-                background: "var(--bg-elevated)",
-                border: "1px solid var(--stroke)",
+                background: category === "video" ? "transparent" : "rgba(30, 30, 30, 0.85)",
+                border: category === "video" ? "none" : "1px solid rgba(255, 255, 255, 0.15)",
                 display: "grid",
                 placeItems: "center",
                 color: "#FFFFFF",
                 textDecoration: "none",
                 cursor: "pointer",
                 flexShrink: 0,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = category === "video" ? "rgba(255, 255, 255, 0.20)" : "rgba(50, 50, 50, 0.95)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = category === "video" ? "transparent" : "rgba(30, 30, 30, 0.85)";
               }}
             >
               <Icon glyph="download" size={20} color="#FFFFFF" />
@@ -299,16 +312,22 @@ export function Preview({
               onClick={() => setMenuOpen((v) => !v)}
               title={t.moreActions}
               style={{
-                width: 42,
-                height: 42,
+                width: category === "video" ? 38 : 42,
+                height: category === "video" ? 38 : 42,
                 borderRadius: "50%",
-                background: "var(--bg-elevated)",
-                border: "1px solid var(--stroke)",
+                background: category === "video" ? "transparent" : "rgba(30, 30, 30, 0.85)",
+                border: category === "video" ? "none" : "1px solid rgba(255, 255, 255, 0.15)",
                 color: "#FFFFFF",
                 display: "grid",
                 placeItems: "center",
                 cursor: "pointer",
                 flexShrink: 0,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = category === "video" ? "rgba(255, 255, 255, 0.20)" : "rgba(50, 50, 50, 0.95)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = category === "video" ? "transparent" : "rgba(30, 30, 30, 0.85)";
               }}
             >
               <Icon glyph="more" size={20} color="#FFFFFF" />
@@ -322,11 +341,12 @@ export function Preview({
                   top: 50,
                   right: 0,
                   width: 220,
-                  background: "var(--bg-elevated)",
-                  border: "1px solid var(--stroke)",
+                  background: "#202020",
+                  border: "1px solid #3D3D3D",
                   borderRadius: 14,
                   padding: "6px 0",
                   zIndex: 60,
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
                 }}
               >
                 <button
@@ -501,8 +521,8 @@ export function Preview({
           />
         )}
 
-        {/* Previous / Next Desktop Controls */}
-        {!isMobile && nodes && currentIndex > 0 && (
+        {/* Previous / Next Desktop Controls (only for photo gallery matching Flutter) */}
+        {category === "image" && !isMobile && nodes && currentIndex > 0 && (
           <button
             type="button"
             onClick={(e) => {
@@ -518,23 +538,28 @@ export function Preview({
               width: 42,
               height: 42,
               borderRadius: "50%",
-              background: "var(--bg-elevated)",
-              border: "1px solid var(--stroke)",
+              background: "rgba(30, 30, 30, 0.85)",
+              border: "1px solid rgba(255, 255, 255, 0.15)",
               color: "#FFFFFF",
               display: "grid",
               placeItems: "center",
               cursor: "pointer",
               opacity: chrome ? 1 : 0,
               pointerEvents: chrome ? "auto" : "none",
-              transition: "opacity 0.2s ease",
               zIndex: 40,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(50, 50, 50, 0.95)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "rgba(30, 30, 30, 0.85)";
             }}
           >
             <Icon glyph="chevron-left" size={20} color="#FFFFFF" />
           </button>
         )}
 
-        {!isMobile && nodes && currentIndex < total - 1 && (
+        {category === "image" && !isMobile && nodes && currentIndex < total - 1 && (
           <button
             type="button"
             onClick={(e) => {
@@ -550,16 +575,21 @@ export function Preview({
               width: 42,
               height: 42,
               borderRadius: "50%",
-              background: "var(--bg-elevated)",
-              border: "1px solid var(--stroke)",
+              background: "rgba(30, 30, 30, 0.85)",
+              border: "1px solid rgba(255, 255, 255, 0.15)",
               color: "#FFFFFF",
               display: "grid",
               placeItems: "center",
               cursor: "pointer",
               opacity: chrome ? 1 : 0,
               pointerEvents: chrome ? "auto" : "none",
-              transition: "opacity 0.2s ease",
               zIndex: 40,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(50, 50, 50, 0.95)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "rgba(30, 30, 30, 0.85)";
             }}
           >
             <Icon glyph="chevron-right" size={20} color="#FFFFFF" />
@@ -1423,11 +1453,12 @@ const menuItemStyle: React.CSSProperties = {
   padding: "10px 16px",
   background: "transparent",
   border: "none",
-  color: "var(--fg-primary)",
+  color: "#FFFFFF",
   fontSize: 14,
   fontWeight: 500,
   cursor: "pointer",
   textAlign: "start",
+  whiteSpace: "nowrap",
 };
 
 function formatClock(seconds: number): string {
