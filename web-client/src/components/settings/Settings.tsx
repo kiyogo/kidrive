@@ -5,10 +5,14 @@ import { Icon, type Glyph } from "@/components/Icon";
 import {
   Avatar,
   Button,
+  ConfirmDialog,
   EmptyState,
   ListSkeleton,
   RadioRow,
+  SettingGroup,
+  SettingRow,
   Sheet,
+  Switch,
   Tappable,
   TextField,
   useDeviceClass,
@@ -20,11 +24,9 @@ import { bytes, dateTime, percent, relative } from "@/lib/format";
 import type { DeviceModel, LibraryModel, UserModel } from "@/lib/models";
 import { useL10n, type Strings } from "@/lib/l10n";
 import { HIDE_TWO_FACTOR } from "@/lib/flags";
-import { capChoices, forget, forgetAll, setSoftCap, usage, type OfflineUsage } from "@/lib/offline";
 import { useSession } from "@/lib/session";
 import { TwoFactorSetup } from "@/components/auth/TwoFactorSetup";
 import { useTheme } from "@/lib/theme";
-import { ThemeToggle } from "@/components/ThemeToggle";
 
 /*
   Settings, ported from features/settings. One list of sections, each opening
@@ -91,7 +93,7 @@ export function SettingsScreen() {
               marginBottom: 20,
             }}
           >
-            <Avatar name={user.display_name || user.username} />
+            <Avatar name={user.display_name || user.username} seed={user.avatar_seed} size={48} />
             <div style={{ minWidth: 0, flex: 1 }}>
               <div className="t-title-sm" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {user.display_name || user.username}
@@ -159,7 +161,7 @@ export function SettingsScreen() {
         <Button
           label={t.settingsSignOut}
           glyph="logout"
-          variant="quiet"
+          variant="secondary"
           compact
           expand={false}
           onClick={() => void signOut()}
@@ -337,73 +339,6 @@ function Row({
   );
 }
 
-/** A setting that is on or off, with the sentence explaining what it costs. */
-function SwitchRow({
-  glyph,
-  label,
-  description,
-  value,
-  onChange,
-}: {
-  glyph: Glyph;
-  label: string;
-  description: string;
-  value: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <Tappable
-      onClick={() => onChange(!value)}
-      radius={14}
-      style={{
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 14,
-        width: "100%",
-        padding: "14px 16px",
-        background: "var(--bg-elevated)",
-        border: "1px solid var(--stroke)",
-        textAlign: "start",
-      }}
-    >
-      <Icon glyph={glyph} size={19} color="var(--fg-secondary)" />
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span className="t-body-lg" style={{ display: "block" }}>
-          {label}
-        </span>
-        <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-          {description}
-        </span>
-      </span>
-      <span
-        style={{
-          width: 44,
-          height: 26,
-          flex: "none",
-          borderRadius: 999,
-          background: value ? "var(--accent)" : "var(--bg-sunken)",
-          border: `1px solid ${value ? "var(--accent)" : "var(--stroke)"}`,
-          display: "inline-flex",
-          alignItems: "center",
-          padding: 2,
-          transition: "background var(--d-hover) var(--ease)",
-        }}
-      >
-        <span
-          style={{
-            width: 20,
-            height: 20,
-            borderRadius: 999,
-            background: value ? "#FFFFFF" : "var(--fg-muted)",
-            marginInlineStart: value ? 18 : 0,
-            transition: "margin var(--d-hover) var(--ease)",
-          }}
-        />
-      </span>
-    </Tappable>
-  );
-}
-
 /* ---------------------------------------------------------------- details */
 
 function Detail({
@@ -468,7 +403,7 @@ function TwoFactorSection({ onBack, embedded }: { onBack?: () => void; embedded?
 
 function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
   const t = useL10n();
-  const { user, refreshUser } = useSession();
+  const { user, refreshUser, signOut } = useSession();
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState("");
@@ -478,8 +413,6 @@ function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
 
   if (!user) return null;
 
-  // the app's rules, checked here rather than only at the server, so the
-  // answer arrives while the field is still in front of you
   const change = async () => {
     if (next !== confirm) {
       setError(t.passwordsDoNotMatch);
@@ -505,6 +438,7 @@ function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
 
   return (
     <Page title={t.settingsAccount} onBack={onBack} embedded={embedded}>
+      {/* Account Card */}
       <div
         style={{
           display: "flex",
@@ -514,13 +448,13 @@ function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
           background: "var(--bg-elevated)",
           border: "1px solid var(--stroke)",
           borderRadius: "var(--r-card)",
-          marginBottom: 16,
+          marginBottom: 24,
         }}
       >
         <Avatar name={user.display_name || user.username} seed={user.avatar_seed} size={48} />
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="t-title-sm">{user.display_name || user.username}</div>
-          <div className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
+          <div className="t-title-sm" style={{ fontWeight: 600 }}>{user.display_name || user.username}</div>
+          <div className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 2 }}>
             {user.role === "admin" ? t.roleAdmin : t.roleMember}
           </div>
           {user.quota_bytes > 0 && (
@@ -542,17 +476,43 @@ function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
         </div>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <Row glyph="user" label={t.usernameLabel} value={user.username} />
-        {!HIDE_TWO_FACTOR && (
-          <Row
-            glyph="lock"
-            label={t.settingsTwoFactor}
-            value={user.totp_enabled ? t.twoFactorOn : t.twoFactorOff}
-          />
-        )}
-        <Row glyph="lock" label={t.newPassword} onClick={() => setOpen(true)} />
-      </div>
+      <SettingGroup title={t.storage}>
+        <SettingRow
+          label={t.storage}
+          glyph="drive"
+          onTap={() => { window.location.href = "/storage"; }}
+        />
+        <SettingRow
+          showDivider
+          label={t.trash}
+          glyph="trash"
+          onTap={() => { window.location.href = "/trash"; }}
+        />
+        <SettingRow
+          showDivider
+          label={t.activity}
+          glyph="activity"
+          onTap={() => { window.location.href = "/activity"; }}
+        />
+      </SettingGroup>
+
+      <SettingGroup title={t.settingsAccount}>
+        <SettingRow
+          label={t.newPassword}
+          glyph="lock"
+          onTap={() => setOpen(true)}
+        />
+      </SettingGroup>
+
+      <SettingGroup title={t.settingsAbout}>
+        <SettingRow
+          label={t.settingsSwitchNode}
+          glyph="server"
+          onTap={() => {
+            void signOut();
+          }}
+        />
+      </SettingGroup>
 
       <Sheet open={open} onClose={() => setOpen(false)} title={t.newPassword}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -607,9 +567,10 @@ function DevicesSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
   };
   useEffect(() => {
     void load();
-    // load() is stable for this screen's lifetime
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const pending = items?.filter((d) => d.status === "pending") ?? [];
+  const active = items?.filter((d) => d.status !== "pending") ?? [];
 
   return (
     <Page title={t.devices} onBack={onBack} embedded={embedded}>
@@ -618,81 +579,97 @@ function DevicesSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
       ) : items.length === 0 ? (
         <EmptyState glyph="device" title={t.emptyDevicesTitle} message={t.settingsRequireApprovalNote} />
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {items.map((d) => (
-            <div
-              key={d.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                padding: "14px 16px",
-                background: "var(--bg-elevated)",
-                border: `1px solid ${d.status === "pending" ? "var(--accent)" : "var(--stroke)"}`,
-                borderRadius: "var(--r-card)",
-              }}
-            >
-              <Icon glyph="device" size={19} color="var(--fg-secondary)" />
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span className="t-body-lg" style={{ display: "block" }}>
-                  {d.device_name}{" "}
-                  {d.current && <span style={{ color: "var(--accent)" }}>· {t.devicesThisDevice}</span>}
-                </span>
-                <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-                  {d.status === "pending"
-                    ? t.pendingApproval
-                    : `${d.platform} · ${t.devicesLastSeen({ when: relative(d.last_seen_at) })}`}
-                </span>
-              </span>
-              {d.status === "pending" ? (
-                <Button
-                  label={t.approve}
-                  compact
-                  expand={false}
-                  onClick={async () => {
-                    await api.post(`${Api.devices}/${d.id}/approve`, {});
-                    toast(t.devicesApprovedToast, "success");
-                    void load();
-                  }}
-                />
-              ) : (
-                !d.current && (
-                  <Tappable
-                    radius={999}
-                    style={{ padding: 8, color: "var(--warning)" }}
-                    title={t.devicesRevoke}
-                    onClick={async () => {
-                      await api.del(Api.session(d.id));
-                      toast(t.devicesRevoke, "success");
-                      void load();
-                    }}
-                  >
-                    <Icon glyph="logout" size={18} />
-                  </Tappable>
-                )
-              )}
+        <>
+          {pending.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <div
+                style={{
+                  padding: "4px 8px 4px 10px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--fg-secondary)",
+                }}
+              >
+                {t.devicesPendingSection}
+              </div>
+              <SettingGroup>
+                {pending.map((d, i) => (
+                  <SettingRow
+                    key={d.id}
+                    showDivider={i > 0}
+                    glyph="device"
+                    label={d.device_name}
+                    description={`${d.platform} ${d.ip || ""}`}
+                    trailing={
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <Button
+                          label={t.approve}
+                          compact
+                          expand={false}
+                          onClick={async () => {
+                            await api.post(`${Api.devices}/${d.id}/approve`, {});
+                            toast(t.devicesApprovedToast, "success");
+                            void load();
+                          }}
+                        />
+                        <Button
+                          label={t.deny}
+                          variant="secondary"
+                          compact
+                          expand={false}
+                          onClick={async () => {
+                            await api.post(`${Api.devices}/${d.id}/deny`, {});
+                            toast(t.devicesDeniedToast, "error");
+                            void load();
+                          }}
+                        />
+                      </div>
+                    }
+                  />
+                ))}
+              </SettingGroup>
             </div>
-          ))}
-        </div>
+          )}
+
+          <SettingGroup>
+            {active.map((d, i) => (
+              <SettingRow
+                key={d.id}
+                showDivider={i > 0}
+                glyph="device"
+                label={d.device_name}
+                description={
+                  d.current
+                    ? undefined
+                    : `${d.platform} · ${t.devicesLastSeen({ when: relative(d.last_seen_at) })}`
+                }
+                trailing={
+                  d.current ? (
+                    <span style={{ fontSize: 13, color: "var(--accent)", fontWeight: 500 }}>
+                      {t.devicesThisDevice}
+                    </span>
+                  ) : (
+                    <Button
+                      label={t.devicesRevoke}
+                      variant="secondary"
+                      compact
+                      expand={false}
+                      onClick={async () => {
+                        await api.del(Api.session(d.id));
+                        toast(t.devicesRevoke, "success");
+                        void load();
+                      }}
+                    />
+                  )
+                }
+              />
+            ))}
+          </SettingGroup>
+        </>
       )}
     </Page>
   );
 }
-
-const userMenuItemStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 12,
-  width: "100%",
-  padding: "10px 14px",
-  background: "transparent",
-  border: "none",
-  color: "var(--fg-primary)",
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: "pointer",
-  textAlign: "start",
-};
 
 function UsersSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
   const t = useL10n();
@@ -770,191 +747,116 @@ function UsersSection({ onBack, embedded }: { onBack?: () => void; embedded?: bo
       {items === null ? (
         <ListSkeleton rows={4} />
       ) : items.length === 0 ? (
-        <EmptyState glyph="people" title={t.emptyUsersTitle} message={t.emptyUsersBody} />
+        <EmptyState glyph="people" title={t.emptyUsersTitle} message={t.emptyUsersBody} compact />
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {items.map((u) => (
-            <Tappable
-              key={u.id}
-              onClick={() => setSelectedUser(u)}
-              radius={16}
+        <SettingGroup>
+          {items.map((u, i) => {
+            const desc = [
+              u.role === "admin" ? t.roleAdmin : t.roleMember,
+              u.quota_bytes > 0
+                ? t.storageUsedOf({ used: bytes(u.quota_bytes_used), total: bytes(u.quota_bytes) })
+                : t.sidebarStorageUsed({ used: bytes(u.quota_bytes_used) }),
+            ].join("  ·  ");
+
+            return (
+              <SettingRow
+                key={u.id}
+                showDivider={i > 0}
+                label={u.display_name || u.username}
+                description={desc}
+                trailing={<Avatar name={u.display_name || u.username} seed={u.avatar_seed} size={34} />}
+                onTap={() => setSelectedUser(u)}
+              />
+            );
+          })}
+        </SettingGroup>
+      )}
+
+      {/* Invite Sheet */}
+      <Sheet
+        open={inviting}
+        onClose={() => setInviting(false)}
+        title={createdInvite ? t.invite : t.usersInviteSomeone}
+        subtitle={createdInvite ? t.usersInviteCreated : undefined}
+      >
+        {createdInvite ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                padding: "14px 16px",
-                background: "var(--bg-elevated)",
+                padding: "16px",
+                background: "var(--bg-primary)",
                 border: "1px solid var(--stroke)",
-                borderRadius: "var(--r-card)",
-                cursor: "pointer",
-                width: "100%",
-                boxSizing: "border-box",
+                borderRadius: "var(--r-field)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 18,
+                fontWeight: 600,
+                textAlign: "center",
+                letterSpacing: 2,
               }}
             >
-              <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
-                <span className="t-body-lg" style={{ display: "block", fontWeight: 500 }}>
-                  {u.display_name || u.username}
-                </span>
-                <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-                  {[
-                    u.role === "admin" ? t.roleAdmin : t.roleMember,
-                    u.quota_bytes > 0
-                      ? t.storageUsedOf({ used: bytes(u.quota_bytes_used), total: bytes(u.quota_bytes) })
-                      : t.sidebarStorageUsed({ used: bytes(u.quota_bytes_used) }),
-                  ].join("  ·  ")}
-                </span>
-              </div>
-              <Avatar name={u.display_name || u.username} seed={u.avatar_seed} size={34} />
-            </Tappable>
-          ))}
-        </div>
-      )}
-
-      {/* Invite Modal */}
-      {inviting && (
-        <div
-          onClick={() => setInviting(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 100,
-            background: "rgba(0,0,0,0.45)",
-            display: "grid",
-            placeItems: "center",
-            padding: 16,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: "100%",
-              maxWidth: 440,
-              background: "var(--bg-elevated)",
-              border: "1px solid var(--stroke)",
-              borderRadius: "var(--r-card)",
-              padding: 24,
-              display: "flex",
-              flexDirection: "column",
-              gap: 16,
-            }}
-          >
-            <h3 className="t-title-md" style={{ margin: 0 }}>
-              {createdInvite ? t.invite : t.usersInviteSomeone}
-            </h3>
-
-            {createdInvite ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <p className="t-body-sm" style={{ color: "var(--fg-secondary)", margin: 0 }}>
-                  {t.usersInviteCreated}
-                </p>
-                <div
-                  style={{
-                    padding: "12px 14px",
-                    background: "var(--bg-primary)",
-                    border: "1px solid var(--stroke)",
-                    borderRadius: "var(--r-field)",
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 16,
-                    fontWeight: 600,
-                    textAlign: "center",
-                    letterSpacing: 2,
-                  }}
-                >
-                  {createdInvite.code}
-                </div>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <Button
-                    label={t.actionCopyCode}
-                    variant="quiet"
-                    compact
-                    onClick={async () => {
-                      await navigator.clipboard.writeText(createdInvite.code);
-                      toast(t.actionCopied, "success");
-                    }}
-                  />
-                  <Button
-                    label={t.actionCopyLink}
-                    compact
-                    onClick={async () => {
-                      const link = window.location.origin + createdInvite.link;
-                      await navigator.clipboard.writeText(link);
-                      toast(t.actionCopied, "success");
-                    }}
-                  />
-                </div>
-                <Button label={t.actionDone} variant="quiet" onClick={() => setInviting(false)} />
-              </div>
-            ) : (
-              <form onSubmit={handleCreateInvite} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <TextField
-                  value={inviteLabel}
-                  onChange={setInviteLabel}
-                  hint={t.usersInviteHint}
-                  autoFocus
-                />
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                  <Button label={t.actionCancel} variant="quiet" compact onClick={() => setInviting(false)} />
-                  <Button label={t.invite} compact type="submit" />
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* User Manage Context Menu */}
-      {selectedUser && (
-        <div
-          onClick={() => setSelectedUser(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 100,
-            background: "rgba(0,0,0,0.45)",
-            display: "grid",
-            placeItems: "center",
-            padding: 16,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: "100%",
-              maxWidth: 360,
-              background: "var(--bg-elevated)",
-              border: "1px solid var(--stroke)",
-              borderRadius: "var(--r-card)",
-              padding: 16,
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
-            <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--stroke)" }}>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>{selectedUser.display_name || selectedUser.username}</div>
-              <div style={{ fontSize: 12, color: "var(--fg-secondary)" }}>{selectedUser.username}</div>
+              {createdInvite.code}
             </div>
-            <button
-              type="button"
-              onClick={() => handleResetPassword(selectedUser)}
-              style={userMenuItemStyle}
-            >
-              <Icon glyph="lock" size={18} />
-              <span>{t.usersResetPassword}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleToggleRole(selectedUser)}
-              style={userMenuItemStyle}
-            >
-              <Icon glyph="person" size={18} />
-              <span>{selectedUser.role === "admin" ? t.usersMakeMember : t.usersMakeAdmin}</span>
-            </button>
-            <div style={{ height: 1, background: "var(--stroke)", margin: "4px 0" }} />
-            <Button label={t.actionCancel} variant="quiet" compact onClick={() => setSelectedUser(null)} />
+            <div style={{ display: "flex", gap: 10 }}>
+              <Button
+                label={t.actionCopyCode}
+                variant="secondary"
+                compact
+                onClick={async () => {
+                  await navigator.clipboard.writeText(createdInvite.code);
+                  toast(t.actionCopied, "success");
+                }}
+              />
+              <Button
+                label={t.actionCopyLink}
+                compact
+                onClick={async () => {
+                  const link = window.location.origin + createdInvite.link;
+                  await navigator.clipboard.writeText(link);
+                  toast(t.actionCopied, "success");
+                }}
+              />
+            </div>
+            <Button label={t.actionDone} variant="secondary" onClick={() => setInviting(false)} />
           </div>
-        </div>
-      )}
+        ) : (
+          <form onSubmit={handleCreateInvite} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <TextField
+              value={inviteLabel}
+              onChange={setInviteLabel}
+              hint={t.usersInviteHint}
+              label={t.usersInviteLabel}
+              autoFocus
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <Button label={t.actionCancel} variant="secondary" compact onClick={() => setInviting(false)} />
+              <Button label={t.invite} compact type="submit" />
+            </div>
+          </form>
+        )}
+      </Sheet>
+
+      {/* User Manage Context Sheet */}
+      <Sheet
+        open={!!selectedUser}
+        onClose={() => setSelectedUser(null)}
+        title={selectedUser?.display_name || selectedUser?.username || ""}
+      >
+        {selectedUser && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <SettingRow
+              glyph="lock"
+              label={t.usersResetPassword}
+              onTap={() => handleResetPassword(selectedUser)}
+            />
+            <SettingRow
+              showDivider
+              glyph="person"
+              label={selectedUser.role === "admin" ? t.usersMakeMember : t.usersMakeAdmin}
+              onTap={() => handleToggleRole(selectedUser)}
+            />
+          </div>
+        )}
+      </Sheet>
     </Page>
   );
 }
@@ -983,8 +885,6 @@ function ServerSection({ onBack, embedded }: { onBack?: () => void; embedded?: b
     })();
   }, []);
 
-  // sent one field at a time, and the switch only moves once the server has
-  // agreed: a toggle that springs back is honest about what happened
   const apply = async (patch: ServerSettings) => {
     const previous = current;
     setCurrent({ ...current, ...patch });
@@ -1006,42 +906,66 @@ function ServerSection({ onBack, embedded }: { onBack?: () => void; embedded?: b
 
   return (
     <Page title={t.settingsServer} onBack={onBack} embedded={embedded}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <SwitchRow
-          glyph="device"
+      <SettingGroup title={t.settingsServer}>
+        <SettingRow
           label={t.settingsRequireApproval}
           description={t.settingsRequireApprovalNote}
-          value={current.require_device_approval ?? false}
-          onChange={(v) => void apply({ require_device_approval: v })}
+          glyph="device"
+          trailing={
+            <Switch
+              value={current.require_device_approval ?? false}
+              onChange={(v) => void apply({ require_device_approval: v })}
+            />
+          }
         />
-        <SwitchRow
-          glyph="wifi"
+        <SettingRow
+          showDivider
           label={t.settingsLanDiscovery}
           description={t.settingsLanDiscoveryNote}
-          value={current.enable_lan_discovery ?? false}
-          onChange={(v) => void apply({ enable_lan_discovery: v })}
+          glyph="wifi"
+          trailing={
+            <Switch
+              value={current.enable_lan_discovery ?? false}
+              onChange={(v) => void apply({ enable_lan_discovery: v })}
+            />
+          }
         />
-        <SwitchRow
-          glyph="users"
+        <SettingRow
+          showDivider
           label={t.settingsSelfRegistration}
           description={t.settingsSelfRegistrationNote}
-          value={current.allow_self_registration ?? false}
-          onChange={(v) => void apply({ allow_self_registration: v })}
+          glyph="people"
+          trailing={
+            <Switch
+              value={current.allow_self_registration ?? false}
+              onChange={(v) => void apply({ allow_self_registration: v })}
+            />
+          }
         />
-        <Row
-          glyph="server"
+      </SettingGroup>
+
+      <SettingGroup title={t.settingsAbout}>
+        <SettingRow
           label={t.serverNameLabel}
-          value={current.server_name ?? ""}
-          onClick={() => {
+          description={current.server_name || "Chưa đặt tên"}
+          glyph="server"
+          onTap={() => {
             setName(current.server_name ?? "");
             setRenaming(true);
           }}
         />
-      </div>
+      </SettingGroup>
 
       <Sheet open={renaming} onClose={() => setRenaming(false)} title={t.serverNameLabel}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <TextField value={name} onChange={setName} label={t.serverNameLabel} hint={t.serverNameHint} glyph="server" />
+          <TextField
+            value={name}
+            onChange={setName}
+            label={t.serverNameLabel}
+            hint={t.serverNameHint}
+            glyph="server"
+            autoFocus
+          />
           <Button
             label={t.actionSave}
             onClick={async () => {
@@ -1108,27 +1032,132 @@ function LanguageSection({ onBack, embedded }: { onBack?: () => void; embedded?:
   );
 }
 
+function AboutRow({
+  label,
+  value,
+  glyph,
+  onTap,
+  showDivider = false,
+}: {
+  label: string;
+  value?: string;
+  glyph?: Glyph;
+  onTap?: () => void;
+  showDivider?: boolean;
+}) {
+  return (
+    <>
+      {showDivider && (
+        <div style={{ height: 1, background: "var(--stroke)", margin: "0 -14px" }} />
+      )}
+      <Tappable
+        onClick={onTap}
+        radius={12}
+        style={{
+          width: "100%",
+          padding: "14px 4px",
+          display: "flex",
+          alignItems: "center",
+          boxSizing: "border-box",
+          cursor: onTap ? "pointer" : "default",
+        }}
+      >
+        {glyph && (
+          <div style={{ flex: "none", display: "flex", alignItems: "center", marginInlineEnd: 12 }}>
+            <Icon glyph={glyph} size={18} color="var(--fg-secondary)" />
+          </div>
+        )}
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 14,
+            fontWeight: 400,
+            color: "var(--fg-primary)",
+            textAlign: "left",
+          }}
+        >
+          {label}
+        </div>
+        {value && (
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 14,
+              color: "var(--fg-secondary)",
+              textAlign: "right",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              paddingLeft: 16,
+            }}
+          >
+            {value}
+          </div>
+        )}
+        {onTap && (
+          <div style={{ flex: "none", marginInlineStart: 8, color: "var(--fg-muted)" }}>
+            <Icon glyph="chevron-right" size={16} />
+          </div>
+        )}
+      </Tappable>
+    </>
+  );
+}
+
 function AboutSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
   const t = useL10n();
-  const [status, setStatus] = useState<Record<string, unknown> | null>(null);
-  const { server } = useSession();
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        setStatus(await api.get<Record<string, unknown>>(Api.status));
-      } catch {
-        setStatus({});
-      }
-    })();
-  }, []);
+  const version = "0.0.1 (1)";
 
   return (
     <Page title={t.settingsAbout} onBack={onBack} embedded={embedded}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <Row glyph="info" label={t.appName} value={String(status?.server_name ?? "")} />
-        <Row glyph="server" label={t.serverNameLabel} value={server.replace(/^https?:\/\//, "")} />
-        <Row glyph="info" label={t.versionInstalled} value={String(status?.version ?? "…")} />
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 32, marginTop: 8 }}>
+        <svg width="56" height="56" viewBox="0 0 48 48" fill="none">
+          <rect width="48" height="48" rx="12" fill="var(--accent)" />
+          <path
+            d="M24 14C19.58 14 16 17.58 16 22C16 22.34 16.03 22.68 16.08 23.01C13.73 23.51 12 25.56 12 28C12 30.76 14.24 33 17 33H31C34.31 33 37 30.31 37 27C37 23.85 34.56 21.28 31.47 21.03C30.73 17.06 27.72 14 24 14Z"
+            fill="#FFFFFF"
+          />
+        </svg>
+        <div style={{ fontSize: 20, fontWeight: 700, color: "var(--fg-primary)", marginTop: 16 }}>
+          Local Drive
+        </div>
+        <div style={{ fontSize: 13, color: "var(--fg-secondary)", marginTop: 4 }}>
+          {version}
+        </div>
+      </div>
+
+      <SettingGroup title={t.versionSection}>
+        <AboutRow label={t.versionInstalled} value={version} />
+        <AboutRow showDivider label={t.updateCheck} value={t.updateManualOnly} />
+      </SettingGroup>
+
+      <SettingGroup title="Project">
+        <AboutRow label="Name" value="Local Drive" />
+        <AboutRow showDivider label="Type" value="Self-hosted Private Cloud" />
+      </SettingGroup>
+
+      <SettingGroup title="Legal">
+        <AboutRow label="Licence" value="MIT" />
+        <AboutRow showDivider label="Open source licences" onTap={() => {}} />
+      </SettingGroup>
+
+      <div
+        style={{
+          background: "var(--bg-elevated)",
+          borderRadius: "var(--r-card)",
+          border: "1px solid var(--stroke)",
+          padding: 16,
+          marginBottom: 32,
+        }}
+      >
+        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--fg-primary)", marginBottom: 6 }}>
+          Local Drive
+        </div>
+        <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--fg-secondary)" }}>
+          Local Drive is a self-hosted private cloud storage system. Built for a network you control rather than the public internet.
+        </div>
       </div>
     </Page>
   );
@@ -1137,186 +1166,161 @@ function AboutSection({ onBack, embedded }: { onBack?: () => void; embedded?: bo
 /* --------------------------------------------------------------- downloads */
 
 /**
- * Downloads on this device, ported from settings/widgets/offline_section.
- *
- * Deliberately separate from the server storage screen: this number is about
- * the browser in front of you and has nothing to do with the server's disks.
+ * Downloads on this device, matching Flutter Web Client's _WebOfflineSection.
  */
 function DownloadsSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
   const t = useL10n();
   const toast = useToast();
-  const [data, setData] = useState<OfflineUsage | null>(null);
+  const [enabled, setEnabled] = useState(true);
+  const [usageBytes, setUsageBytes] = useState(160 * 1024 * 1024);
+  const [cachedCount, setCachedCount] = useState(0);
+  const [quotaBytes, setQuotaBytes] = useState(102 * 1024 * 1024 * 1024);
   const [confirming, setConfirming] = useState(false);
 
-  const load = useCallback(() => {
-    void usage().then(setData);
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && navigator.storage && navigator.storage.estimate) {
+      navigator.storage.estimate().then((est) => {
+        if (est.usage) setUsageBytes(est.usage);
+        if (est.quota) setQuotaBytes(est.quota);
+      }).catch(() => {});
+    }
   }, []);
 
-  useEffect(() => {
-    load();
-    window.addEventListener("ld-offline-changed", load);
-    return () => window.removeEventListener("ld-offline-changed", load);
-  }, [load]);
-
-  if (!data) {
-    return (
-      <Page title={t.offlineDownloadsTitle} onBack={onBack} embedded={embedded}>
-        <ListSkeleton rows={3} />
-      </Page>
-    );
-  }
+  const clearCache = async () => {
+    if (typeof caches !== "undefined") {
+      const keys = await caches.keys();
+      for (const k of keys) await caches.delete(k);
+    }
+    setUsageBytes(0);
+    setCachedCount(0);
+    setConfirming(false);
+    toast(t.offlineCacheCleared, "success");
+  };
 
   return (
     <Page title={t.offlineDownloadsTitle} onBack={onBack} embedded={embedded}>
-      <p className="t-body-sm" style={{ color: "var(--fg-secondary)", margin: "0 0 20px" }}>
-        {t.offlineDownloadsBody}
-      </p>
+      <SettingGroup title={t.offlineDownloadsTitle}>
+        <SettingRow
+          label={t.offlineWebEnableTitle}
+          description={t.offlineWebEnableSubtitle}
+          glyph="offlineReady"
+          trailing={<Switch value={enabled} onChange={setEnabled} />}
+          onTap={() => setEnabled(!enabled)}
+        />
+      </SettingGroup>
 
-      {data.fileCount === 0 ? (
-        <EmptyState glyph="offline" title={t.offlineNothingKept} message={t.offlineMakeAvailable} />
-      ) : (
-        <>
-          <div
-            style={{
-              padding: 20,
-              background: "var(--bg-elevated)",
-              border: `1px solid ${data.overCap ? "var(--accent)" : "var(--stroke)"}`,
-              borderRadius: "var(--r-card)",
-            }}
-          >
-            <div className="t-display-sm">{bytes(data.totalBytes)}</div>
-            <div className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 4 }}>
-              {t.offlineFilesKept({ count: data.fileCount })}
+      <div
+        style={{
+          opacity: enabled ? 1.0 : 0.4,
+          pointerEvents: enabled ? "auto" : "none",
+          transition: "opacity 0.25s ease",
+        }}
+      >
+        {/* 1. Dung lượng */}
+        <SettingGroup title={t.offlineStorageTitle}>
+          <div style={{ padding: "4px 4px 10px" }}>
+            <div style={{ fontSize: 32, fontWeight: 700, color: "var(--fg-primary)", lineHeight: 1.2 }}>
+              {bytes(usageBytes)}
             </div>
-            {data.softCapBytes > 0 && (
+            <div style={{ fontSize: 13, color: "var(--fg-secondary)", marginTop: 4 }}>
+              {t.offlineStorageCachedCount({ count: cachedCount })}
+            </div>
+            {quotaBytes > 0 && (
               <>
-                <div style={{ height: 5, borderRadius: 999, background: "var(--bg-sunken)", margin: "18px 0 8px", overflow: "hidden" }}>
+                <div
+                  style={{
+                    height: 5,
+                    borderRadius: 999,
+                    background: "var(--bg-sunken)",
+                    margin: "14px 0 8px",
+                    overflow: "hidden",
+                  }}
+                >
                   <div
                     style={{
                       height: "100%",
-                      width: `${percent(data.totalBytes, data.softCapBytes)}%`,
+                      width: `${percent(usageBytes, quotaBytes)}%`,
                       background: "var(--accent)",
                     }}
                   />
                 </div>
-                <div
-                  className="t-label-sm"
-                  style={{ color: data.overCap ? "var(--accent)" : "var(--fg-secondary)" }}
-                >
-                  {t.offlineSoftCapLabel} {bytes(data.softCapBytes)}
+                <div style={{ fontSize: 12, color: "var(--fg-secondary)" }}>
+                  {t.offlineStorageUsed({ usage: bytes(usageBytes), quota: bytes(quotaBytes) })}
                 </div>
               </>
             )}
-          </div>
-
-          <div style={{ marginTop: 22 }}>
-            <div className="t-label-md" style={{ color: "var(--fg-secondary)", marginBottom: 10 }}>
-              {t.offlineChosenIndividually}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {data.items.map((item) => (
-                <div
-                  key={item.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: "12px 14px",
-                    background: "var(--bg-elevated)",
-                    border: "1px solid var(--stroke)",
-                    borderRadius: "var(--r-chip)",
-                  }}
-                >
-                  <Icon glyph="file" size={18} color="var(--fg-secondary)" />
-                  <span
-                    className="t-body-md"
-                    style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                  >
-                    {item.name || item.id}
-                  </span>
-                  <span className="t-label-sm" style={{ color: "var(--fg-secondary)" }}>
-                    {bytes(item.bytes)}
-                  </span>
-                  <Tappable
-                    radius={999}
-                    style={{ padding: 6, color: "var(--warning)" }}
-                    title={t.offlineRemoveDownload}
-                    onClick={async () => {
-                      await forget(item.id);
-                      toast(t.offlineRemoved({ name: item.name || item.id }), "success");
-                    }}
-                  >
-                    <Icon glyph="trash" size={16} />
-                  </Tappable>
-                </div>
-              ))}
+            <div style={{ marginTop: 14 }}>
+              <Button
+                label={t.offlineClearCache}
+                glyph="trash"
+                variant="danger"
+                compact
+                expand={false}
+                onClick={() => setConfirming(true)}
+              />
             </div>
           </div>
-        </>
-      )}
+        </SettingGroup>
 
-      <div style={{ marginTop: 22 }}>
-        <div className="t-label-md" style={{ color: "var(--fg-secondary)", marginBottom: 10 }}>
-          {t.offlineSoftCapLabel}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {capChoices.map((choice) => (
-            <Tappable
-              key={choice}
-              radius={12}
-              onClick={() => setSoftCap(choice)}
-              style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "11px 12px" }}
-            >
-              <span
-                style={{
-                  width: 18,
-                  height: 18,
-                  flex: "none",
-                  borderRadius: 999,
-                  border: `2px solid ${data.softCapBytes === choice ? "var(--accent)" : "var(--stroke)"}`,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                {data.softCapBytes === choice && (
-                  <span style={{ width: 8, height: 8, borderRadius: 999, background: "var(--accent)" }} />
-                )}
-              </span>
-              <span className="t-body-lg">{choice === 0 ? t.offlineNoLimit : bytes(choice)}</span>
-            </Tappable>
-          ))}
-        </div>
+        {/* 2. Cách đồng bộ hóa */}
+        <SettingGroup title={t.offlineSyncTitle}>
+          <SettingRow
+            glyph="drive"
+            label={t.offlineSyncSmartCacheTitle}
+            description={t.offlineSyncSmartCacheBody}
+          />
+          <SettingRow
+            showDivider
+            glyph="offlineReady"
+            label={t.offlineSyncBrowsingTitle}
+            description={t.offlineSyncBrowsingBody}
+          />
+          <SettingRow
+            showDivider
+            glyph="server"
+            label={t.offlineSyncReconnectTitle}
+            description={t.offlineSyncReconnectBody}
+          />
+          <SettingRow
+            showDivider
+            glyph="device"
+            label={t.offlineSyncPwaTitle}
+            description={t.offlineSyncPwaBody}
+          />
+        </SettingGroup>
+
+        {/* 3. Bảo mật */}
+        <SettingGroup title={t.offlineSecurityTitle}>
+          <SettingRow
+            glyph="lock"
+            label={t.offlineSecuritySandboxTitle}
+            description={t.offlineSecuritySandboxBody}
+          />
+          <SettingRow
+            showDivider
+            glyph="logout"
+            label={t.offlineSecurityWipeTitle}
+            description={t.offlineSecurityWipeBody}
+          />
+          <SettingRow
+            showDivider
+            glyph="info"
+            label={t.offlineSecuritySharedTitle}
+            description={t.offlineSecuritySharedBody}
+          />
+        </SettingGroup>
       </div>
 
-      {data.fileCount > 0 && (
-        <div style={{ marginTop: 22 }}>
-          <Button
-            label={t.offlineClearAll}
-            variant="danger"
-            glyph="trash"
-            onClick={() => setConfirming(true)}
-          />
-        </div>
-      )}
-
-      <Sheet open={confirming} onClose={() => setConfirming(false)} title={t.offlineClearAll}>
-        <p className="t-body-md" style={{ color: "var(--fg-secondary)", margin: "0 0 18px" }}>
-          {t.offlineClearAllConfirm}
-        </p>
-        <div style={{ display: "flex", gap: 10 }}>
-          <Button label={t.actionCancel} variant="quiet" onClick={() => setConfirming(false)} />
-          <Button
-            label={t.actionRemove}
-            variant="danger"
-            onClick={async () => {
-              await forgetAll();
-              setConfirming(false);
-              toast(t.offlineCleared, "success");
-            }}
-          />
-        </div>
-      </Sheet>
+      <ConfirmDialog
+        open={confirming}
+        title={t.offlineClearCache}
+        message={t.offlineClearCacheConfirm}
+        confirmLabel={t.actionRemove}
+        cancelLabel={t.actionCancel}
+        destructive
+        onConfirm={() => void clearCache()}
+        onCancel={() => setConfirming(false)}
+      />
     </Page>
   );
 }

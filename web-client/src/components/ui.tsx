@@ -87,7 +87,7 @@ export function Button({
   label: string;
   onClick?: () => void;
   glyph?: Glyph;
-  variant?: "primary" | "quiet" | "danger";
+  variant?: "primary" | "secondary" | "quiet" | "danger" | "destructive";
   expand?: boolean;
   compact?: boolean;
   disabled?: boolean;
@@ -96,8 +96,10 @@ export function Button({
 }) {
   const palette = {
     primary: { bg: "var(--accent)", fg: "#FFFFFF", border: "var(--accent)" },
+    secondary: { bg: "transparent", fg: "var(--fg-primary)", border: "var(--stroke)" },
     quiet: { bg: "transparent", fg: "var(--fg-primary)", border: "var(--stroke)" },
     danger: { bg: "transparent", fg: "var(--warning)", border: "var(--warning)" },
+    destructive: { bg: "transparent", fg: "var(--warning)", border: "var(--warning)" },
   }[variant];
 
   return (
@@ -224,6 +226,169 @@ export function RadioRow({
   );
 }
 
+/* ---------------------------------------------------------------- controls */
+
+export function Switch({
+  value,
+  onChange,
+  disabled = false,
+}: {
+  value: boolean;
+  onChange?: (val: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Tappable
+      onClick={() => {
+        if (!disabled && onChange) onChange(!value);
+      }}
+      disabled={disabled}
+      radius={16}
+      style={{
+        width: 46,
+        height: 28,
+        padding: 3,
+        borderRadius: 14,
+        background: value ? "var(--accent)" : "rgba(128, 128, 128, 0.16)",
+        border: `1px solid ${value ? "var(--accent)" : "var(--stroke)"}`,
+        display: "flex",
+        alignItems: "center",
+        boxSizing: "border-box",
+        cursor: disabled ? "not-allowed" : "pointer",
+        transition: "background var(--d-tap) var(--ease), border var(--d-tap) var(--ease)",
+      }}
+    >
+      <div
+        style={{
+          width: 20,
+          height: 20,
+          borderRadius: 999,
+          background: "#FFFFFF",
+          marginInlineStart: value ? "auto" : 0,
+          boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+          transition: "margin var(--d-tap) var(--ease)",
+        }}
+      />
+    </Tappable>
+  );
+}
+
+export function SettingGroup({
+  title,
+  children,
+}: {
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      {title && (
+        <div
+          style={{
+            padding: "4px 8px 4px 10px",
+            fontSize: 12,
+            fontWeight: 600,
+            color: "var(--fg-secondary)",
+            letterSpacing: 0.3,
+          }}
+        >
+          {title}
+        </div>
+      )}
+      <div
+        style={{
+          background: "var(--bg-elevated)",
+          borderRadius: "var(--r-card)",
+          border: "1px solid var(--stroke)",
+          padding: "8px 14px",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function SettingRow({
+  glyph,
+  label,
+  description,
+  trailing,
+  onTap,
+  destructive = false,
+  showDivider = false,
+}: {
+  glyph?: Glyph;
+  label: string;
+  description?: string;
+  trailing?: ReactNode;
+  onTap?: () => void;
+  destructive?: boolean;
+  showDivider?: boolean;
+}) {
+  const color = destructive ? "var(--warning)" : "var(--fg-primary)";
+
+  return (
+    <>
+      {showDivider && (
+        <div style={{ height: 1, background: "var(--stroke)", margin: "0 -14px" }} />
+      )}
+      <Tappable
+        onClick={onTap}
+        radius={12}
+        style={{
+          width: "100%",
+          padding: "14px 4px",
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          cursor: onTap ? "pointer" : "default",
+          boxSizing: "border-box",
+        }}
+      >
+        {glyph && (
+          <div style={{ flex: "none", display: "flex", alignItems: "center" }}>
+            <Icon glyph={glyph} size={19} color={destructive ? "var(--warning)" : "var(--fg-secondary)"} />
+          </div>
+        )}
+        <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+          <div
+            className="t-body-lg"
+            style={{
+              color,
+              fontWeight: 400,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {label}
+          </div>
+          {description && (
+            <div
+              className="t-body-sm"
+              style={{
+                color: "var(--fg-secondary)",
+                marginTop: 2,
+                lineHeight: 1.4,
+              }}
+            >
+              {description}
+            </div>
+          )}
+        </div>
+        {trailing ? (
+          <div style={{ flex: "none", marginInlineStart: 12 }}>{trailing}</div>
+        ) : onTap ? (
+          <div style={{ flex: "none", marginInlineStart: 8, color: "var(--fg-secondary)" }}>
+            <Icon glyph="chevron-right" size={18} />
+          </div>
+        ) : null}
+      </Tappable>
+    </>
+  );
+}
+
 /* ------------------------------------------------------------------ field */
 
 export function TextField({
@@ -335,12 +500,14 @@ export function EmptyState({
   message,
   actionLabel,
   onAction,
+  compact = false,
 }: {
   glyph?: Glyph;
   title: string;
   message?: string;
   actionLabel?: string;
   onAction?: () => void;
+  compact?: boolean;
 }) {
   return (
     <div
@@ -351,7 +518,7 @@ export function EmptyState({
         alignItems: "center",
         justifyContent: "center",
         textAlign: "center",
-        padding: "56px 24px",
+        padding: compact ? "24px 16px" : "56px 24px",
         gap: 6,
       }}
     >
@@ -817,6 +984,7 @@ export function Dialog({
 export function ConfirmDialog({
   open,
   onClose,
+  onCancel,
   title,
   message,
   confirmLabel,
@@ -825,7 +993,8 @@ export function ConfirmDialog({
   onConfirm,
 }: {
   open: boolean;
-  onClose: () => void;
+  onClose?: () => void;
+  onCancel?: () => void;
   title: string;
   message: string;
   confirmLabel: string;
@@ -833,8 +1002,9 @@ export function ConfirmDialog({
   destructive?: boolean;
   onConfirm: () => void | Promise<void>;
 }) {
+  const handleClose = onCancel ?? onClose ?? (() => {});
   return (
-    <Dialog open={open} onClose={onClose} title={title}>
+    <Dialog open={open} onClose={handleClose} title={title}>
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
         <div className="t-body-md" style={{ color: "var(--fg-primary)", lineHeight: 1.5 }}>
           {message}
@@ -845,7 +1015,7 @@ export function ConfirmDialog({
             variant="quiet"
             expand={false}
             compact
-            onClick={onClose}
+            onClick={handleClose}
           />
           <Button
             label={confirmLabel}
@@ -854,7 +1024,7 @@ export function ConfirmDialog({
             compact
             onClick={() => {
               void onConfirm();
-              onClose();
+              handleClose();
             }}
           />
         </div>
