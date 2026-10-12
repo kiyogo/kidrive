@@ -213,11 +213,18 @@ export function Shell({
                   gap: 12,
                   padding: "11px 14px",
                   background: active ? "rgba(76,141,255,0.12)" : "transparent",
-                  color: "var(--fg-primary)",
+                  color: active ? "var(--fg-primary)" : "var(--fg-secondary)",
                 }}
               >
                 <Icon glyph={item.glyph} size={19} color={active ? "var(--accent)" : "var(--fg-secondary)"} />
-                <span className="t-body-lg" style={{ fontWeight: 400, flex: 1 }}>
+                <span
+                  className="t-body-lg"
+                  style={{
+                    fontWeight: 400,
+                    flex: 1,
+                    color: active ? "var(--fg-primary)" : "var(--fg-secondary)",
+                  }}
+                >
                   {String(t[item.key])}
                 </span>
               </Tappable>

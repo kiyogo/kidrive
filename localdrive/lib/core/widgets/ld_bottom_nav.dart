@@ -171,7 +171,7 @@ class _NavButton extends StatelessWidget {
               style: Theme.of(context).textTheme.labelSmall!.copyWith(
                     color: color,
                     fontSize: 11.5,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    fontWeight: FontWeight.w500,
                     letterSpacing: 0.1,
                   ),
               child: Text(
@@ -264,7 +264,9 @@ class _SidebarRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final labelColor = context.surfaces.foregroundPrimary;
+    final labelColor = selected
+        ? context.surfaces.foregroundPrimary
+        : context.surfaces.foregroundSecondary;
     final iconColor = selected
         ? LdColors.accentPrimary
         : context.surfaces.foregroundSecondary;
@@ -296,8 +298,7 @@ class _SidebarRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodyLarge!.copyWith(
                         color: labelColor,
-                        fontWeight:
-                            selected ? FontWeight.w600 : FontWeight.w400,
+                        fontWeight: FontWeight.w400,
                       ),
                 ),
               ),
