@@ -64,6 +64,7 @@ export function Tappable({
         opacity: disabled ? 0.5 : 1,
         transition: `background var(--d-tap) var(--ease), opacity var(--d-tap) var(--ease)`,
         textAlign: "start",
+        whiteSpace: "normal",
         ...style,
       }}
     >
@@ -109,6 +110,7 @@ export function Button({
       type={type}
       onClick={onClick}
       disabled={disabled || busy}
+      className="ld-btn"
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -123,6 +125,7 @@ export function Button({
         border: `1px solid ${palette.border}`,
         font: "inherit",
         fontWeight: 600,
+        whiteSpace: "nowrap",
         fontSize: compact ? 13 : 14,
         cursor: disabled || busy ? "not-allowed" : "pointer",
         opacity: disabled ? 0.45 : 1,
@@ -303,6 +306,8 @@ export function SettingGroup({
           borderRadius: "var(--r-card)",
           border: "1px solid var(--stroke)",
           padding: "8px 14px",
+          boxSizing: "border-box",
+          overflow: "hidden",
         }}
       >
         {children}
@@ -357,6 +362,8 @@ export function SettingRow({
               color: "var(--fg-secondary)",
               marginTop: 2,
               lineHeight: 1.4,
+              whiteSpace: "normal",
+              wordBreak: "break-word",
             }}
           >
             {description}
@@ -390,6 +397,7 @@ export function SettingRow({
             cursor: onTap ? "pointer" : "default",
             boxSizing: "border-box",
             borderRadius: 12,
+            whiteSpace: "normal",
           }}
         >
           {rowContent}
@@ -406,6 +414,7 @@ export function SettingRow({
             gap: 14,
             cursor: onTap ? "pointer" : "default",
             boxSizing: "border-box",
+            whiteSpace: "normal",
           }}
         >
           {rowContent}
