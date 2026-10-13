@@ -691,43 +691,45 @@ export function ErrorState({
   );
 }
 
-/** The shape of what is coming is known, so a skeleton reads as content
- *  arriving rather than as a wait. */
-export function GridSkeleton({ columns = 4 }: { columns?: number }) {
+/**
+ * Loading indicator: shows only the brand loading Spinner (zero skeleton frames).
+ * Includes a 120ms debounce: if data arrives immediately, nothing flashes and
+ * the content renders right away. If loading takes longer, only the centered
+ * Spinner icon is displayed.
+ */
+export function LoadingState({ size = 32, delay = 120 }: { size?: number; delay?: number }) {
+  const [show, setShow] = useState(delay === 0);
+
+  useEffect(() => {
+    if (delay === 0) return;
+    const timer = setTimeout(() => setShow(true), delay);
+    return () => clearTimeout(timer);
+  }, [delay]);
+
+  if (!show) return null;
+
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: `repeat(auto-fill, minmax(150px, 1fr))`,
-        gap: 14,
-        padding: 20,
+        placeItems: "center",
+        minHeight: 240,
+        padding: 40,
+        width: "100%",
+        boxSizing: "border-box",
       }}
     >
-      {Array.from({ length: columns * 2 }).map((_, i) => (
-        <div key={i}>
-          <div className="ld-skeleton" style={{ aspectRatio: "1 / 1", borderRadius: "var(--r-tile)" }} />
-          <div className="ld-skeleton" style={{ height: 12, borderRadius: 6, marginTop: 10, width: "70%" }} />
-          <div className="ld-skeleton" style={{ height: 10, borderRadius: 6, marginTop: 6, width: "40%" }} />
-        </div>
-      ))}
+      <Spinner size={size} />
     </div>
   );
 }
 
-export function ListSkeleton({ rows = 8 }: { rows?: number }) {
-  return (
-    <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 10 }}>
-      {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <div className="ld-skeleton" style={{ width: 40, height: 40, borderRadius: 10 }} />
-          <div style={{ flex: 1 }}>
-            <div className="ld-skeleton" style={{ height: 12, borderRadius: 6, width: "45%" }} />
-            <div className="ld-skeleton" style={{ height: 10, borderRadius: 6, width: "20%", marginTop: 7 }} />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+export function GridSkeleton({ columns: _columns }: { columns?: number } = {}) {
+  return <LoadingState size={32} delay={120} />;
+}
+
+export function ListSkeleton({ rows: _rows }: { rows?: number } = {}) {
+  return <LoadingState size={32} delay={120} />;
 }
 
 /* ------------------------------------------------------------------ toast */

@@ -285,20 +285,9 @@ class _PeopleSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: <Widget>[
-        for (var i = 0; i < 4; i++)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-            child: Row(
-              children: <Widget>[
-                LdSkeleton.circle(size: 38),
-                SizedBox(width: 12),
-                LdSkeleton(width: 130, height: 13),
-              ],
-            ),
-          ),
-      ],
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 32),
+      child: Center(child: LdSpinner()),
     );
   }
 }
