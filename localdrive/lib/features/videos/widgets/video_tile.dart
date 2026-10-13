@@ -1,6 +1,7 @@
 import '../../../imports.dart';
 import '../../files/models/node_model.dart';
 import '../../files/providers/files_providers.dart';
+import '../../files/widgets/shared/node_actions.dart';
 import '../../offline/controller/offline_controller.dart';
 
 /// A card for one video in the videos grid.
@@ -60,6 +61,7 @@ class VideoTile extends HookConsumerWidget {
       child: LdTappable(
         onTap: selecting ? onToggleSelect : onOpen,
         onLongPress: onToggleSelect,
+        onSecondaryTap: (pos) => showNodeActions(context, ref, node, pos),
         borderRadius: LdRadii.tileRadius,
         child: AnimatedContainer(
           duration: LdMotion.tapFade,

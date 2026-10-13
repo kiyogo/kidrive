@@ -1,14 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useL10n } from "@/lib/l10n";
-import { Icon } from "@/components/Icon";
-import { Button, EmptyState, ErrorState, GridSkeleton, SizeSlider, Tappable, useDeviceClass } from "@/components/ui";
+import { Icon, type Glyph } from "@/components/Icon";
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  GridSkeleton,
+  Menu,
+  SizeSlider,
+  Tappable,
+  TextField,
+  useDeviceClass,
+  useToast,
+} from "@/components/ui";
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { bytes } from "@/lib/format";
 import type { NodeModel } from "@/lib/models";
 import { transfers, type Transfer } from "@/lib/upload";
+import { useUploader } from "@/lib/uploads";
+import { ShareSheet } from "@/components/share/ShareSheet";
 
 /**
  * The image gallery: strictly photos/images only in one timeline.
@@ -22,22 +36,40 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
   const [columns, setColumns] = useState(5);
   const [sortBy, setSortBy] = useState<"taken" | "created" | "updated" | "name" | "size">("taken");
   const [sortDesc, setSortDesc] = useState(true);
+  const [menu, setMenu] = useState<{
+    x?: number;
+    y?: number;
+    node: NodeModel;
+  } | null>(null);
+  const [canvasMenu, setCanvasMenu] = useState<{
+    x?: number;
+    y?: number;
+  } | null>(null);
+  const [sharing, setSharing] = useState<NodeModel | null>(null);
+  const [renamingNode, setRenamingNode] = useState<NodeModel | null>(null);
+  const [renameName, setRenameName] = useState("");
+  const toast = useToast();
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api.get<{ nodes: NodeModel[] }>(Api.nodes, {
+        filter: "image",
+        sort: sortBy,
+        order: sortDesc ? "desc" : "asc",
+      });
+      const imagesOnly = (data?.nodes ?? []).filter((n) => n.mime_type?.startsWith("image/"));
+      setNodes(imagesOnly);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t.errorUnexpectedBody);
+    }
+  }, [t, sortBy, sortDesc]);
+
+  const upload = useUploader("", () => void load());
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const data = await api.get<{ nodes: NodeModel[] }>(Api.nodes, {
-          filter: "image",
-          sort: sortBy,
-          order: sortDesc ? "desc" : "asc",
-        });
-        const imagesOnly = (data?.nodes ?? []).filter((n) => n.mime_type?.startsWith("image/"));
-        setNodes(imagesOnly);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : t.errorUnexpectedBody);
-      }
-    })();
-  }, [t, sortBy, sortDesc]);
+    void load();
+  }, [load]);
 
   const count = nodes?.length ?? 0;
 
@@ -109,7 +141,16 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
       ) : nodes.length === 0 ? (
         <EmptyState glyph="gallery" title={t.galleryEmptyTitle} message={t.galleryEmptyBody} />
       ) : (
-        <div style={{ padding: "16px 24px 120px" }}>
+        <div
+          style={{ padding: "16px 24px 120px" }}
+          onContextMenu={(e) => {
+            const target = e.target as HTMLElement;
+            if (target.closest("[data-gallery-tile]")) return;
+            if (target.closest("button, a, input")) return;
+            e.preventDefault();
+            setCanvasMenu({ x: e.clientX, y: e.clientY });
+          }}
+        >
           <div
             style={{
               display: "grid",
@@ -126,7 +167,13 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
               return (
                 <Tappable
                   key={n.id}
+                  data-gallery-tile={n.id}
                   onClick={() => onOpen(n, nodes)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setMenu({ x: e.clientX, y: e.clientY, node: n });
+                  }}
                   radius={14}
                   style={{
                     display: "block",
@@ -157,6 +204,123 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
           </div>
         </div>
       )}
+
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        accept="image/*"
+        hidden
+        onChange={(e) => void upload.pick(e.target.files)}
+      />
+
+      {upload.sheet}
+
+      <Menu
+        open={Boolean(menu)}
+        x={menu?.x}
+        y={menu?.y}
+        title={menu?.node.name}
+        onClose={() => setMenu(null)}
+        items={
+          menu
+            ? [
+                {
+                  label: t.actionOpen,
+                  glyph: "eye" as Glyph,
+                  onClick: () => onOpen(menu.node, nodes ?? undefined),
+                },
+                {
+                  label: t.starred,
+                  glyph: (menu.node.starred ? "star-filled" : "star") as Glyph,
+                  onClick: async () => {
+                    if (menu.node.starred) await api.del(Api.star(menu.node.id));
+                    else await api.post(Api.star(menu.node.id), {});
+                    void load();
+                  },
+                },
+                {
+                  label: t.download,
+                  glyph: "download" as Glyph,
+                  onClick: () => window.open(api.media(Api.download(menu.node.id)), "_blank"),
+                },
+                {
+                  label: t.actionRename,
+                  glyph: "edit" as Glyph,
+                  onClick: () => {
+                    setRenamingNode(menu.node);
+                    setRenameName(menu.node.name);
+                  },
+                },
+                {
+                  label: t.actionShare,
+                  glyph: "share" as Glyph,
+                  onClick: () => setSharing(menu.node),
+                },
+                {
+                  label: t.trash,
+                  glyph: "trash" as Glyph,
+                  danger: true,
+                  onClick: async () => {
+                    await api.del(Api.node(menu.node.id));
+                    toast(t.trash, "success");
+                    void load();
+                  },
+                },
+              ]
+            : []
+        }
+      />
+
+      <Menu
+        open={Boolean(canvasMenu)}
+        x={canvasMenu?.x}
+        y={canvasMenu?.y}
+        onClose={() => setCanvasMenu(null)}
+        items={[
+          {
+            label: t.upload,
+            glyph: "upload" as Glyph,
+            onClick: () => fileInput.current?.click(),
+          },
+          {
+            label: t.actionRefresh,
+            glyph: "refresh" as Glyph,
+            onClick: () => void load(),
+          },
+        ]}
+      />
+
+      {sharing && <ShareSheet node={sharing} onClose={() => setSharing(null)} />}
+
+      <Dialog open={Boolean(renamingNode)} onClose={() => setRenamingNode(null)} title={t.actionRename}>
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!renamingNode || !renameName.trim()) return;
+            try {
+              await api.patch(Api.node(renamingNode.id), { name: renameName.trim() });
+              toast(t.actionRename, "success");
+              setRenamingNode(null);
+              void load();
+            } catch (err) {
+              toast(err instanceof Error ? err.message : t.errorUnexpectedTitle, "error");
+            }
+          }}
+          style={{ display: "flex", flexDirection: "column", gap: 16 }}
+        >
+          <TextField
+            label={t.actionRename}
+            value={renameName}
+            onChange={setRenameName}
+            autoFocus
+          />
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <Button label={t.actionCancel} variant="secondary" onClick={() => setRenamingNode(null)} />
+            <Button label={t.actionSave} type="submit" disabled={!renameName.trim()} />
+          </div>
+        </form>
+      </Dialog>
     </div>
   );
 }

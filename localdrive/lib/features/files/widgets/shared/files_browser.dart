@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 
 import '../../../offline/controller/offline_controller.dart';
@@ -11,6 +12,7 @@ import '../desktop/draggable_node.dart';
 import '../desktop/marquee_selection.dart';
 import 'node_actions.dart';
 import 'node_tile.dart';
+import 'rename_sheet.dart';
 
 /// The listing itself, shared by every breakpoint. The page wrappers decide
 /// the chrome around it; this decides nothing about layout beyond the column
@@ -66,13 +68,35 @@ class FilesBrowser extends ConsumerWidget {
           child: Center(child: LdSpinner()),
         ),
         isEmpty: (nodes) => nodes.isEmpty,
-        empty: () => LdEmptyState(
-          title: emptyTitle,
-          message: emptyBody,
-          glyph: emptyGlyph,
-          actionLabel: emptyActionLabel,
-          onAction: onEmptyAction,
-        ),
+        empty: () => desktopBehaviour(context)
+            ? Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: (event) {
+                  if (event.buttons == kSecondaryMouseButton) {
+                    _showCanvasMenu(
+                      context,
+                      ref,
+                      query,
+                      const <NodeModel>[],
+                      event.position,
+                    );
+                  }
+                },
+                child: LdEmptyState(
+                  title: emptyTitle,
+                  message: emptyBody,
+                  glyph: emptyGlyph,
+                  actionLabel: emptyActionLabel,
+                  onAction: onEmptyAction,
+                ),
+              )
+            : LdEmptyState(
+                title: emptyTitle,
+                message: emptyBody,
+                glyph: emptyGlyph,
+                actionLabel: emptyActionLabel,
+                onAction: onEmptyAction,
+              ),
         data: (nodes) {
           final listing = viewMode == ViewMode.grid
               ? _Grid(
@@ -105,6 +129,8 @@ class FilesBrowser extends ConsumerWidget {
                   .setMarquee(ids, additive: additive, base: before),
               onEmptyTap: () =>
                   ref.read(selectionProvider.notifier).clear(),
+              onEmptySecondaryTap: (pos) =>
+                  _showCanvasMenu(context, ref, query, nodes, pos),
               child: listing,
             ),
           );
@@ -170,7 +196,18 @@ class _Grid extends ConsumerWidget {
                 ? activateNode(context, ref, node, nodes)
                 : ref.read(selectionProvider.notifier).toggle(node.id),
             onOpen: () => activateNode(context, ref, node, nodes),
-            onMenu: (position) => showNodeActions(context, ref, node, position),
+            onMenu: (position) {
+              if (selection.length > 1 && selection.contains(node.id)) {
+                final chosen =
+                    nodes.where((n) => selection.contains(n.id)).toList();
+                showBulkNodeActions(context, ref, chosen, position);
+              } else {
+                if (selection.isNotEmpty && !selection.contains(node.id)) {
+                  ref.read(selectionProvider.notifier).only(node.id);
+                }
+                showNodeActions(context, ref, node, position);
+              }
+            },
           ),
         );
       },
@@ -220,11 +257,79 @@ class _List extends ConsumerWidget {
                 ? activateNode(context, ref, node, nodes)
                 : ref.read(selectionProvider.notifier).toggle(node.id),
             onOpen: () => activateNode(context, ref, node, nodes),
-            onMenu: (position) => showNodeActions(context, ref, node, position),
+            onMenu: (position) {
+              if (selection.length > 1 && selection.contains(node.id)) {
+                final chosen =
+                    nodes.where((n) => selection.contains(n.id)).toList();
+                showBulkNodeActions(context, ref, chosen, position);
+              } else {
+                if (selection.isNotEmpty && !selection.contains(node.id)) {
+                  ref.read(selectionProvider.notifier).only(node.id);
+                }
+                showNodeActions(context, ref, node, position);
+              }
+            },
           ),
         );
       },
     );
+  }
+}
+
+/// The context menu shown when right clicking empty canvas space.
+Future<void> _showCanvasMenu(
+  BuildContext context,
+  WidgetRef ref,
+  FolderQuery query,
+  List<NodeModel> nodes,
+  Offset position,
+) async {
+  final l10n = L10n.of(context);
+  final isBrowse = query.filter == NodeFilter.none && query.query.isEmpty;
+
+  final actions = <LdMenuAction>[
+    if (isBrowse) ...<LdMenuAction>[
+      LdMenuAction(
+        id: 'new_folder',
+        label: l10n.newFolder,
+        glyph: LdGlyph.folder,
+      ),
+      LdMenuAction(
+        id: 'upload',
+        label: l10n.upload,
+        glyph: LdGlyph.upload,
+      ),
+    ],
+    LdMenuAction(
+      id: 'refresh',
+      label: l10n.actionRefresh,
+      glyph: LdGlyph.refresh,
+    ),
+    if (nodes.isNotEmpty)
+      LdMenuAction(
+        id: 'select_all',
+        label: l10n.actionSelect,
+        glyph: LdGlyph.check,
+      ),
+  ];
+
+  final choice = await LdContextMenu.show(
+    context,
+    title: isBrowse ? l10n.myFiles : l10n.moreActions,
+    anchor: position == Offset.zero ? null : position,
+    actions: actions,
+  );
+  if (choice == null || !context.mounted) return;
+
+  switch (choice) {
+    case 'new_folder':
+      await showNewFolderSheet(context, ref, parentId: query.parentId);
+    case 'upload':
+      await pickAndUpload(context, ref, query.parentId);
+    case 'refresh':
+      ref.invalidate(folderProvider(query));
+    case 'select_all':
+      ref.read(selectionProvider.notifier).selectAll(nodes.map((n) => n.id));
   }
 }
 

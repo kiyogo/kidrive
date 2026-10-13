@@ -35,6 +35,7 @@ export function Tappable({
   disabled,
   title,
   style,
+  ...rest
 }: {
   children: ReactNode;
   onClick?: (e: React.MouseEvent) => void;
@@ -44,6 +45,7 @@ export function Tappable({
   disabled?: boolean;
   title?: string;
   style?: React.CSSProperties;
+  [key: `data-${string}`]: unknown;
 }) {
   return (
     <button
@@ -53,6 +55,7 @@ export function Tappable({
       onClick={disabled ? undefined : (e) => onClick?.(e)}
       onContextMenu={onContextMenu}
       className={`ld-tappable ${className}`}
+      {...rest}
       style={{
         borderRadius: radius,
         background: "none",

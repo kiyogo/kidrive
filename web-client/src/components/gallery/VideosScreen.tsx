@@ -1,22 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useL10n } from "@/lib/l10n";
-import { Icon } from "@/components/Icon";
+import { Icon, type Glyph } from "@/components/Icon";
 import {
   Button,
+  Dialog,
   EmptyState,
   ErrorState,
   GridSkeleton,
   Menu,
   SizeSlider,
   Tappable,
+  TextField,
   useDeviceClass,
+  useToast,
 } from "@/components/ui";
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { bytes } from "@/lib/format";
 import type { NodeModel } from "@/lib/models";
+import { useUploader } from "@/lib/uploads";
+import { ShareSheet } from "@/components/share/ShareSheet";
 
 type SortKey = "created" | "updated" | "name" | "size";
 
@@ -38,6 +43,21 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [ratios, setRatios] = useState<Record<string, number>>({});
   const sortBtnRef = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<{
+    x?: number;
+    y?: number;
+    node: NodeModel;
+    isBulk?: boolean;
+  } | null>(null);
+  const [canvasMenu, setCanvasMenu] = useState<{
+    x?: number;
+    y?: number;
+  } | null>(null);
+  const [sharing, setSharing] = useState<NodeModel | null>(null);
+  const [renamingNode, setRenamingNode] = useState<NodeModel | null>(null);
+  const [renameName, setRenameName] = useState("");
+  const toast = useToast();
+  const fileInput = useRef<HTMLInputElement>(null);
 
   // Restore saved column preference
   useEffect(() => {
@@ -63,22 +83,26 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
     }
   };
 
+  const load = useCallback(async () => {
+    try {
+      const data = await api.get<{ nodes: NodeModel[] }>(Api.nodes, {
+        filter: "video",
+        sort: sortBy,
+        order: sortDesc ? "desc" : "asc",
+        limit: 500,
+      });
+      setNodes(data?.nodes ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t.errorUnexpectedBody);
+    }
+  }, [sortBy, sortDesc, t.errorUnexpectedBody]);
+
+  const upload = useUploader("", () => void load());
+
   // Fetch video nodes with current sort
   useEffect(() => {
-    void (async () => {
-      try {
-        const data = await api.get<{ nodes: NodeModel[] }>(Api.nodes, {
-          filter: "video",
-          sort: sortBy,
-          order: sortDesc ? "desc" : "asc",
-          limit: 500,
-        });
-        setNodes(data?.nodes ?? []);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : t.errorUnexpectedBody);
-      }
-    })();
-  }, [sortBy, sortDesc, t.errorUnexpectedBody]);
+    void load();
+  }, [load]);
 
   const toggleSelect = (id: string) => {
     setSelection((prev) => {
@@ -282,6 +306,13 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
             boxSizing: "border-box",
             width: "100%",
           }}
+          onContextMenu={(e) => {
+            const target = e.target as HTMLElement;
+            if (target.closest("[data-video-tile]")) return;
+            if (target.closest("button, a, input")) return;
+            e.preventDefault();
+            setCanvasMenu({ x: e.clientX, y: e.clientY });
+          }}
         >
           {columnBuckets.map((bucket, colIdx) => (
             <div
@@ -324,6 +355,7 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
                       }
                     }}
                     onToggleSelect={() => toggleSelect(node.id)}
+                    onMenu={setMenu}
                   />
                 );
               })}
@@ -331,6 +363,163 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
           ))}
         </div>
       )}
+
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        accept="video/*"
+        hidden
+        onChange={(e) => void upload.pick(e.target.files)}
+      />
+
+      {upload.sheet}
+
+      <Menu
+        open={Boolean(menu)}
+        x={menu?.x}
+        y={menu?.y}
+        title={menu?.isBulk ? t.selectedCount({ count: selectedNodes.length }) : menu?.node.name}
+        onClose={() => setMenu(null)}
+        items={
+          menu
+            ? menu.isBulk
+              ? [
+                  {
+                    label: t.download,
+                    glyph: "download" as Glyph,
+                    onClick: () => {
+                      for (const n of selectedNodes) {
+                        window.open(api.media(Api.download(n.id)), "_blank");
+                      }
+                      setSelection(new Set());
+                    },
+                  },
+                  {
+                    label: t.actionDeselect,
+                    glyph: "close" as Glyph,
+                    onClick: () => setSelection(new Set()),
+                  },
+                  {
+                    label: t.trash,
+                    glyph: "trash" as Glyph,
+                    danger: true,
+                    onClick: async () => {
+                      for (const n of selectedNodes) {
+                        await api.del(Api.node(n.id));
+                      }
+                      toast(t.trash, "success");
+                      setSelection(new Set());
+                      void load();
+                    },
+                  },
+                ]
+              : [
+                  {
+                    label: t.actionPlay,
+                    glyph: "play" as Glyph,
+                    onClick: () => onOpen(menu.node, nodes ?? undefined),
+                  },
+                  {
+                    label: t.starred,
+                    glyph: (menu.node.starred ? "star-filled" : "star") as Glyph,
+                    onClick: async () => {
+                      if (menu.node.starred) await api.del(Api.star(menu.node.id));
+                      else await api.post(Api.star(menu.node.id), {});
+                      void load();
+                    },
+                  },
+                  {
+                    label: t.download,
+                    glyph: "download" as Glyph,
+                    onClick: () => window.open(api.media(Api.download(menu.node.id)), "_blank"),
+                  },
+                  {
+                    label: t.actionRename,
+                    glyph: "edit" as Glyph,
+                    onClick: () => {
+                      setRenamingNode(menu.node);
+                      setRenameName(menu.node.name);
+                    },
+                  },
+                  {
+                    label: t.actionShare,
+                    glyph: "share" as Glyph,
+                    onClick: () => setSharing(menu.node),
+                  },
+                  {
+                    label: t.trash,
+                    glyph: "trash" as Glyph,
+                    danger: true,
+                    onClick: async () => {
+                      await api.del(Api.node(menu.node.id));
+                      toast(t.trash, "success");
+                      void load();
+                    },
+                  },
+                ]
+            : []
+        }
+      />
+
+      <Menu
+        open={Boolean(canvasMenu)}
+        x={canvasMenu?.x}
+        y={canvasMenu?.y}
+        onClose={() => setCanvasMenu(null)}
+        items={[
+          {
+            label: t.upload,
+            glyph: "upload" as Glyph,
+            onClick: () => fileInput.current?.click(),
+          },
+          {
+            label: t.actionRefresh,
+            glyph: "refresh" as Glyph,
+            onClick: () => void load(),
+          },
+          ...(nodes && nodes.length > 0
+            ? [
+                {
+                  label: t.actionSelect,
+                  glyph: "check" as Glyph,
+                  onClick: () => setSelection(new Set(nodes.map((n) => n.id))),
+                },
+              ]
+            : []),
+        ]}
+      />
+
+      {sharing && <ShareSheet node={sharing} onClose={() => setSharing(null)} />}
+
+      <Dialog open={Boolean(renamingNode)} onClose={() => setRenamingNode(null)} title={t.actionRename}>
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!renamingNode || !renameName.trim()) return;
+            try {
+              await api.patch(Api.node(renamingNode.id), { name: renameName.trim() });
+              toast(t.actionRename, "success");
+              setRenamingNode(null);
+              void load();
+            } catch (err) {
+              toast(err instanceof Error ? err.message : t.errorUnexpectedTitle, "error");
+            }
+          }}
+          style={{ display: "flex", flexDirection: "column", gap: 16 }}
+        >
+          <TextField
+            label={t.actionRename}
+            value={renameName}
+            onChange={setRenameName}
+            autoFocus
+          />
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <Button label={t.actionCancel} variant="secondary" onClick={() => setRenamingNode(null)} />
+            <Button label={t.actionSave} type="submit" disabled={!renameName.trim()} />
+          </div>
+        </form>
+      </Dialog>
     </div>
   );
 }
@@ -343,6 +532,7 @@ function VideoCard({
   onOpen,
   onToggleSelect,
   onRatioResolved,
+  onMenu,
 }: {
   node: NodeModel;
   ratio: number;
@@ -351,6 +541,7 @@ function VideoCard({
   onOpen: () => void;
   onToggleSelect: () => void;
   onRatioResolved: (r: number) => void;
+  onMenu: (m: { x?: number; y?: number; node: NodeModel; isBulk?: boolean }) => void;
 }) {
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -362,10 +553,19 @@ function VideoCard({
 
   return (
     <Tappable
+      data-video-tile={node.id}
       onClick={selecting ? onToggleSelect : onOpen}
       onContextMenu={(e) => {
         e.preventDefault();
-        onToggleSelect();
+        e.stopPropagation();
+        if (selecting && selected) {
+          onMenu({ x: e.clientX, y: e.clientY, node, isBulk: true });
+        } else {
+          if (!selected) {
+            onToggleSelect();
+          }
+          onMenu({ x: e.clientX, y: e.clientY, node, isBulk: false });
+        }
       }}
       radius={14}
       style={{

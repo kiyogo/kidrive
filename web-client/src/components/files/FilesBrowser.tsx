@@ -83,6 +83,11 @@ export function FilesBrowser({
     y?: number;
     anchorRect?: { left: number; right: number; top: number; bottom: number };
     node: NodeModel;
+    isBulk?: boolean;
+  } | null>(null);
+  const [canvasMenu, setCanvasMenu] = useState<{
+    x?: number;
+    y?: number;
   } | null>(null);
   const [overflow, setOverflow] = useState<{
     x?: number;
@@ -776,7 +781,17 @@ export function FilesBrowser({
       />
 
       {/* listing */}
-      <div ref={listRef} style={{ flex: 1, minHeight: 0 }}>
+      <div
+        ref={listRef}
+        style={{ flex: 1, minHeight: 0 }}
+        onContextMenu={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest("[data-node-id]")) return;
+          if (target.closest("button, a, input, select, textarea")) return;
+          e.preventDefault();
+          setCanvasMenu({ x: e.clientX, y: e.clientY });
+        }}
+      >
         {error ? (
           <ErrorState message={error} onRetry={() => void load()} />
         ) : nodes === null ? (
@@ -944,12 +959,53 @@ export function FilesBrowser({
         anchorRect={menu?.anchorRect}
         x={menu?.x}
         y={menu?.y}
-        title={menu?.node.name}
-        subtitle={menu ? subtitleFor(menu.node) : undefined}
+        title={menu?.isBulk ? t.selectedCount({ count: chosen.length }) : menu?.node.name}
+        subtitle={menu && !menu.isBulk ? subtitleFor(menu.node) : undefined}
         onClose={() => setMenu(null)}
         items={
           menu
-            ? filter === "trash"
+            ? menu.isBulk
+              ? [
+                  {
+                    label: chosen.every((n) => n.starred) ? t.starred : t.starred,
+                    glyph: (chosen.every((n) => n.starred) ? "star-filled" : "star") as Glyph,
+                    onClick: async () => {
+                      const allStarred = chosen.every((n) => n.starred);
+                      for (const n of chosen) {
+                        if (allStarred) await api.del(Api.star(n.id));
+                        else await api.post(Api.star(n.id), {});
+                      }
+                      void load();
+                    },
+                  },
+                  ...(chosen.some((n) => !isFolder(n))
+                    ? [
+                        {
+                          label: t.download,
+                          glyph: "download" as Glyph,
+                          onClick: () => {
+                            for (const n of chosen) {
+                              if (!isFolder(n)) {
+                                window.open(api.media(Api.download(n.id)), "_blank");
+                              }
+                            }
+                          },
+                        },
+                      ]
+                    : []),
+                  {
+                    label: t.actionDeselect,
+                    glyph: "close" as Glyph,
+                    onClick: () => setSelection(new Set()),
+                  },
+                  {
+                    label: t.trash,
+                    glyph: "trash" as Glyph,
+                    danger: true,
+                    onClick: () => void trashChosen(),
+                  },
+                ]
+              : filter === "trash"
               ? [
                   {
                     label: t.restore,
@@ -1043,6 +1099,56 @@ export function FilesBrowser({
                 ]
             : []
         }
+      />
+
+      <Menu
+        open={Boolean(canvasMenu)}
+        x={canvasMenu?.x}
+        y={canvasMenu?.y}
+        onClose={() => setCanvasMenu(null)}
+        items={[
+          ...(filter === "none"
+            ? [
+                {
+                  label: t.newFolder,
+                  glyph: "folder-plus" as Glyph,
+                  onClick: () => {
+                    setFolderName("");
+                    setCreateFolderOpen(true);
+                  },
+                },
+                {
+                  label: t.upload,
+                  glyph: "upload" as Glyph,
+                  onClick: () => fileInput.current?.click(),
+                },
+              ]
+            : []),
+          {
+            label: t.actionRefresh,
+            glyph: "refresh" as Glyph,
+            onClick: () => void load(),
+          },
+          ...(visible.length > 0
+            ? [
+                {
+                  label: t.actionSelect,
+                  glyph: "check" as Glyph,
+                  onClick: () => setSelection(new Set(visible.map((n) => n.id))),
+                },
+              ]
+            : []),
+          ...(filter === "trash" && nodes && nodes.length > 0
+            ? [
+                {
+                  label: t.emptyTrashAction,
+                  glyph: "trash" as Glyph,
+                  danger: true,
+                  onClick: () => setConfirmEmptyTrash(true),
+                },
+              ]
+            : []),
+        ]}
       />
 
       <Dialog open={createFolderOpen} onClose={() => setCreateFolderOpen(false)} title={t.newFolder}>
@@ -1298,6 +1404,7 @@ function Grid({
     y?: number;
     anchorRect?: { left: number; right: number; top: number; bottom: number };
     node: NodeModel;
+    isBulk?: boolean;
   }) => void;
   dragProps: (id: string, sel: Set<string>) => Record<string, unknown>;
   folderProps: (id: string) => Record<string, unknown>;
@@ -1354,6 +1461,7 @@ function Tile({
     y?: number;
     anchorRect?: { left: number; right: number; top: number; bottom: number };
     node: NodeModel;
+    isBulk?: boolean;
   }) => void;
   dragProps: (id: string, sel: Set<string>) => Record<string, unknown>;
   folderProps: (id: string) => Record<string, unknown>;
@@ -1378,7 +1486,14 @@ function Tile({
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        onMenu({ x: e.clientX, y: e.clientY, node });
+        if (selection.size > 1 && selection.has(node.id)) {
+          onMenu({ x: e.clientX, y: e.clientY, node, isBulk: true });
+        } else {
+          if (!selection.has(node.id)) {
+            onToggle(node.id, false, false);
+          }
+          onMenu({ x: e.clientX, y: e.clientY, node, isBulk: false });
+        }
       }}
       style={{ cursor: "pointer", display: "flex", flexDirection: "column" }}
     >
@@ -1582,6 +1697,7 @@ function List({
     y?: number;
     anchorRect?: { left: number; right: number; top: number; bottom: number };
     node: NodeModel;
+    isBulk?: boolean;
   }) => void;
   dragProps: (id: string, sel: Set<string>) => Record<string, unknown>;
   folderProps: (id: string) => Record<string, unknown>;
@@ -1616,7 +1732,14 @@ function List({
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              onMenu({ x: e.clientX, y: e.clientY, node });
+              if (selection.size > 1 && selection.has(node.id)) {
+                onMenu({ x: e.clientX, y: e.clientY, node, isBulk: true });
+              } else {
+                if (!selection.has(node.id)) {
+                  onToggle(node.id, false, false);
+                }
+                onMenu({ x: e.clientX, y: e.clientY, node, isBulk: false });
+              }
             }}
             style={{
               display: "flex",

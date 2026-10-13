@@ -332,3 +332,79 @@ Future<void> downloadNodes(
     );
   }
 }
+
+/// The context menu for multiple selected nodes.
+Future<void> showBulkNodeActions(
+  BuildContext context,
+  WidgetRef ref,
+  List<NodeModel> nodes,
+  Offset anchor,
+) async {
+  if (nodes.isEmpty) return;
+  final l10n = L10n.of(context);
+  final canTrash = nodes.every((n) => n.role.canTrash);
+  final hasFiles = nodes.any((n) => !n.isFolder);
+  final allStarred = nodes.every((n) => n.starred);
+
+  final actions = <LdMenuAction>[
+    LdMenuAction(
+      id: 'star',
+      label: l10n.starred,
+      glyph: allStarred ? LdGlyph.starFilled : LdGlyph.star,
+    ),
+    if (hasFiles)
+      LdMenuAction(
+        id: 'download',
+        label: l10n.download,
+        glyph: LdGlyph.download,
+      ),
+    if (canTrash)
+      LdMenuAction(
+        id: 'trash',
+        label: l10n.trash,
+        glyph: LdGlyph.trash,
+        destructive: true,
+      ),
+    LdMenuAction(
+      id: 'clear',
+      label: l10n.actionDeselect,
+      glyph: LdGlyph.close,
+    ),
+  ];
+
+  final choice = await LdContextMenu.show(
+    context,
+    title: l10n.selectedCount(nodes.length),
+    actions: actions,
+    anchor: anchor == Offset.zero ? null : anchor,
+  );
+  if (choice == null || !context.mounted) return;
+
+  final controller = ref.read(filesControllerProvider.notifier);
+
+  switch (choice) {
+    case 'star':
+      for (final node in nodes) {
+        await controller.setStarred(node, !allStarred);
+      }
+    case 'download':
+      await downloadNodes(context, ref, nodes);
+    case 'trash':
+      final confirmed = await LdBottomSheet.confirm(
+        context,
+        title: l10n.confirmTrashTitle,
+        message: l10n.confirmTrashBody(
+          l10n.selectedCount(nodes.length),
+        ),
+        confirmLabel: l10n.actionDelete,
+        cancelLabel: l10n.actionCancel,
+        destructive: true,
+      );
+      if (!confirmed || !context.mounted) return;
+      await controller.trashMany(nodes);
+      ref.read(selectionProvider.notifier).clear();
+    case 'clear':
+      ref.read(selectionProvider.notifier).clear();
+  }
+}
+

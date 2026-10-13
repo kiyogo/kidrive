@@ -165,7 +165,7 @@ export default function AppRoute({
     );
   }
 
-  return <Drive key={locale} initialSlug={slug} />;
+  return <Drive key={`${locale}-${slug?.join("/") || "files"}`} initialSlug={slug} />;
 }
 
 /* ------------------------------------------------------------------ drive */

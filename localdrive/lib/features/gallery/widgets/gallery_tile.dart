@@ -1,6 +1,7 @@
 import '../../../imports.dart';
 import '../../files/models/node_model.dart';
 import '../../files/providers/files_providers.dart';
+import '../../files/widgets/shared/node_actions.dart';
 import '../../offline/controller/offline_controller.dart';
 
 /// One picture in the grid. Holds its own aspect ratio from the server's
@@ -32,6 +33,7 @@ class GalleryTile extends ConsumerWidget {
       child: LdTappable(
         onTap: selecting ? onToggleSelect : onOpen,
         onLongPress: onToggleSelect,
+        onSecondaryTap: (pos) => showNodeActions(context, ref, node, pos),
         borderRadius: LdRadii.tileRadius,
         child: AnimatedContainer(
           duration: LdMotion.tapFade,

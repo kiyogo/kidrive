@@ -20,6 +20,7 @@ class MarqueeSelection extends StatefulWidget {
     required this.onChanged,
     required this.onStart,
     this.onEmptyTap,
+    this.onEmptySecondaryTap,
     this.enabled = true,
   });
 
@@ -28,6 +29,9 @@ class MarqueeSelection extends StatefulWidget {
   /// A click on empty space that never became a drag, which every file
   /// manager treats as "never mind".
   final VoidCallback? onEmptyTap;
+
+  /// A right click on empty space.
+  final void Function(Offset position)? onEmptySecondaryTap;
 
   /// the ids the box currently covers, sent on every move so the tiles light
   /// up as the box passes over them rather than only at the end
@@ -155,9 +159,15 @@ class _MarqueeSelectionState extends State<MarqueeSelection> {
 
   void _down(PointerDownEvent event) {
     if (event.kind != PointerDeviceKind.mouse) return;
-    if (event.buttons != kPrimaryMouseButton) return;
     if (_onScrollbar(event.position)) return;
     if (!_onEmptySpace(event.position)) return;
+
+    if (event.buttons == kSecondaryMouseButton) {
+      widget.onEmptySecondaryTap?.call(event.position);
+      return;
+    }
+
+    if (event.buttons != kPrimaryMouseButton) return;
     _start(event.position);
   }
 
