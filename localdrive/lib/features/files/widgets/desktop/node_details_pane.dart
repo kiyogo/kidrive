@@ -80,9 +80,7 @@ class NodeDetailsPane extends ConsumerWidget {
           if (node.hasActiveShare)
             _Fact(label: l10n.shareLinkTab, value: l10n.shareCreateLink),
 
-          const SizedBox(height: 20),
-          Divider(height: 1, color: context.surfaces.strokeOutline),
-          const SizedBox(height: 12),
+          const SizedBox(height: 18),
 
           if (!node.isFolder)
             LdSettingRow(

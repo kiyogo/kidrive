@@ -169,7 +169,8 @@ export function TwoFactorSetup({
           onClick={() => setByHand(false)}
           style={{
             flex: 1,
-            padding: "10px 16px",
+            minWidth: 0,
+            padding: "10px 8px",
             borderRadius: "var(--r-pill)",
             background: !byHand ? "var(--accent)" : "transparent",
             color: !byHand ? "#FFFFFF" : "var(--fg-secondary)",
@@ -179,6 +180,9 @@ export function TwoFactorSetup({
             cursor: "pointer",
             transition: "all 0.15s ease",
             textAlign: "center",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
           }}
         >
           {t.twoFactorUseQr}
@@ -188,7 +192,8 @@ export function TwoFactorSetup({
           onClick={() => setByHand(true)}
           style={{
             flex: 1,
-            padding: "10px 16px",
+            minWidth: 0,
+            padding: "10px 8px",
             borderRadius: "var(--r-pill)",
             background: byHand ? "var(--accent)" : "transparent",
             color: byHand ? "#FFFFFF" : "var(--fg-secondary)",
@@ -198,6 +203,9 @@ export function TwoFactorSetup({
             cursor: "pointer",
             transition: "all 0.15s ease",
             textAlign: "center",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
           }}
         >
           {t.twoFactorUseKey}

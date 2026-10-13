@@ -429,7 +429,7 @@ class _LinkCard extends HookConsumerWidget {
               },
             ),
           ),
-          Divider(height: 1, color: context.surfaces.strokeOutline),
+          const SizedBox(height: 4),
           LdSettingRow(
             label: l10n.shareLinkExpiry,
             description: share.expires
@@ -443,7 +443,7 @@ class _LinkCard extends HookConsumerWidget {
               refresh();
             },
           ),
-          Divider(height: 1, color: context.surfaces.strokeOutline),
+          const SizedBox(height: 4),
           LdSettingRow(
             label: l10n.shareLinkPassword,
             description: share.passwordProtected

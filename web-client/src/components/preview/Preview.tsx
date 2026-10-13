@@ -334,71 +334,123 @@ export function Preview({
             </button>
 
             {menuOpen && (
-              <div
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  position: "absolute",
-                  top: 50,
-                  right: 0,
-                  width: 220,
-                  background: "#202020",
-                  border: "1px solid #3D3D3D",
-                  borderRadius: 14,
-                  padding: "6px 0",
-                  zIndex: 60,
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleToggleStar();
-                    setMenuOpen(false);
+              <>
+                <div
+                  style={{
+                    position: "fixed",
+                    inset: 0,
+                    zIndex: 55,
+                    background: "transparent",
                   }}
-                  style={menuItemStyle}
-                >
-                  <Icon glyph={starred ? "star-filled" : "star"} size={18} color={starred ? "#4C8DFF" : "currentColor"} />
-                  <span>{t.starred}</span>
-                </button>
-                <a
-                  href={src}
-                  download={node.name}
                   onClick={() => setMenuOpen(false)}
-                  style={{ ...menuItemStyle, textDecoration: "none" }}
-                >
-                  <Icon glyph="download" size={18} />
-                  <span>{t.download}</span>
-                </a>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleShare();
-                    setMenuOpen(false);
+                />
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: "absolute",
+                    top: 50,
+                    right: 0,
+                    width: 220,
+                    background: "var(--bg-elevated)",
+                    border: "1px solid var(--stroke)",
+                    borderRadius: 14,
+                    padding: "6px 0",
+                    zIndex: 60,
+                    boxShadow: "none",
                   }}
-                  style={menuItemStyle}
                 >
-                  <Icon glyph="share" size={18} />
-                  <span>{t.actionShare}</span>
-                </button>
-                <div style={{ height: 1, background: "var(--stroke)", margin: "4px 0" }} />
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setMenuOpen(false);
-                    try {
-                      await api.del(Api.node(node.id));
-                      toast(t.confirmTrashTitle, "success");
-                      onClose();
-                    } catch (e) {
-                      toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
-                    }
-                  }}
-                  style={{ ...menuItemStyle, color: "var(--warning)" }}
-                >
-                  <Icon glyph="trash" size={18} color="var(--warning)" />
-                  <span>{t.trash}</span>
-                </button>
-              </div>
+                  <Tappable
+                    radius={10}
+                    onClick={() => {
+                      void handleToggleStar();
+                      setMenuOpen(false);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      width: "100%",
+                      padding: "11px 14px",
+                      color: "var(--fg-primary)",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    <Icon glyph={starred ? "star-filled" : "star"} size={19} color={starred ? "#4C8DFF" : "var(--fg-primary)"} />
+                    <span className="t-body-lg" style={{ color: "var(--fg-primary)", flex: 1, textAlign: "left", lineHeight: "22px" }}>
+                      {t.starred}
+                    </span>
+                  </Tappable>
+                  <Tappable
+                    radius={10}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      window.open(src, "_blank");
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      width: "100%",
+                      padding: "11px 14px",
+                      color: "var(--fg-primary)",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    <Icon glyph="download" size={19} color="var(--fg-primary)" />
+                    <span className="t-body-lg" style={{ color: "var(--fg-primary)", flex: 1, textAlign: "left", lineHeight: "22px" }}>
+                      {t.download}
+                    </span>
+                  </Tappable>
+                  <Tappable
+                    radius={10}
+                    onClick={() => {
+                      void handleShare();
+                      setMenuOpen(false);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      width: "100%",
+                      padding: "11px 14px",
+                      color: "var(--fg-primary)",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    <Icon glyph="share" size={19} color="var(--fg-primary)" />
+                    <span className="t-body-lg" style={{ color: "var(--fg-primary)", flex: 1, textAlign: "left", lineHeight: "22px" }}>
+                      {t.actionShare}
+                    </span>
+                  </Tappable>
+                  <Tappable
+                    radius={10}
+                    onClick={async () => {
+                      setMenuOpen(false);
+                      try {
+                        await api.del(Api.node(node.id));
+                        toast(t.confirmTrashTitle, "success");
+                        onClose();
+                      } catch (e) {
+                        toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
+                      }
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      width: "100%",
+                      padding: "11px 14px",
+                      color: "var(--warning)",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    <Icon glyph="trash" size={19} color="var(--warning)" />
+                    <span className="t-body-lg" style={{ color: "var(--warning)", flex: 1, textAlign: "left", lineHeight: "22px" }}>
+                      {t.trash}
+                    </span>
+                  </Tappable>
+                </div>
+              </>
             )}
           </div>
         </div>

@@ -99,6 +99,7 @@ class LdButton extends StatelessWidget {
             label,
             style: labelStyle,
             maxLines: 1,
+            softWrap: false,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
           ),

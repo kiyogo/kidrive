@@ -378,7 +378,9 @@ body {
 }
 
 /* Prevent text wrapping on buttons, tabs, navigation items, chips, and headers */
+button,
 .ld-btn,
+.ld-tappable,
 .t-label-lg,
 .t-label-md,
 .t-label-sm,

@@ -189,6 +189,9 @@ class _MenuRow extends StatelessWidget {
             Expanded(
               child: Text(
                 action.label,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodyLarge!.copyWith(
                       color: color,
                     ),

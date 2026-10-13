@@ -233,21 +233,27 @@ class LdSegmented<T> extends StatelessWidget {
                 child: AnimatedContainer(
                   duration: LdMotion.tapFade,
                   curve: LdMotion.curve,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
                   decoration: BoxDecoration(
                     color: entry.key == selected
                         ? LdColors.accentPrimary
                         : Colors.transparent,
                     borderRadius: LdRadii.pillRadius,
                   ),
-                  child: Text(
-                    entry.value,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.labelLarge!.copyWith(
-                          color: entry.key == selected
-                              ? Colors.white
-                              : context.surfaces.foregroundSecondary,
-                        ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      entry.value,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.labelLarge!.copyWith(
+                            color: entry.key == selected
+                                ? Colors.white
+                                : context.surfaces.foregroundSecondary,
+                          ),
+                    ),
                   ),
                 ),
               ),
