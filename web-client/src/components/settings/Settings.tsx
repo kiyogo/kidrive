@@ -901,7 +901,10 @@ function ServerSection({ onBack, embedded }: { onBack?: () => void; embedded?: b
     const previous = current;
     setCurrent({ ...current, ...patch });
     try {
-      await api.patch(Api.settings, patch);
+      const updated = await api.patch<ServerSettings>(Api.settings, patch);
+      if (updated) {
+        setCurrent((prev) => ({ ...prev, ...updated }));
+      }
     } catch (e) {
       setCurrent(previous);
       toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
@@ -923,6 +926,7 @@ function ServerSection({ onBack, embedded }: { onBack?: () => void; embedded?: b
           label={t.settingsRequireApproval}
           description={t.settingsRequireApprovalNote}
           glyph="device"
+          onTap={() => void apply({ require_device_approval: !(current.require_device_approval ?? false) })}
           trailing={
             <Switch
               value={current.require_device_approval ?? false}
@@ -935,6 +939,7 @@ function ServerSection({ onBack, embedded }: { onBack?: () => void; embedded?: b
           label={t.settingsLanDiscovery}
           description={t.settingsLanDiscoveryNote}
           glyph="wifi"
+          onTap={() => void apply({ enable_lan_discovery: !(current.enable_lan_discovery ?? false) })}
           trailing={
             <Switch
               value={current.enable_lan_discovery ?? false}
@@ -947,6 +952,7 @@ function ServerSection({ onBack, embedded }: { onBack?: () => void; embedded?: b
           label={t.settingsSelfRegistration}
           description={t.settingsSelfRegistrationNote}
           glyph="people"
+          onTap={() => void apply({ allow_self_registration: !(current.allow_self_registration ?? false) })}
           trailing={
             <Switch
               value={current.allow_self_registration ?? false}
@@ -977,11 +983,20 @@ function ServerSection({ onBack, embedded }: { onBack?: () => void; embedded?: b
             hint={t.serverNameHint}
             glyph="server"
             autoFocus
+            onEnter={async () => {
+              const trimmed = name.trim();
+              if (!trimmed) return;
+              await apply({ server_name: trimmed });
+              setRenaming(false);
+            }}
           />
           <Button
             label={t.actionSave}
+            disabled={!name.trim()}
             onClick={async () => {
-              await apply({ server_name: name.trim() });
+              const trimmed = name.trim();
+              if (!trimmed) return;
+              await apply({ server_name: trimmed });
               setRenaming(false);
             }}
           />

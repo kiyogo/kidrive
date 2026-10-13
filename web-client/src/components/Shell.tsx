@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, useState, useEffect, type ReactNode } from "react";
 import { useL10n, type Strings } from "@/lib/l10n";
 import { Icon, type Glyph } from "./Icon";
-import { Menu, Sheet, Tappable, useDeviceClass } from "./ui";
+import { Banner, Menu, Sheet, Tappable, useDeviceClass } from "./ui";
 import { bytes, percent } from "@/lib/format";
 import { useSession } from "@/lib/session";
 
@@ -63,6 +63,21 @@ export function Shell({
   const t = useL10n();
   const { isDesktop } = useDeviceClass();
   const { user } = useSession();
+  const [offline, setOffline] = useState(
+    typeof navigator !== "undefined" ? !navigator.onLine : false,
+  );
+
+  useEffect(() => {
+    const handleOnline = () => setOffline(false);
+    const handleOffline = () => setOffline(true);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
   const [createMenuAnchor, setCreateMenuAnchor] = useState<{ left: number; right: number; top: number; bottom: number } | null>(null);
   const shellFileInput = useRef<HTMLInputElement>(null);
@@ -72,6 +87,13 @@ export function Shell({
     return (
       <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
         <input ref={shellFileInput} type="file" multiple hidden onChange={(e) => { onUpload(e.target.files); e.target.value = ""; }} />
+        {offline && (
+          <Banner
+            glyph="offline"
+            message={t.errorOfflineTitle}
+            tint="var(--fg-secondary)"
+          />
+        )}
         <div style={{ flex: 1, minHeight: 0, paddingBottom: 92 }}>{children}</div>
         <nav
           style={{
@@ -274,7 +296,16 @@ export function Shell({
         )}
       </aside>
 
-      <main style={{ flex: 1, minWidth: 0, height: "100dvh", overflowY: "auto", overflowX: "hidden" }}>{children}</main>
+      <main style={{ flex: 1, minWidth: 0, height: "100dvh", overflowY: "auto", overflowX: "hidden" }}>
+        {offline && (
+          <Banner
+            glyph="offline"
+            message={t.errorOfflineTitle}
+            tint="var(--fg-secondary)"
+          />
+        )}
+        {children}
+      </main>
     </div>
   );
 }

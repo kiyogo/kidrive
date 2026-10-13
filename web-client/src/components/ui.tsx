@@ -50,7 +50,7 @@ export function Tappable({
       type="button"
       title={title}
       disabled={disabled}
-      onClick={onClick}
+      onClick={disabled ? undefined : (e) => onClick?.(e)}
       onContextMenu={onContextMenu}
       className={`ld-tappable ${className}`}
       style={{
@@ -244,7 +244,8 @@ export function Switch({
 }) {
   return (
     <Tappable
-      onClick={() => {
+      onClick={(e) => {
+        e?.stopPropagation();
         if (!disabled && onChange) onChange(!value);
       }}
       disabled={disabled}
@@ -388,6 +389,7 @@ export function SettingRow({
       {trailing ? (
         <div
           onClick={onTap}
+          className={onTap ? "ld-tappable" : undefined}
           style={{
             width: "100%",
             padding: "14px 4px",
@@ -398,6 +400,7 @@ export function SettingRow({
             boxSizing: "border-box",
             borderRadius: 12,
             whiteSpace: "normal",
+            transition: "background var(--d-tap) var(--ease)",
           }}
         >
           {rowContent}
@@ -900,7 +903,8 @@ export function Banner({
     <div
       style={{
         width: "100%",
-        background: "rgba(255, 255, 255, 0.05)",
+        background: "var(--bg-sunken)",
+        borderBottom: "1px solid var(--stroke)",
         padding: "10px 16px",
         display: "flex",
         alignItems: "center",
