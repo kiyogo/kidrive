@@ -348,7 +348,14 @@ export function TwoFactorSetup({
           >
             {t.recoveryCodesBody}
           </p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 10px", marginTop: 4 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gap: "8px 10px",
+              marginTop: 4,
+            }}
+          >
             {recoveryCodes.map((c) => (
               <span
                 key={c}
@@ -360,6 +367,10 @@ export function TwoFactorSetup({
                   fontSize: 13,
                   letterSpacing: 1,
                   color: "var(--fg-primary)",
+                  textAlign: "center",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
                 }}
               >
                 {c}
