@@ -1387,7 +1387,7 @@ export function StorageScreen() {
 
     if (isAdmin) {
       try {
-        const dRes = await api.get<{ drives: unknown[]; helper_available: boolean }>(`${Api.prefix}/drives`);
+        const dRes = await api.get<{ drives: unknown[]; helper_available: boolean }>(Api.drives);
         setDrives(dRes ?? { drives: [], helper_available: false });
       } catch {
         setDrives({ drives: [], helper_available: false });

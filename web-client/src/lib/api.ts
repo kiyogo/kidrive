@@ -98,6 +98,10 @@ class Client {
     return this.base;
   }
 
+  get token() {
+    return this.access;
+  }
+
   get signedIn() {
     return Boolean(this.access);
   }

@@ -11,6 +11,7 @@ import {
 } from "react";
 import { api, ApiError } from "./api";
 import { Api } from "./endpoints";
+import { wsClient } from "./websocket";
 import type { LoginResult, UserModel } from "./models";
 
 /**
@@ -101,12 +102,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const settle = useCallback((u: UserModel | null) => {
     if (!u) {
       setStage("signedOut");
+      wsClient.disconnect();
       return;
     }
     setUser(u);
-    if (u.must_change_password) setStage("mustChangePassword");
-    else if (u.must_enable_totp && u.username !== "admin") setStage("mustEnableTotp");
-    else setStage("ready");
+    if (u.must_change_password) {
+      setStage("mustChangePassword");
+      wsClient.disconnect();
+    } else if (u.must_enable_totp && u.username !== "admin") {
+      setStage("mustEnableTotp");
+      wsClient.disconnect();
+    } else {
+      setStage("ready");
+      wsClient.connect();
+    }
   }, []);
 
   const refreshUser = useCallback(async () => {
@@ -133,6 +142,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     api.onUnauthenticated(() => {
       setUser(null);
       setStage("signedOut");
+      wsClient.disconnect();
     });
 
     void (async () => {
@@ -269,12 +279,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     api.setTokens(null);
     setUser(null);
     setStage("signedOut");
+    wsClient.disconnect();
   }, []);
 
   const cancelPending = useCallback(() => {
     setPendingSessionId("");
     api.setTokens(null);
     setStage("signedOut");
+    wsClient.disconnect();
   }, []);
 
   const forgetServer = useCallback(() => {

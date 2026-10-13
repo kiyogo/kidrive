@@ -87,6 +87,7 @@ export const Api = {
   pendingDevices: `${prefix}/devices/pending`,
   trash: `${prefix}/trash`,
   search: `${prefix}/search`,
+  ws: `${prefix}/ws`,
 } as const;
 
 /** The one port a Local Drive server serves on. Not 443, so it does not

@@ -6,6 +6,7 @@ import { Icon, type Glyph } from "./Icon";
 import { Banner, Menu, Sheet, Tappable, useDeviceClass } from "./ui";
 import { bytes, percent } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { wsClient, type ConnectionState } from "@/lib/websocket";
 
 export type Section =
   | "files"
@@ -66,17 +67,24 @@ export function Shell({
   const [offline, setOffline] = useState(
     typeof navigator !== "undefined" ? !navigator.onLine : false,
   );
+  const [connectionState, setConnectionState] = useState<ConnectionState>(
+    wsClient.getState(),
+  );
 
   useEffect(() => {
     const handleOnline = () => setOffline(false);
     const handleOffline = () => setOffline(true);
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
+    const unbind = wsClient.onStateChange(setConnectionState);
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      unbind();
     };
   }, []);
+
+  const isDisconnected = offline || connectionState === "disconnected";
 
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
   const [createMenuAnchor, setCreateMenuAnchor] = useState<{ left: number; right: number; top: number; bottom: number } | null>(null);
@@ -87,7 +95,7 @@ export function Shell({
     return (
       <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
         <input ref={shellFileInput} type="file" multiple hidden onChange={(e) => { onUpload(e.target.files); e.target.value = ""; }} />
-        {offline && (
+        {isDisconnected && (
           <Banner
             glyph="offline"
             message={t.errorOfflineTitle}
@@ -296,15 +304,26 @@ export function Shell({
         )}
       </aside>
 
-      <main style={{ flex: 1, minWidth: 0, height: "100dvh", overflowY: "auto", overflowX: "hidden" }}>
-        {offline && (
+      <main
+        style={{
+          flex: 1,
+          minWidth: 0,
+          height: "100dvh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {isDisconnected && (
           <Banner
             glyph="offline"
             message={t.errorOfflineTitle}
             tint="var(--fg-secondary)"
           />
         )}
-        {children}
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
+          {children}
+        </div>
       </main>
     </div>
   );
