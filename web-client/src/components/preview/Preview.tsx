@@ -1238,9 +1238,9 @@ function InteractiveImage({
   const viewRef = useRef(view);
   viewRef.current = view;
 
-  // Exact parity with Flutter PhotoView: minimum scale is contained (1.0 = 100%), max is 6.0
-  const MIN_SCALE = 1.0;
-  const MAX_SCALE = 6.0;
+  // Exact parity with Flutter ZoomOnScroll: minScale = 0.5, maxScale = 8.0
+  const MIN_SCALE = 0.5;
+  const MAX_SCALE = 8.0;
 
   // Pointer/touch tracking refs
   const isDragging = useRef(false);
@@ -1319,13 +1319,13 @@ function InteractiveImage({
     [naturalSize, initialWidth, initialHeight],
   );
 
-  // Smooth incremental zoom by step (+ / - button or keyboard)
+  // Smooth incremental zoom by step (keyboard)
   const zoomStep = useCallback(
     (dir: 1 | -1) => {
       const factor = dir > 0 ? 1.35 : 1 / 1.35;
       const nextScale = Math.min(Math.max(MIN_SCALE, viewRef.current.scale * factor), MAX_SCALE);
       if (nextScale <= 1.0) {
-        setView({ scale: 1.0, x: 0, y: 0 });
+        setView({ scale: nextScale, x: 0, y: 0 });
         return;
       }
       const clamped = clampPosition(viewRef.current.x, viewRef.current.y, nextScale);
@@ -1357,7 +1357,7 @@ function InteractiveImage({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [zoomStep, resetZoom]);
 
-  // Mouse wheel zoom towards mouse position (matching Flutter's ZoomOnScroll)
+  // Mouse wheel zoom towards mouse position (matching Flutter's ZoomOnScroll: 0.5x to 8.0x)
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.stopPropagation();
     const factor = e.deltaY > 0 ? 0.88 : 1 / 0.88;
@@ -1365,7 +1365,7 @@ function InteractiveImage({
     const nextScale = Math.min(Math.max(MIN_SCALE, current.scale * factor), MAX_SCALE);
 
     if (nextScale <= 1.0) {
-      setView({ scale: 1.0, x: 0, y: 0 });
+      setView({ scale: nextScale, x: 0, y: 0 });
       return;
     }
 
@@ -1386,7 +1386,7 @@ function InteractiveImage({
   // Perform double-tap or double-click zoom toggle (matching Flutter PhotoView)
   const triggerZoomAt = (clientX: number, clientY: number) => {
     const current = viewRef.current;
-    if (current.scale > 1.05) {
+    if (current.scale > 1.05 || current.scale < 0.95) {
       setView({ scale: 1.0, x: 0, y: 0 });
     } else {
       const targetScale = 2.5;
@@ -1473,7 +1473,7 @@ function InteractiveImage({
     if (isPinching.current && e.touches.length < 2) {
       isPinching.current = false;
       if (viewRef.current.scale <= 1.0) {
-        setView({ scale: 1.0, x: 0, y: 0 });
+        setView((v) => ({ ...v, x: 0, y: 0 }));
       }
       return;
     }
@@ -1609,119 +1609,6 @@ function InteractiveImage({
         }}
       />
 
-      {/* Floating Zoom Action Pill: Bấm Zoom (+ / 100% / -) */}
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          position: "absolute",
-          bottom: 84,
-          right: 20,
-          zIndex: 45,
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          background: "rgba(30, 30, 30, 0.88)",
-          backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
-          border: "1px solid rgba(255, 255, 255, 0.15)",
-          borderRadius: 24,
-          padding: "4px 8px",
-          opacity: chrome ? 1 : 0,
-          pointerEvents: chrome ? "auto" : "none",
-          transition: "opacity 0.2s ease, transform 0.2s ease",
-          transform: chrome ? "translateY(0)" : "translateY(10px)",
-          userSelect: "none",
-        }}
-      >
-        <button
-          type="button"
-          title="Thu nhỏ (-) [Phím -]"
-          disabled={view.scale <= 1.01}
-          onClick={() => zoomStep(-1)}
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: "50%",
-            background: "transparent",
-            border: "none",
-            color: view.scale <= 1.01 ? "rgba(255, 255, 255, 0.3)" : "#FFFFFF",
-            display: "grid",
-            placeItems: "center",
-            cursor: view.scale <= 1.01 ? "default" : "pointer",
-            transition: "background 0.15s ease",
-          }}
-          onMouseEnter={(e) => {
-            if (view.scale > 1.01) e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-          }}
-        >
-          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </button>
-
-        <button
-          type="button"
-          title="Kích thước chuẩn 100% [Phím 0]"
-          onClick={resetZoom}
-          style={{
-            padding: "0 8px",
-            height: 28,
-            borderRadius: 14,
-            background: view.scale > 1.05 ? "rgba(76, 141, 255, 0.2)" : "transparent",
-            border: "none",
-            color: view.scale > 1.05 ? "#4C8DFF" : "#FFFFFF",
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: "pointer",
-            minWidth: 46,
-            textAlign: "center",
-            display: "grid",
-            placeItems: "center",
-            transition: "all 0.15s ease",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = view.scale > 1.05 ? "rgba(76, 141, 255, 0.3)" : "rgba(255, 255, 255, 0.15)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = view.scale > 1.05 ? "rgba(76, 141, 255, 0.2)" : "transparent";
-          }}
-        >
-          {Math.round(view.scale * 100)}%
-        </button>
-
-        <button
-          type="button"
-          title="Phóng to (+) [Phím +]"
-          disabled={view.scale >= MAX_SCALE - 0.05}
-          onClick={() => zoomStep(1)}
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: "50%",
-            background: "transparent",
-            border: "none",
-            color: view.scale >= MAX_SCALE - 0.05 ? "rgba(255, 255, 255, 0.3)" : "#FFFFFF",
-            display: "grid",
-            placeItems: "center",
-            cursor: view.scale >= MAX_SCALE - 0.05 ? "default" : "pointer",
-            transition: "background 0.15s ease",
-          }}
-          onMouseEnter={(e) => {
-            if (view.scale < MAX_SCALE - 0.05) e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-          }}
-        >
-          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </button>
-      </div>
     </div>
   );
 }
