@@ -1383,53 +1383,120 @@ function InteractiveImage({
     }
   };
 
-  // Perform double-tap or double-click zoom toggle (matching Flutter PhotoView)
-  const triggerZoomAt = (clientX: number, clientY: number) => {
-    const current = viewRef.current;
-    // If currently zoomed out (< 1.0) or zoomed in (> 1.0), double click always resets back to 100%
-    if (current.scale < 0.98 || current.scale > 1.02) {
+  // Compute covering scale factor (the scale where the image completely fills the screen without letterboxing)
+  const getCoveringScale = useCallback(() => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    const cWidth = rect?.width || (typeof window !== "undefined" ? window.innerWidth : 1000);
+    const cHeight = rect?.height || (typeof window !== "undefined" ? window.innerHeight : 800);
+    const nw = naturalSize.width || initialWidth || cWidth;
+    const nh = naturalSize.height || initialHeight || cHeight;
+    const imgAspect = nw / (nh || 1);
+    const cAspect = cWidth / (cHeight || 1);
+    return Math.max(1.0, Math.max(imgAspect / cAspect, cAspect / imgAspect));
+  }, [naturalSize, initialWidth, initialHeight]);
+
+  // Compute 1:1 pixel scale (original size in Flutter PhotoView)
+  const getOriginalScale = useCallback(() => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    const cWidth = rect?.width || (typeof window !== "undefined" ? window.innerWidth : 1000);
+    const cHeight = rect?.height || (typeof window !== "undefined" ? window.innerHeight : 800);
+    const nw = naturalSize.width || initialWidth || cWidth;
+    const nh = naturalSize.height || initialHeight || cHeight;
+    const imgAspect = nw / (nh || 1);
+    const cAspect = cWidth / (cHeight || 1);
+    let baseWidth = cWidth;
+    if (imgAspect >= cAspect) {
+      baseWidth = cWidth;
+    } else {
+      baseWidth = cHeight * imgAspect;
+    }
+    const orig = nw / (baseWidth || 1);
+    return Math.min(Math.max(MIN_SCALE, orig), MAX_SCALE);
+  }, [naturalSize, initialWidth, initialHeight]);
+
+  // Double-tap scale state cycle matching Flutter PhotoView:
+  // initial (1.0) -> covering -> originalSize -> initial
+  // And when zoomedOut (< 1.0) or custom zoomedIn: always resets directly to initial (1.0, x: 0, y: 0)
+  const triggerDoubleTapZoom = useCallback(() => {
+    const currentScale = viewRef.current.scale;
+    const covering = getCoveringScale();
+    const original = getOriginalScale();
+
+    const isAtInitial = Math.abs(currentScale - 1.0) < 0.05;
+    const isAtCovering = covering > 1.05 && Math.abs(currentScale - covering) < 0.08;
+    const isAtOriginal = original > 1.05 && Math.abs(currentScale - original) < 0.08;
+
+    // 1. If currently zoomed small (< 1.0, e.g. 0.5x) or arbitrary wheel zoom:
+    // Flutter defaultScaleStateCycle returns PhotoViewScaleState.initial (1.0, centered at 0, 0)
+    if (!isAtInitial && !isAtCovering && !isAtOriginal) {
       setView({ scale: 1.0, x: 0, y: 0 });
       return;
     }
 
-    // When at 100%, double-click zooms in to 2.5x centered around click position
-    const targetScale = 2.5;
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) {
-      setView({ scale: targetScale, x: 0, y: 0 });
+    // 2. If at initial (1.0): next is covering (fills viewport, centered at 0, 0)
+    if (isAtInitial) {
+      if (covering > 1.05) {
+        setView({ scale: covering, x: 0, y: 0 });
+      } else if (original > 1.15) {
+        setView({ scale: original, x: 0, y: 0 });
+      } else {
+        setView({ scale: 2.0, x: 0, y: 0 });
+      }
       return;
     }
-    const clickX = clientX - rect.left - rect.width / 2;
-    const clickY = clientY - rect.top - rect.height / 2;
-    const rawX = -clickX * (targetScale - 1);
-    const rawY = -clickY * (targetScale - 1);
-    const clamped = clampPosition(rawX, rawY, targetScale);
-    setView({ scale: targetScale, x: clamped.x, y: clamped.y });
-  };
 
-  // Click handler with timer to cleanly distinguish single click from double click
+    // 3. If at covering: next is originalSize (if distinct and larger), else initial
+    if (isAtCovering) {
+      if (original > covering * 1.1) {
+        setView({ scale: original, x: 0, y: 0 });
+      } else {
+        setView({ scale: 1.0, x: 0, y: 0 });
+      }
+      return;
+    }
+
+    // 4. If at original: return to initial (1.0, centered at 0, 0)
+    setView({ scale: 1.0, x: 0, y: 0 });
+  }, [getCoveringScale, getOriginalScale]);
+
+  // Timestamp and distance tracking for 100% reliable double-click detection
+  const lastClickTime = useRef(0);
+  const lastClickPos = useRef({ x: 0, y: 0 });
+
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (didMove.current) return;
-    if (e.detail === 1) {
-      if (clickTimer.current) clearTimeout(clickTimer.current);
-      clickTimer.current = setTimeout(() => {
-        onTap();
-      }, 260);
-    } else if (e.detail >= 2) {
+    if (didMove.current) {
+      didMove.current = false;
+      return;
+    }
+    const now = Date.now();
+    const timeSinceLast = now - lastClickTime.current;
+    const dist = Math.hypot(e.clientX - lastClickPos.current.x, e.clientY - lastClickPos.current.y);
+
+    if ((timeSinceLast < 320 && dist < 50) || e.detail >= 2) {
+      lastClickTime.current = 0;
       if (clickTimer.current) {
         clearTimeout(clickTimer.current);
         clickTimer.current = null;
       }
-      triggerZoomAt(e.clientX, e.clientY);
+      triggerDoubleTapZoom();
+    } else {
+      lastClickTime.current = now;
+      lastClickPos.current = { x: e.clientX, y: e.clientY };
+      if (clickTimer.current) clearTimeout(clickTimer.current);
+      clickTimer.current = setTimeout(() => {
+        onTap();
+      }, 260);
     }
   };
 
   const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
     if (clickTimer.current) {
       clearTimeout(clickTimer.current);
       clickTimer.current = null;
     }
-    triggerZoomAt(e.clientX, e.clientY);
+    lastClickTime.current = 0;
+    triggerDoubleTapZoom();
   };
 
   // Touch handlers for mobile pinch, pan & tap
@@ -1519,7 +1586,7 @@ function InteractiveImage({
             clickTimer.current = null;
           }
           lastTapTime.current = 0;
-          triggerZoomAt(touch.clientX, touch.clientY);
+          triggerDoubleTapZoom();
         } else {
           lastTapTime.current = now;
           lastTapPos.current = { x: touch.clientX, y: touch.clientY };
