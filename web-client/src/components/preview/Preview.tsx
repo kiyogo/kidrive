@@ -474,6 +474,8 @@ export function Preview({
           <InteractiveImage
             src={src}
             alt={node.name}
+            initialWidth={node.image_width}
+            initialHeight={node.image_height}
             onTap={() => {
               setMenuOpen(false);
               setChrome((c) => !c);
@@ -1196,19 +1198,40 @@ function ActionRow({
 /**
  * Interactive image viewer supporting pinch zoom, double-tap zoom, wheel zoom towards cursor,
  * and pan matching Flutter's PhotoViewGallery / ZoomOnScroll.
+ * Strictly bounded: cannot pan image off-screen, and allows zooming out smaller than 1.0 (minScale: 0.3)
+ * with automatic centering when scale <= 1.0.
  */
 function InteractiveImage({
   src,
   alt,
+  initialWidth,
+  initialHeight,
   onTap,
 }: {
   src: string;
   alt: string;
+  initialWidth?: number;
+  initialHeight?: number;
   onTap: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [scale, setScale] = useState(1);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number }>({
+    width: initialWidth || 0,
+    height: initialHeight || 0,
+  });
+
+  // Consolidated view state
+  const [view, setView] = useState<{ scale: number; x: number; y: number }>({
+    scale: 1,
+    x: 0,
+    y: 0,
+  });
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
+  // Zoom bounds matching Flutter's PhotoView + ZoomOnScroll
+  const MIN_SCALE = 0.3;
+  const MAX_SCALE = 8.0;
 
   // Pointer/touch tracking refs
   const isDragging = useRef(false);
@@ -1228,9 +1251,11 @@ function InteractiveImage({
 
   // Reset zoom when image src changes
   useEffect(() => {
-    setScale(1);
-    setPosition({ x: 0, y: 0 });
-  }, [src]);
+    setView({ scale: 1, x: 0, y: 0 });
+    if (initialWidth && initialHeight) {
+      setNaturalSize({ width: initialWidth, height: initialHeight });
+    }
+  }, [src, initialWidth, initialHeight]);
 
   // Clean up single tap timer on unmount
   useEffect(() => {
@@ -1239,48 +1264,96 @@ function InteractiveImage({
     };
   }, []);
 
+  /**
+   * Calculates maximum allowable pan offsets (maxX, maxY) and clamps the target (x, y)
+   * so the image edges never get pulled completely inside the viewport when zoomed,
+   * and stays strictly centered at (0, 0) when scale <= 1.0.
+   */
+  const clampPosition = useCallback(
+    (targetX: number, targetY: number, targetScale: number) => {
+      if (targetScale <= 1.0) {
+        return { x: 0, y: 0 };
+      }
+      const rect = containerRef.current?.getBoundingClientRect();
+      const cWidth = rect?.width || (typeof window !== "undefined" ? window.innerWidth : 1000);
+      const cHeight = rect?.height || (typeof window !== "undefined" ? window.innerHeight : 800);
+
+      const nw = naturalSize.width || initialWidth || cWidth;
+      const nh = naturalSize.height || initialHeight || cHeight;
+
+      const imgAspect = nw / (nh || 1);
+      const cAspect = cWidth / (cHeight || 1);
+
+      let baseWidth = cWidth;
+      let baseHeight = cHeight;
+      if (imgAspect >= cAspect) {
+        // Fits container width, letterboxed top/bottom
+        baseWidth = cWidth;
+        baseHeight = cWidth / imgAspect;
+      } else {
+        // Fits container height, letterboxed left/right
+        baseHeight = cHeight;
+        baseWidth = cHeight * imgAspect;
+      }
+
+      const sw = baseWidth * targetScale;
+      const sh = baseHeight * targetScale;
+
+      const maxX = Math.max(0, (sw - cWidth) / 2);
+      const maxY = Math.max(0, (sh - cHeight) / 2);
+
+      return {
+        x: Math.min(Math.max(-maxX, targetX), maxX),
+        y: Math.min(Math.max(-maxY, targetY), maxY),
+      };
+    },
+    [naturalSize, initialWidth, initialHeight],
+  );
+
   // Mouse wheel zoom towards mouse position (matching Flutter's ZoomOnScroll)
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.stopPropagation();
     const factor = e.deltaY > 0 ? 0.88 : 1 / 0.88;
-    setScale((prevScale) => {
-      const nextScale = Math.min(Math.max(1, prevScale * factor), 8);
-      if (nextScale === 1) {
-        setPosition({ x: 0, y: 0 });
-        return 1;
-      }
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (rect) {
-        const mouseX = e.clientX - rect.left - rect.width / 2;
-        const mouseY = e.clientY - rect.top - rect.height / 2;
-        setPosition((prevPos) => ({
-          x: mouseX - (mouseX - prevPos.x) * (nextScale / prevScale),
-          y: mouseY - (mouseY - prevPos.y) * (nextScale / prevScale),
-        }));
-      }
-      return nextScale;
-    });
+    const current = viewRef.current;
+    const nextScale = Math.min(Math.max(MIN_SCALE, current.scale * factor), MAX_SCALE);
+
+    if (nextScale <= 1.0) {
+      setView({ scale: nextScale, x: 0, y: 0 });
+      return;
+    }
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect) {
+      const mouseX = e.clientX - rect.left - rect.width / 2;
+      const mouseY = e.clientY - rect.top - rect.height / 2;
+      const scaleRatio = nextScale / current.scale;
+      const rawX = mouseX - (mouseX - current.x) * scaleRatio;
+      const rawY = mouseY - (mouseY - current.y) * scaleRatio;
+      const clamped = clampPosition(rawX, rawY, nextScale);
+      setView({ scale: nextScale, x: clamped.x, y: clamped.y });
+    } else {
+      setView((v) => ({ ...v, scale: nextScale }));
+    }
   };
 
   // Perform double-tap or double-click zoom toggle
   const triggerZoomAt = (clientX: number, clientY: number) => {
-    if (scale > 1.05) {
-      setScale(1);
-      setPosition({ x: 0, y: 0 });
+    const current = viewRef.current;
+    if (current.scale > 1.05) {
+      setView({ scale: 1, x: 0, y: 0 });
     } else {
-      const rect = containerRef.current?.getBoundingClientRect();
       const targetScale = 2.5;
+      const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) {
-        setScale(targetScale);
+        setView({ scale: targetScale, x: 0, y: 0 });
         return;
       }
       const clickX = clientX - rect.left - rect.width / 2;
       const clickY = clientY - rect.top - rect.height / 2;
-      setScale(targetScale);
-      setPosition({
-        x: -clickX * (targetScale - 1),
-        y: -clickY * (targetScale - 1),
-      });
+      const rawX = -clickX * (targetScale - 1);
+      const rawY = -clickY * (targetScale - 1);
+      const clamped = clampPosition(rawX, rawY, targetScale);
+      setView({ scale: targetScale, x: clamped.x, y: clamped.y });
     }
   };
 
@@ -1300,11 +1373,11 @@ function InteractiveImage({
         e.touches[0].clientY - e.touches[1].clientY,
       );
       pinchStartDist.current = dist;
-      pinchStartScale.current = scale;
+      pinchStartScale.current = viewRef.current.scale;
     } else if (e.touches.length === 1) {
       isPinching.current = false;
       dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      startPos.current = { ...position };
+      startPos.current = { x: viewRef.current.x, y: viewRef.current.y };
       didMove.current = false;
     }
   };
@@ -1316,28 +1389,34 @@ function InteractiveImage({
         e.touches[0].clientY - e.touches[1].clientY,
       );
       const ratio = dist / pinchStartDist.current;
-      const newScale = Math.min(Math.max(0.5, pinchStartScale.current * ratio), 8);
-      setScale(newScale);
+      const newScale = Math.min(Math.max(MIN_SCALE, pinchStartScale.current * ratio), MAX_SCALE);
       didMove.current = true;
-    } else if (e.touches.length === 1 && scale > 1) {
+      if (newScale <= 1.0) {
+        setView({ scale: newScale, x: 0, y: 0 });
+      } else {
+        const clamped = clampPosition(viewRef.current.x, viewRef.current.y, newScale);
+        setView({ scale: newScale, x: clamped.x, y: clamped.y });
+      }
+    } else if (e.touches.length === 1 && viewRef.current.scale > 1) {
       const dx = e.touches[0].clientX - dragStart.current.x;
       const dy = e.touches[0].clientY - dragStart.current.y;
       if (Math.hypot(dx, dy) > 5) {
         didMove.current = true;
       }
-      setPosition({
-        x: startPos.current.x + dx,
-        y: startPos.current.y + dy,
-      });
+      const clamped = clampPosition(
+        startPos.current.x + dx,
+        startPos.current.y + dy,
+        viewRef.current.scale,
+      );
+      setView((v) => ({ ...v, x: clamped.x, y: clamped.y }));
     }
   };
 
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
     if (isPinching.current && e.touches.length < 2) {
       isPinching.current = false;
-      if (scale < 1) {
-        setScale(1);
-        setPosition({ x: 0, y: 0 });
+      if (viewRef.current.scale < 1) {
+        setView({ scale: 1, x: 0, y: 0 });
       }
       return;
     }
@@ -1372,27 +1451,30 @@ function InteractiveImage({
 
   // Mouse pointer pan/drag when zoomed
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === "touch" || scale <= 1) return;
+    if (e.pointerType === "touch" || viewRef.current.scale <= 1) return;
+    if (e.button !== 0) return;
     e.stopPropagation();
     isDragging.current = true;
     didMove.current = false;
     dragStart.current = { x: e.clientX, y: e.clientY };
-    startPos.current = { ...position };
+    startPos.current = { x: viewRef.current.x, y: viewRef.current.y };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDragging.current) return;
+    if (!isDragging.current || viewRef.current.scale <= 1) return;
     e.stopPropagation();
     const dx = e.clientX - dragStart.current.x;
     const dy = e.clientY - dragStart.current.y;
     if (Math.hypot(dx, dy) > 3) {
       didMove.current = true;
     }
-    setPosition({
-      x: startPos.current.x + dx,
-      y: startPos.current.y + dy,
-    });
+    const clamped = clampPosition(
+      startPos.current.x + dx,
+      startPos.current.y + dy,
+      viewRef.current.scale,
+    );
+    setView((v) => ({ ...v, x: clamped.x, y: clamped.y }));
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1434,7 +1516,7 @@ function InteractiveImage({
         alignItems: "center",
         justifyContent: "center",
         overflow: "hidden",
-        cursor: scale > 1 ? (isDragging.current ? "grabbing" : "grab") : "default",
+        cursor: view.scale > 1 ? (isDragging.current ? "grabbing" : "grab") : "default",
         touchAction: "none",
       }}
     >
@@ -1443,14 +1525,21 @@ function InteractiveImage({
         src={src}
         alt={alt}
         draggable={false}
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          if (img.naturalWidth && img.naturalHeight) {
+            setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+          }
+        }}
         style={{
           width: "100%",
           height: "100%",
           maxWidth: "100%",
           maxHeight: "100%",
           objectFit: "contain",
-          transform: `translate3d(${position.x}px, ${position.y}px, 0) scale(${scale})`,
-          transition: isDragging.current || isPinching.current ? "none" : "transform 0.15s ease-out",
+          transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`,
+          transformOrigin: "center center",
+          transition: isDragging.current || isPinching.current ? "none" : "transform 0.16s cubic-bezier(0.2, 0, 0, 1)",
           userSelect: "none",
           pointerEvents: "auto",
         }}
