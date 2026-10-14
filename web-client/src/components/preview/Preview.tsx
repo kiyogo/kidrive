@@ -1386,22 +1386,25 @@ function InteractiveImage({
   // Perform double-tap or double-click zoom toggle (matching Flutter PhotoView)
   const triggerZoomAt = (clientX: number, clientY: number) => {
     const current = viewRef.current;
-    if (current.scale > 1.05 || current.scale < 0.95) {
+    // If currently zoomed out (< 1.0) or zoomed in (> 1.0), double click always resets back to 100%
+    if (current.scale < 0.98 || current.scale > 1.02) {
       setView({ scale: 1.0, x: 0, y: 0 });
-    } else {
-      const targetScale = 2.5;
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) {
-        setView({ scale: targetScale, x: 0, y: 0 });
-        return;
-      }
-      const clickX = clientX - rect.left - rect.width / 2;
-      const clickY = clientY - rect.top - rect.height / 2;
-      const rawX = -clickX * (targetScale - 1);
-      const rawY = -clickY * (targetScale - 1);
-      const clamped = clampPosition(rawX, rawY, targetScale);
-      setView({ scale: targetScale, x: clamped.x, y: clamped.y });
+      return;
     }
+
+    // When at 100%, double-click zooms in to 2.5x centered around click position
+    const targetScale = 2.5;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) {
+      setView({ scale: targetScale, x: 0, y: 0 });
+      return;
+    }
+    const clickX = clientX - rect.left - rect.width / 2;
+    const clickY = clientY - rect.top - rect.height / 2;
+    const rawX = -clickX * (targetScale - 1);
+    const rawY = -clickY * (targetScale - 1);
+    const clamped = clampPosition(rawX, rawY, targetScale);
+    setView({ scale: targetScale, x: clamped.x, y: clamped.y });
   };
 
   // Click handler with timer to cleanly distinguish single click from double click
@@ -1411,14 +1414,22 @@ function InteractiveImage({
       if (clickTimer.current) clearTimeout(clickTimer.current);
       clickTimer.current = setTimeout(() => {
         onTap();
-      }, 230);
-    } else if (e.detail === 2) {
+      }, 260);
+    } else if (e.detail >= 2) {
       if (clickTimer.current) {
         clearTimeout(clickTimer.current);
         clickTimer.current = null;
       }
       triggerZoomAt(e.clientX, e.clientY);
     }
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+    triggerZoomAt(e.clientX, e.clientY);
   };
 
   // Touch handlers for mobile pinch, pan & tap
@@ -1449,7 +1460,7 @@ function InteractiveImage({
       const newScale = Math.min(Math.max(MIN_SCALE, pinchStartScale.current * ratio), MAX_SCALE);
       didMove.current = true;
       if (newScale <= 1.0) {
-        setView({ scale: 1.0, x: 0, y: 0 });
+        setView({ scale: newScale, x: 0, y: 0 });
       } else {
         const clamped = clampPosition(viewRef.current.x, viewRef.current.y, newScale);
         setView({ scale: newScale, x: clamped.x, y: clamped.y });
@@ -1523,11 +1534,12 @@ function InteractiveImage({
 
   // Mouse pointer pan/drag when zoomed
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === "touch" || viewRef.current.scale <= 1.0) return;
+    if (e.pointerType === "touch") return;
     if (e.button !== 0) return;
+    didMove.current = false;
+    if (viewRef.current.scale <= 1.0) return;
     e.stopPropagation();
     isDragging.current = true;
-    didMove.current = false;
     dragStart.current = { x: e.clientX, y: e.clientY };
     startPos.current = { x: viewRef.current.x, y: viewRef.current.y };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -1573,6 +1585,7 @@ function InteractiveImage({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       style={{
         position: "absolute",
         inset: 0,
@@ -1603,7 +1616,7 @@ function InteractiveImage({
           objectFit: "contain",
           transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`,
           transformOrigin: "center center",
-          transition: isDragging.current || isPinching.current ? "none" : "transform 0.16s cubic-bezier(0.2, 0, 0, 1)",
+          transition: isDragging.current || isPinching.current ? "none" : "transform 0.2s cubic-bezier(0.2, 0, 0, 1)",
           userSelect: "none",
           pointerEvents: "auto",
         }}
