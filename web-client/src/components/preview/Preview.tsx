@@ -1385,9 +1385,22 @@ function InteractiveImage({
 
   const lastZoomTime = useRef(0);
 
+  // Compute exact covering scale factor: just enough to fill the entire screen without black bars
+  const getCoveringScale = useCallback(() => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    const cWidth = rect?.width || (typeof window !== "undefined" ? window.innerWidth : 1000);
+    const cHeight = rect?.height || (typeof window !== "undefined" ? window.innerHeight : 800);
+    const nw = naturalSize.width || initialWidth || cWidth;
+    const nh = naturalSize.height || initialHeight || cHeight;
+    const imgAspect = nw / (nh || 1);
+    const cAspect = cWidth / (cHeight || 1);
+    const cov = Math.max(imgAspect / cAspect, cAspect / imgAspect);
+    return cov > 1.05 ? cov : 1.35;
+  }, [naturalSize, initialWidth, initialHeight]);
+
   // Double-click zoom handler:
   // - If currently zoomed out (< 0.98, e.g. 0.5x) or zoomed in (> 1.02): ALWAYS resets directly to default 100% (scale: 1.0, x: 0, y: 0) as when newly opened!
-  // - If already at default 100% (1.0): zooms in to 2.0x (centered at 0, 0 matching 8082)
+  // - If already at default 100% (1.0): zooms image just enough to fill the screen (covering), without over-zooming!
   const triggerDoubleTapZoom = useCallback(() => {
     const now = Date.now();
     if (now - lastZoomTime.current < 400) {
@@ -1404,9 +1417,10 @@ function InteractiveImage({
       return;
     }
 
-    // 2. When at default 100% (1.0), double click zooms to 2.0x (centered at 0, 0)
-    setView({ scale: 2.0, x: 0, y: 0 });
-  }, []);
+    // 2. When at default 100% (1.0), double click zooms to fill the entire screen (covering, centered at 0, 0)
+    const covering = getCoveringScale();
+    setView({ scale: covering, x: 0, y: 0 });
+  }, [getCoveringScale]);
 
   // Timestamp and distance tracking for 100% reliable double-click detection without missing clicks
   const lastClickTime = useRef(0);
@@ -1599,7 +1613,7 @@ function InteractiveImage({
         alignItems: "center",
         justifyContent: "center",
         overflow: "hidden",
-        cursor: view.scale > 1.0 ? (isDragging.current ? "grabbing" : "grab") : "default",
+        cursor: "default",
         touchAction: "none",
       }}
     >
@@ -1622,7 +1636,10 @@ function InteractiveImage({
           objectFit: "contain",
           transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`,
           transformOrigin: "center center",
-          transition: isDragging.current || isPinching.current ? "none" : "transform 0.2s cubic-bezier(0.2, 0, 0, 1)",
+          willChange: "transform",
+          backfaceVisibility: "hidden",
+          WebkitBackfaceVisibility: "hidden",
+          transition: isDragging.current || isPinching.current ? "none" : "transform 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
           userSelect: "none",
           pointerEvents: "auto",
         }}
