@@ -476,6 +476,9 @@ export function Preview({
             alt={node.name}
             initialWidth={node.image_width}
             initialHeight={node.image_height}
+            chrome={chrome}
+            onPrev={currentIndex > 0 ? handlePrev : undefined}
+            onNext={currentIndex < total - 1 ? handleNext : undefined}
             onTap={() => {
               setMenuOpen(false);
               setChrome((c) => !c);
@@ -1206,12 +1209,18 @@ function InteractiveImage({
   alt,
   initialWidth,
   initialHeight,
+  chrome = true,
+  onPrev,
+  onNext,
   onTap,
 }: {
   src: string;
   alt: string;
   initialWidth?: number;
   initialHeight?: number;
+  chrome?: boolean;
+  onPrev?: () => void;
+  onNext?: () => void;
   onTap: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -1222,16 +1231,16 @@ function InteractiveImage({
 
   // Consolidated view state
   const [view, setView] = useState<{ scale: number; x: number; y: number }>({
-    scale: 1,
+    scale: 1.0,
     x: 0,
     y: 0,
   });
   const viewRef = useRef(view);
   viewRef.current = view;
 
-  // Zoom bounds matching Flutter's PhotoView + ZoomOnScroll
-  const MIN_SCALE = 0.3;
-  const MAX_SCALE = 8.0;
+  // Exact parity with Flutter PhotoView: minimum scale is contained (1.0 = 100%), max is 6.0
+  const MIN_SCALE = 1.0;
+  const MAX_SCALE = 6.0;
 
   // Pointer/touch tracking refs
   const isDragging = useRef(false);
@@ -1241,26 +1250,26 @@ function InteractiveImage({
 
   // Multi-touch pinch tracking
   const pinchStartDist = useRef(0);
-  const pinchStartScale = useRef(1);
+  const pinchStartScale = useRef(1.0);
   const isPinching = useRef(false);
 
-  // Tap tracking for single vs double tap
+  // Click timer to distinguish single click (toggle chrome) from double click (zoom)
+  const clickTimer = useRef<NodeJS.Timeout | null>(null);
   const lastTapTime = useRef(0);
   const lastTapPos = useRef({ x: 0, y: 0 });
-  const singleTapTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Reset zoom when image src changes
   useEffect(() => {
-    setView({ scale: 1, x: 0, y: 0 });
+    setView({ scale: 1.0, x: 0, y: 0 });
     if (initialWidth && initialHeight) {
       setNaturalSize({ width: initialWidth, height: initialHeight });
     }
   }, [src, initialWidth, initialHeight]);
 
-  // Clean up single tap timer on unmount
+  // Clean up timer on unmount
   useEffect(() => {
     return () => {
-      if (singleTapTimer.current) clearTimeout(singleTapTimer.current);
+      if (clickTimer.current) clearTimeout(clickTimer.current);
     };
   }, []);
 
@@ -1310,6 +1319,44 @@ function InteractiveImage({
     [naturalSize, initialWidth, initialHeight],
   );
 
+  // Smooth incremental zoom by step (+ / - button or keyboard)
+  const zoomStep = useCallback(
+    (dir: 1 | -1) => {
+      const factor = dir > 0 ? 1.35 : 1 / 1.35;
+      const nextScale = Math.min(Math.max(MIN_SCALE, viewRef.current.scale * factor), MAX_SCALE);
+      if (nextScale <= 1.0) {
+        setView({ scale: 1.0, x: 0, y: 0 });
+        return;
+      }
+      const clamped = clampPosition(viewRef.current.x, viewRef.current.y, nextScale);
+      setView({ scale: nextScale, x: clamped.x, y: clamped.y });
+    },
+    [clampPosition],
+  );
+
+  const resetZoom = useCallback(() => {
+    setView({ scale: 1.0, x: 0, y: 0 });
+  }, []);
+
+  // Keyboard shortcuts (+ / - / 0) for zoom
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        zoomStep(1);
+      } else if (e.key === "-" || e.key === "_") {
+        e.preventDefault();
+        zoomStep(-1);
+      } else if (e.key === "0") {
+        e.preventDefault();
+        resetZoom();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [zoomStep, resetZoom]);
+
   // Mouse wheel zoom towards mouse position (matching Flutter's ZoomOnScroll)
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.stopPropagation();
@@ -1318,7 +1365,7 @@ function InteractiveImage({
     const nextScale = Math.min(Math.max(MIN_SCALE, current.scale * factor), MAX_SCALE);
 
     if (nextScale <= 1.0) {
-      setView({ scale: nextScale, x: 0, y: 0 });
+      setView({ scale: 1.0, x: 0, y: 0 });
       return;
     }
 
@@ -1336,11 +1383,11 @@ function InteractiveImage({
     }
   };
 
-  // Perform double-tap or double-click zoom toggle
+  // Perform double-tap or double-click zoom toggle (matching Flutter PhotoView)
   const triggerZoomAt = (clientX: number, clientY: number) => {
     const current = viewRef.current;
     if (current.scale > 1.05) {
-      setView({ scale: 1, x: 0, y: 0 });
+      setView({ scale: 1.0, x: 0, y: 0 });
     } else {
       const targetScale = 2.5;
       const rect = containerRef.current?.getBoundingClientRect();
@@ -1357,14 +1404,24 @@ function InteractiveImage({
     }
   };
 
-  // Double click for mouse users
-  const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-    if (singleTapTimer.current) clearTimeout(singleTapTimer.current);
-    triggerZoomAt(e.clientX, e.clientY);
+  // Click handler with timer to cleanly distinguish single click from double click
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (didMove.current) return;
+    if (e.detail === 1) {
+      if (clickTimer.current) clearTimeout(clickTimer.current);
+      clickTimer.current = setTimeout(() => {
+        onTap();
+      }, 230);
+    } else if (e.detail === 2) {
+      if (clickTimer.current) {
+        clearTimeout(clickTimer.current);
+        clickTimer.current = null;
+      }
+      triggerZoomAt(e.clientX, e.clientY);
+    }
   };
 
-  // Touch handlers for mobile pinch & tap
+  // Touch handlers for mobile pinch, pan & tap
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     if (e.touches.length === 2) {
       isPinching.current = true;
@@ -1392,12 +1449,12 @@ function InteractiveImage({
       const newScale = Math.min(Math.max(MIN_SCALE, pinchStartScale.current * ratio), MAX_SCALE);
       didMove.current = true;
       if (newScale <= 1.0) {
-        setView({ scale: newScale, x: 0, y: 0 });
+        setView({ scale: 1.0, x: 0, y: 0 });
       } else {
         const clamped = clampPosition(viewRef.current.x, viewRef.current.y, newScale);
         setView({ scale: newScale, x: clamped.x, y: clamped.y });
       }
-    } else if (e.touches.length === 1 && viewRef.current.scale > 1) {
+    } else if (e.touches.length === 1 && viewRef.current.scale > 1.0) {
       const dx = e.touches[0].clientX - dragStart.current.x;
       const dy = e.touches[0].clientY - dragStart.current.y;
       if (Math.hypot(dx, dy) > 5) {
@@ -1415,43 +1472,58 @@ function InteractiveImage({
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
     if (isPinching.current && e.touches.length < 2) {
       isPinching.current = false;
-      if (viewRef.current.scale < 1) {
-        setView({ scale: 1, x: 0, y: 0 });
+      if (viewRef.current.scale <= 1.0) {
+        setView({ scale: 1.0, x: 0, y: 0 });
       }
       return;
     }
 
-    if (e.changedTouches.length === 1 && !didMove.current) {
+    if (e.changedTouches.length === 1) {
       const touch = e.changedTouches[0];
-      const now = Date.now();
-      const dist = Math.hypot(
-        touch.clientX - lastTapPos.current.x,
-        touch.clientY - lastTapPos.current.y,
-      );
+      const dx = touch.clientX - dragStart.current.x;
+      const dy = touch.clientY - dragStart.current.y;
 
-      if (now - lastTapTime.current < 280 && dist < 30) {
-        // Double tap!
-        if (singleTapTimer.current) {
-          clearTimeout(singleTapTimer.current);
-          singleTapTimer.current = null;
+      // Swipe navigation between photos on mobile when at 100% scale
+      if (viewRef.current.scale <= 1.01 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        if (dx > 0 && onPrev) {
+          onPrev();
+          return;
+        } else if (dx < 0 && onNext) {
+          onNext();
+          return;
         }
-        lastTapTime.current = 0;
-        triggerZoomAt(touch.clientX, touch.clientY);
-      } else {
-        // First tap: delay to see if a second tap comes
-        lastTapTime.current = now;
-        lastTapPos.current = { x: touch.clientX, y: touch.clientY };
-        if (singleTapTimer.current) clearTimeout(singleTapTimer.current);
-        singleTapTimer.current = setTimeout(() => {
-          onTap();
-        }, 260);
+      }
+
+      if (!didMove.current) {
+        const now = Date.now();
+        const dist = Math.hypot(
+          touch.clientX - lastTapPos.current.x,
+          touch.clientY - lastTapPos.current.y,
+        );
+
+        if (now - lastTapTime.current < 280 && dist < 30) {
+          // Double tap zoom
+          if (clickTimer.current) {
+            clearTimeout(clickTimer.current);
+            clickTimer.current = null;
+          }
+          lastTapTime.current = 0;
+          triggerZoomAt(touch.clientX, touch.clientY);
+        } else {
+          lastTapTime.current = now;
+          lastTapPos.current = { x: touch.clientX, y: touch.clientY };
+          if (clickTimer.current) clearTimeout(clickTimer.current);
+          clickTimer.current = setTimeout(() => {
+            onTap();
+          }, 240);
+        }
       }
     }
   };
 
   // Mouse pointer pan/drag when zoomed
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === "touch" || viewRef.current.scale <= 1) return;
+    if (e.pointerType === "touch" || viewRef.current.scale <= 1.0) return;
     if (e.button !== 0) return;
     e.stopPropagation();
     isDragging.current = true;
@@ -1462,7 +1534,7 @@ function InteractiveImage({
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDragging.current || viewRef.current.scale <= 1) return;
+    if (!isDragging.current || viewRef.current.scale <= 1.0) return;
     e.stopPropagation();
     const dx = e.clientX - dragStart.current.x;
     const dy = e.clientY - dragStart.current.y;
@@ -1489,18 +1561,10 @@ function InteractiveImage({
     }
   };
 
-  const handleMouseClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (didMove.current) return;
-    if (e.detail <= 1) {
-      onTap();
-    }
-  };
-
   return (
     <div
       ref={containerRef}
       onWheel={handleWheel}
-      onDoubleClick={handleDoubleClick}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -1508,7 +1572,7 @@ function InteractiveImage({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
-      onClick={handleMouseClick}
+      onClick={handleClick}
       style={{
         position: "absolute",
         inset: 0,
@@ -1516,7 +1580,7 @@ function InteractiveImage({
         alignItems: "center",
         justifyContent: "center",
         overflow: "hidden",
-        cursor: view.scale > 1 ? (isDragging.current ? "grabbing" : "grab") : "default",
+        cursor: view.scale > 1.0 ? (isDragging.current ? "grabbing" : "grab") : "default",
         touchAction: "none",
       }}
     >
@@ -1544,6 +1608,120 @@ function InteractiveImage({
           pointerEvents: "auto",
         }}
       />
+
+      {/* Floating Zoom Action Pill: Bấm Zoom (+ / 100% / -) */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: "absolute",
+          bottom: 84,
+          right: 20,
+          zIndex: 45,
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          background: "rgba(30, 30, 30, 0.88)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          border: "1px solid rgba(255, 255, 255, 0.15)",
+          borderRadius: 24,
+          padding: "4px 8px",
+          opacity: chrome ? 1 : 0,
+          pointerEvents: chrome ? "auto" : "none",
+          transition: "opacity 0.2s ease, transform 0.2s ease",
+          transform: chrome ? "translateY(0)" : "translateY(10px)",
+          userSelect: "none",
+        }}
+      >
+        <button
+          type="button"
+          title="Thu nhỏ (-) [Phím -]"
+          disabled={view.scale <= 1.01}
+          onClick={() => zoomStep(-1)}
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: "50%",
+            background: "transparent",
+            border: "none",
+            color: view.scale <= 1.01 ? "rgba(255, 255, 255, 0.3)" : "#FFFFFF",
+            display: "grid",
+            placeItems: "center",
+            cursor: view.scale <= 1.01 ? "default" : "pointer",
+            transition: "background 0.15s ease",
+          }}
+          onMouseEnter={(e) => {
+            if (view.scale > 1.01) e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+          }}
+        >
+          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+
+        <button
+          type="button"
+          title="Kích thước chuẩn 100% [Phím 0]"
+          onClick={resetZoom}
+          style={{
+            padding: "0 8px",
+            height: 28,
+            borderRadius: 14,
+            background: view.scale > 1.05 ? "rgba(76, 141, 255, 0.2)" : "transparent",
+            border: "none",
+            color: view.scale > 1.05 ? "#4C8DFF" : "#FFFFFF",
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: "pointer",
+            minWidth: 46,
+            textAlign: "center",
+            display: "grid",
+            placeItems: "center",
+            transition: "all 0.15s ease",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = view.scale > 1.05 ? "rgba(76, 141, 255, 0.3)" : "rgba(255, 255, 255, 0.15)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = view.scale > 1.05 ? "rgba(76, 141, 255, 0.2)" : "transparent";
+          }}
+        >
+          {Math.round(view.scale * 100)}%
+        </button>
+
+        <button
+          type="button"
+          title="Phóng to (+) [Phím +]"
+          disabled={view.scale >= MAX_SCALE - 0.05}
+          onClick={() => zoomStep(1)}
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: "50%",
+            background: "transparent",
+            border: "none",
+            color: view.scale >= MAX_SCALE - 0.05 ? "rgba(255, 255, 255, 0.3)" : "#FFFFFF",
+            display: "grid",
+            placeItems: "center",
+            cursor: view.scale >= MAX_SCALE - 0.05 ? "default" : "pointer",
+            transition: "background 0.15s ease",
+          }}
+          onMouseEnter={(e) => {
+            if (view.scale < MAX_SCALE - 0.05) e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+          }}
+        >
+          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }
