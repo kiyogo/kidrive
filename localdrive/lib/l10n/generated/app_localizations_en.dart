@@ -821,6 +821,12 @@ class L10nEn extends L10n {
   String get settingsServer => 'Server';
 
   @override
+  String get settingsNetworkShares => 'Network file sharing';
+
+  @override
+  String get settingsDiskManagement => 'Disk management';
+
+  @override
   String get settingsUsers => 'Users';
 
   @override

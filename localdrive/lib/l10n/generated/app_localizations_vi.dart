@@ -824,6 +824,12 @@ class L10nVi extends L10n {
   String get settingsServer => 'Máy chủ';
 
   @override
+  String get settingsNetworkShares => 'Chia sẻ tệp mạng nội bộ';
+
+  @override
+  String get settingsDiskManagement => 'Quản lý ổ cứng';
+
+  @override
   String get settingsUsers => 'Người dùng';
 
   @override

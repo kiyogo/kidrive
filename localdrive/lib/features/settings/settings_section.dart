@@ -7,7 +7,9 @@ import '../about/pages/about_page.dart';
 import '../auth/pages/two_factor_setup_page.dart';
 import 'widgets/appearance_section.dart';
 import 'widgets/devices_section.dart';
+import 'widgets/disks_section.dart';
 import 'widgets/language_section.dart';
+import 'widgets/network_shares_section.dart';
 import 'widgets/offline_section.dart';
 import 'widgets/server_section.dart';
 import 'widgets/users_section.dart';
@@ -25,6 +27,8 @@ enum SettingsSection {
   language('language'),
   twoFactor('two-factor'),
   downloads('downloads'),
+  networkShares('network-shares'),
+  disks('disks'),
   users('users'),
   server('server'),
   about('about');
@@ -50,13 +54,20 @@ enum SettingsSection {
       values.where((section) => section.isAvailable(isAdmin: isAdmin)).toList();
 
   bool isAvailable({required bool isAdmin}) => switch (this) {
-        SettingsSection.users || SettingsSection.server => isAdmin,
+        SettingsSection.users ||
+        SettingsSection.server ||
+        SettingsSection.networkShares ||
+        SettingsSection.disks =>
+          isAdmin,
         SettingsSection.downloads => true,
         _ => true,
       };
 
   bool get isAdminOnly =>
-      this == SettingsSection.users || this == SettingsSection.server;
+      this == SettingsSection.users ||
+      this == SettingsSection.server ||
+      this == SettingsSection.networkShares ||
+      this == SettingsSection.disks;
 
   String title(L10n l10n) => switch (this) {
         SettingsSection.account => l10n.settingsAccount,
@@ -65,6 +76,8 @@ enum SettingsSection {
         SettingsSection.language => l10n.settingsLanguage,
         SettingsSection.twoFactor => l10n.settingsTwoFactor,
         SettingsSection.downloads => l10n.offlineDownloadsTitle,
+        SettingsSection.networkShares => l10n.settingsNetworkShares,
+        SettingsSection.disks => l10n.settingsDiskManagement,
         SettingsSection.users => l10n.settingsUsers,
         SettingsSection.server => l10n.settingsServer,
         SettingsSection.about => l10n.settingsAbout,
@@ -77,6 +90,8 @@ enum SettingsSection {
         SettingsSection.language => LdGlyph.language,
         SettingsSection.twoFactor => LdGlyph.lock,
         SettingsSection.downloads => LdGlyph.offlineReady,
+        SettingsSection.networkShares => LdGlyph.shared,
+        SettingsSection.disks => LdGlyph.drive,
         SettingsSection.users => LdGlyph.people,
         SettingsSection.server => LdGlyph.server,
         SettingsSection.about => LdGlyph.info,
@@ -93,6 +108,8 @@ enum SettingsSection {
         // the same screen the phone opens, so enrolment is identical everywhere
         SettingsSection.twoFactor => const TwoFactorSetupPage(embedded: true),
         SettingsSection.downloads => const OfflineSection(),
+        SettingsSection.networkShares => const NetworkSharesSection(),
+        SettingsSection.disks => const DisksSection(),
         SettingsSection.users => const UsersSection(),
         SettingsSection.server => const ServerSection(),
         // the same page the phone pushes, minus its own scaffold, because the

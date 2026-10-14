@@ -33,6 +33,7 @@ backups/
 /server/server-arm64
 /server/localdrive
 /server/localdrive.exe
+/localdrive.exe
 *.exe~
 *.test
 *.out

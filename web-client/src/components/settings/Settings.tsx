@@ -28,6 +28,8 @@ import { HIDE_TWO_FACTOR } from "@/lib/flags";
 import { useSession } from "@/lib/session";
 import { TwoFactorSetup } from "@/components/auth/TwoFactorSetup";
 import { useTheme } from "@/lib/theme";
+import { NetworkSharesSection } from "./NetworkSharesSection";
+import { DisksSection } from "./DisksSection";
 
 /*
   Settings, ported from features/settings. One list of sections, each opening
@@ -44,11 +46,13 @@ type SectionId =
   | "language"
   | "two-factor"
   | "downloads"
+  | "network-shares"
+  | "disks"
   | "users"
   | "server"
   | "about";
 
-/** Declared once, in the app's order. Users and server are admin only. */
+/** Declared once, in the app's order. Users, server, network shares, and disks are admin only. */
 const sections: { id: SectionId; key: keyof Strings; glyph: Glyph; adminOnly?: boolean }[] = [
   { id: "account", key: "settingsAccount", glyph: "person" },
   { id: "appearance", key: "settingsAppearance", glyph: "eye" },
@@ -56,6 +60,8 @@ const sections: { id: SectionId; key: keyof Strings; glyph: Glyph; adminOnly?: b
   { id: "language", key: "settingsLanguage", glyph: "language" },
   { id: "two-factor", key: "settingsTwoFactor", glyph: "lock" },
   { id: "downloads", key: "offlineDownloadsTitle", glyph: "offlineReady" },
+  { id: "network-shares", key: "settingsNetworkShares", glyph: "share", adminOnly: true },
+  { id: "disks", key: "settingsDiskManagement", glyph: "storage", adminOnly: true },
   { id: "users", key: "settingsUsers", glyph: "people", adminOnly: true },
   { id: "server", key: "settingsServer", glyph: "server", adminOnly: true },
   { id: "about", key: "settingsAbout", glyph: "info" },
@@ -388,6 +394,10 @@ function Detail({
       return <UsersSection onBack={onBack} embedded={embedded} />;
     case "server":
       return <ServerSection onBack={onBack} embedded={embedded} />;
+    case "network-shares":
+      return <NetworkSharesSection onBack={onBack} embedded={embedded} />;
+    case "disks":
+      return <DisksSection onBack={onBack} embedded={embedded} />;
     case "language":
       return <LanguageSection onBack={onBack} embedded={embedded} />;
     case "downloads":

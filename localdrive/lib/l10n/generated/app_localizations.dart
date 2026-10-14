@@ -1587,6 +1587,18 @@ abstract class L10n {
   /// **'Server'**
   String get settingsServer;
 
+  /// No description provided for @settingsNetworkShares.
+  ///
+  /// In en, this message translates to:
+  /// **'Network file sharing'**
+  String get settingsNetworkShares;
+
+  /// No description provided for @settingsDiskManagement.
+  ///
+  /// In en, this message translates to:
+  /// **'Disk management'**
+  String get settingsDiskManagement;
+
   /// No description provided for @settingsUsers.
   ///
   /// In en, this message translates to:

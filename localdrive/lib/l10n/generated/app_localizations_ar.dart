@@ -813,6 +813,12 @@ class L10nAr extends L10n {
   String get settingsServer => 'الخادم';
 
   @override
+  String get settingsNetworkShares => 'مشاركة ملفات الشبكة';
+
+  @override
+  String get settingsDiskManagement => 'إدارة الأقراص';
+
+  @override
   String get settingsUsers => 'المستخدمون';
 
   @override

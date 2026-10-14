@@ -267,6 +267,8 @@
 
   "settingsAccount": "Tài khoản",
   "settingsLanguage": "Ngôn ngữ",
+  "settingsNetworkShares": "Chia sẻ tệp mạng nội bộ",
+  "settingsDiskManagement": "Quản lý ổ cứng",
   "settingsServer": "Máy chủ",
   "settingsUsers": "Người dùng",
   "settingsAbout": "Giới thiệu",

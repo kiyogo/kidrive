@@ -277,6 +277,8 @@
 
   "settingsAccount": "الحساب",
   "settingsLanguage": "اللغة",
+  "settingsNetworkShares": "مشاركة ملفات الشبكة",
+  "settingsDiskManagement": "إدارة الأقراص",
   "settingsServer": "الخادم",
   "settingsUsers": "المستخدمون",
   "settingsAbout": "حول التطبيق",

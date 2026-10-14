@@ -138,6 +138,8 @@ class _Overview extends ConsumerWidget {
           LdSettingGroup(
             title: l10n.settingsServer,
             children: <Widget>[
+              _SectionRow(SettingsSection.networkShares),
+              _SectionRow(SettingsSection.disks),
               _SectionRow(SettingsSection.users),
               _SectionRow(SettingsSection.server),
             ],
