@@ -13,6 +13,10 @@ class LibraryCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = L10n.of(context);
     final online = library.isOnline;
+    final libTotal = library.statsKnown ? library.totalBytes : 0;
+    final libFree = library.statsKnown ? library.freeBytes : 0;
+    final libLocalUsed = isAdmin ? library.bytesUsed : 0;
+    final libDiskUsed = libTotal > libFree ? libTotal - libFree : libLocalUsed;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -78,14 +82,14 @@ class LibraryCard extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 16),
-          // bytesUsed is everything on this drive, every account included, so
-          // it is an admin figure. What a member needs from this card is where
-          // the drive is and whether there is room on it, and free space
-          // answers both without saying how much anyone else is keeping
           LdUsageBar(
-            usedBytes: isAdmin ? library.bytesUsed : 0,
-            totalBytes: library.statsKnown ? library.totalBytes : 0,
-            usedLabel: isAdmin ? LdFormat.bytes(context, library.bytesUsed) : '',
+            usedBytes: libDiskUsed,
+            totalBytes: libTotal,
+            primaryBytes: libLocalUsed,
+            height: 6,
+            usedLabel: library.statsKnown
+                ? '${LdFormat.bytes(context, libDiskUsed)} trên ${LdFormat.bytes(context, libTotal)}${isAdmin && libLocalUsed > 0 && libDiskUsed > libLocalUsed ? ' (LocalDrive: ${LdFormat.bytes(context, libLocalUsed)})' : ''}'
+                : '',
             freeLabel: library.statsKnown
                 ? l10n.libraryFreeSpace(
                     LdFormat.bytes(context, library.freeBytes),

@@ -104,6 +104,8 @@ class LdUsageBar extends StatelessWidget {
     required this.totalBytes,
     required this.usedLabel,
     required this.freeLabel,
+    this.primaryBytes,
+    this.height = 8,
     this.warnAbove = 0.9,
   });
 
@@ -111,11 +113,13 @@ class LdUsageBar extends StatelessWidget {
   final int totalBytes;
   final String usedLabel;
   final String freeLabel;
+  final int? primaryBytes;
+  final double height;
   final double warnAbove;
 
   @override
   Widget build(BuildContext context) {
-    final fraction = totalBytes <= 0 ? 0.0 : usedBytes / totalBytes;
+    final fraction = totalBytes <= 0 ? 0.0 : (usedBytes / totalBytes).clamp(0.0, 1.0);
     final color = fraction >= warnAbove
         ? LdColors.accentWarning
         : LdColors.accentPrimary;
@@ -123,12 +127,58 @@ class LdUsageBar extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        LdProgressBar(value: fraction, height: 8, color: color),
+        if (primaryBytes != null && primaryBytes! > 0 && totalBytes > 0)
+          RepaintBoundary(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(height),
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                children: <Widget>[
+                  Container(
+                    height: height,
+                    color: LdColors.wash(LdColors.foregroundPrimary, 0.08),
+                  ),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final totalW = constraints.maxWidth * fraction;
+                      final primaryFraction = (primaryBytes! / totalBytes).clamp(0.0, 1.0);
+                      final primaryW = constraints.maxWidth * primaryFraction;
+                      return Stack(
+                        children: <Widget>[
+                          Container(
+                            height: height,
+                            width: totalW,
+                            decoration: BoxDecoration(
+                              color: fraction >= warnAbove
+                                  ? LdColors.accentWarning
+                                  : LdColors.wash(LdColors.accentPrimary, 0.4),
+                              borderRadius: BorderRadius.circular(height),
+                            ),
+                          ),
+                          Container(
+                            height: height,
+                            width: primaryW < 3 && primaryBytes! > 0 ? 3 : primaryW,
+                            decoration: BoxDecoration(
+                              color: LdColors.accentPrimary,
+                              borderRadius: BorderRadius.circular(height),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          LdProgressBar(value: fraction, height: height, color: color),
         const SizedBox(height: 10),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: <Widget>[
-            Text(usedLabel, style: Theme.of(context).textTheme.bodySmall),
+            Flexible(child: Text(usedLabel, style: Theme.of(context).textTheme.bodySmall)),
+            const SizedBox(width: 8),
             Text(freeLabel, style: Theme.of(context).textTheme.bodySmall),
           ],
         ),

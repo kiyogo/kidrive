@@ -26,6 +26,9 @@ class StorageTotalCard extends ConsumerWidget {
         ? summary.totalUsed
         : user.quotaBytesUsed;
     final caption = isAdmin || user == null ? l10n.storageTotal : l10n.storageYours;
+    final totalDisk = summary.totalBytes;
+    final totalFree = summary.totalFree;
+    final diskUsed = totalDisk > totalFree ? totalDisk - totalFree : used;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -45,14 +48,15 @@ class StorageTotalCard extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
           LdUsageBar(
-            usedBytes: used,
-            totalBytes: summary.totalBytes,
-            usedLabel: l10n.storageUsedOf(
-              LdFormat.bytes(context, used),
-              LdFormat.bytes(context, summary.totalBytes),
-            ),
+            usedBytes: diskUsed,
+            totalBytes: totalDisk,
+            primaryBytes: used,
+            usedLabel: '${l10n.storageUsedOf(
+              LdFormat.bytes(context, diskUsed),
+              LdFormat.bytes(context, totalDisk),
+            )}${used > 0 && diskUsed > used ? ' (LocalDrive: ${LdFormat.bytes(context, used)})' : ''}',
             freeLabel: l10n.libraryFreeSpace(
-              LdFormat.bytes(context, summary.totalFree),
+              LdFormat.bytes(context, totalFree),
             ),
           ),
         ],

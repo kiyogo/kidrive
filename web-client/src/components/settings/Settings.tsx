@@ -1408,9 +1408,15 @@ export function StorageScreen() {
   }
 
   const used = isAdmin || !user ? data.total_used : user.quota_bytes_used;
-  const total = isAdmin || !user ? data.total_bytes : (user.quota_bytes || data.total_bytes);
+  const totalDisk = data.total_bytes;
+  const freeDisk = data.total_free;
+  const diskUsed = Math.max(0, totalDisk - freeDisk);
+  const otherDiskUsed = Math.max(0, diskUsed - used);
+  const totalPercent = totalDisk > 0 ? (diskUsed / totalDisk) * 100 : 0;
+  const localPercent = totalDisk > 0 ? (used / totalDisk) * 100 : 0;
+  const otherPercent = totalDisk > 0 ? (otherDiskUsed / totalDisk) * 100 : 0;
+  const isWarn = totalPercent >= 90;
   const caption = isAdmin || !user ? t.storageTotal : t.storageYours;
-  const usedPercent = total > 0 ? (used / total) * 100 : 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflowY: "auto", overflowX: "hidden" }}>
@@ -1455,21 +1461,45 @@ export function StorageScreen() {
             {bytes(used)}
           </div>
           {/* LdUsageBar */}
-          <div style={{ height: 8, borderRadius: 999, background: "var(--bg-sunken)", overflow: "hidden", marginBottom: 8 }}>
-            <div
-              style={{
-                height: "100%",
-                width: `${Math.min(100, Math.max(0, usedPercent))}%`,
-                background: "var(--accent)",
-              }}
-            />
+          <div
+            style={{
+              height: 8,
+              borderRadius: 999,
+              background: "var(--bg-sunken)",
+              overflow: "hidden",
+              marginBottom: 8,
+              display: "flex",
+            }}
+          >
+            {localPercent > 0 && (
+              <div
+                style={{
+                  height: "100%",
+                  width: `${localPercent}%`,
+                  minWidth: used > 0 ? 3 : 0,
+                  background: "var(--accent)",
+                }}
+                title={`Local Drive: ${bytes(used)}`}
+              />
+            )}
+            {otherPercent > 0 && (
+              <div
+                style={{
+                  height: "100%",
+                  width: `${otherPercent}%`,
+                  background: isWarn ? "var(--warning)" : "rgba(76, 141, 255, 0.4)",
+                }}
+                title={`Hệ thống & dữ liệu khác: ${bytes(otherDiskUsed)}`}
+              />
+            )}
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
             <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-              {t.storageUsedOf({ used: bytes(used), total: bytes(total) })}
+              {t.storageUsedOf({ used: bytes(diskUsed), total: bytes(totalDisk) })}
+              {used > 0 && otherDiskUsed > 0 ? ` (Local Drive: ${bytes(used)})` : ""}
             </span>
             <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-              {t.libraryFreeSpace({ free: bytes(data.total_free) })}
+              {t.libraryFreeSpace({ free: bytes(freeDisk) })}
             </span>
           </div>
         </div>
@@ -1480,10 +1510,15 @@ export function StorageScreen() {
           <div style={{ flex: isDesktop ? 3 : undefined, width: "100%", minWidth: 0 }}>
             {data.libraries.map((l) => {
               const isOnline = l.online ?? (l.status === undefined || l.status === "online");
-              const libUsed = isAdmin ? (l.bytes_used ?? 0) : 0;
               const libTotal = (l.stats_known ?? true) ? (l.total_bytes ?? 0) : 0;
               const libFree = (l.stats_known ?? true) ? (l.free_bytes ?? 0) : 0;
-              const libPercent = libTotal > 0 ? (libUsed / libTotal) * 100 : 0;
+              const libLocalUsed = isAdmin ? (l.bytes_used ?? 0) : 0;
+              const libDiskUsed = Math.max(0, libTotal - libFree);
+              const libOtherUsed = Math.max(0, libDiskUsed - libLocalUsed);
+              const libDiskPercent = libTotal > 0 ? (libDiskUsed / libTotal) * 100 : 0;
+              const libLocalPercent = libTotal > 0 ? (libLocalUsed / libTotal) * 100 : 0;
+              const libOtherPercent = libTotal > 0 ? (libOtherUsed / libTotal) * 100 : 0;
+              const libIsWarn = libDiskPercent >= 90;
 
               return (
                 <div
@@ -1526,18 +1561,42 @@ export function StorageScreen() {
 
                   {/* LdUsageBar inside library card */}
                   <div style={{ marginTop: 16 }}>
-                    <div style={{ height: 6, borderRadius: 999, background: "var(--bg-sunken)", overflow: "hidden", marginBottom: 8 }}>
-                      <div
-                        style={{
-                          height: "100%",
-                          width: `${Math.min(100, Math.max(0, libPercent))}%`,
-                          background: "var(--accent)",
-                        }}
-                      />
+                    <div
+                      style={{
+                        height: 6,
+                        borderRadius: 999,
+                        background: "var(--bg-sunken)",
+                        overflow: "hidden",
+                        marginBottom: 8,
+                        display: "flex",
+                      }}
+                    >
+                      {libLocalPercent > 0 && (
+                        <div
+                          style={{
+                            height: "100%",
+                            width: `${libLocalPercent}%`,
+                            minWidth: libLocalUsed > 0 ? 3 : 0,
+                            background: "var(--accent)",
+                          }}
+                          title={`Local Drive: ${bytes(libLocalUsed)}`}
+                        />
+                      )}
+                      {libOtherPercent > 0 && (
+                        <div
+                          style={{
+                            height: "100%",
+                            width: `${libOtherPercent}%`,
+                            background: libIsWarn ? "var(--warning)" : "rgba(76, 141, 255, 0.4)",
+                          }}
+                          title={`Hệ thống & dữ liệu khác: ${bytes(libOtherUsed)}`}
+                        />
+                      )}
                     </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
                       <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-                        {isAdmin && libUsed > 0 ? bytes(libUsed) : ""}
+                        {bytes(libDiskUsed)} trên {bytes(libTotal)}
+                        {isAdmin && libLocalUsed > 0 && libOtherUsed > 0 ? ` (Local Drive: ${bytes(libLocalUsed)})` : ""}
                       </span>
                       <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
                         {(l.stats_known ?? true) ? t.libraryFreeSpace({ free: bytes(libFree) }) : t.storageOffline}
