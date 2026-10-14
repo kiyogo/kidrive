@@ -1383,83 +1383,32 @@ function InteractiveImage({
     }
   };
 
-  // Compute covering scale factor (the scale where the image completely fills the screen without letterboxing)
-  const getCoveringScale = useCallback(() => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    const cWidth = rect?.width || (typeof window !== "undefined" ? window.innerWidth : 1000);
-    const cHeight = rect?.height || (typeof window !== "undefined" ? window.innerHeight : 800);
-    const nw = naturalSize.width || initialWidth || cWidth;
-    const nh = naturalSize.height || initialHeight || cHeight;
-    const imgAspect = nw / (nh || 1);
-    const cAspect = cWidth / (cHeight || 1);
-    return Math.max(1.0, Math.max(imgAspect / cAspect, cAspect / imgAspect));
-  }, [naturalSize, initialWidth, initialHeight]);
+  const lastZoomTime = useRef(0);
 
-  // Compute 1:1 pixel scale (original size in Flutter PhotoView)
-  const getOriginalScale = useCallback(() => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    const cWidth = rect?.width || (typeof window !== "undefined" ? window.innerWidth : 1000);
-    const cHeight = rect?.height || (typeof window !== "undefined" ? window.innerHeight : 800);
-    const nw = naturalSize.width || initialWidth || cWidth;
-    const nh = naturalSize.height || initialHeight || cHeight;
-    const imgAspect = nw / (nh || 1);
-    const cAspect = cWidth / (cHeight || 1);
-    let baseWidth = cWidth;
-    if (imgAspect >= cAspect) {
-      baseWidth = cWidth;
-    } else {
-      baseWidth = cHeight * imgAspect;
-    }
-    const orig = nw / (baseWidth || 1);
-    return Math.min(Math.max(MIN_SCALE, orig), MAX_SCALE);
-  }, [naturalSize, initialWidth, initialHeight]);
-
-  // Double-tap scale state cycle matching Flutter PhotoView:
-  // initial (1.0) -> covering -> originalSize -> initial
-  // And when zoomedOut (< 1.0) or custom zoomedIn: always resets directly to initial (1.0, x: 0, y: 0)
+  // Double-click zoom handler:
+  // - If currently zoomed out (< 0.98, e.g. 0.5x) or zoomed in (> 1.02): ALWAYS resets directly to default 100% (scale: 1.0, x: 0, y: 0) as when newly opened!
+  // - If already at default 100% (1.0): zooms in to 2.0x (centered at 0, 0 matching 8082)
   const triggerDoubleTapZoom = useCallback(() => {
+    const now = Date.now();
+    if (now - lastZoomTime.current < 400) {
+      return;
+    }
+    lastZoomTime.current = now;
+
     const currentScale = viewRef.current.scale;
-    const covering = getCoveringScale();
-    const original = getOriginalScale();
 
-    const isAtInitial = Math.abs(currentScale - 1.0) < 0.05;
-    const isAtCovering = covering > 1.05 && Math.abs(currentScale - covering) < 0.08;
-    const isAtOriginal = original > 1.05 && Math.abs(currentScale - original) < 0.08;
-
-    // 1. If currently zoomed small (< 1.0, e.g. 0.5x) or arbitrary wheel zoom:
-    // Flutter defaultScaleStateCycle returns PhotoViewScaleState.initial (1.0, centered at 0, 0)
-    if (!isAtInitial && !isAtCovering && !isAtOriginal) {
+    // 1. If currently zoomed out (< 1.0) or zoomed in (> 1.0):
+    // ALWAYS returns directly to default (scale: 1.0, x: 0, y: 0) - exactly as when newly opened!
+    if (currentScale < 0.98 || currentScale > 1.02) {
       setView({ scale: 1.0, x: 0, y: 0 });
       return;
     }
 
-    // 2. If at initial (1.0): next is covering (fills viewport, centered at 0, 0)
-    if (isAtInitial) {
-      if (covering > 1.05) {
-        setView({ scale: covering, x: 0, y: 0 });
-      } else if (original > 1.15) {
-        setView({ scale: original, x: 0, y: 0 });
-      } else {
-        setView({ scale: 2.0, x: 0, y: 0 });
-      }
-      return;
-    }
+    // 2. When at default 100% (1.0), double click zooms to 2.0x (centered at 0, 0)
+    setView({ scale: 2.0, x: 0, y: 0 });
+  }, []);
 
-    // 3. If at covering: next is originalSize (if distinct and larger), else initial
-    if (isAtCovering) {
-      if (original > covering * 1.1) {
-        setView({ scale: original, x: 0, y: 0 });
-      } else {
-        setView({ scale: 1.0, x: 0, y: 0 });
-      }
-      return;
-    }
-
-    // 4. If at original: return to initial (1.0, centered at 0, 0)
-    setView({ scale: 1.0, x: 0, y: 0 });
-  }, [getCoveringScale, getOriginalScale]);
-
-  // Timestamp and distance tracking for 100% reliable double-click detection
+  // Timestamp and distance tracking for 100% reliable double-click detection without missing clicks
   const lastClickTime = useRef(0);
   const lastClickPos = useRef({ x: 0, y: 0 });
 
@@ -1472,7 +1421,7 @@ function InteractiveImage({
     const timeSinceLast = now - lastClickTime.current;
     const dist = Math.hypot(e.clientX - lastClickPos.current.x, e.clientY - lastClickPos.current.y);
 
-    if ((timeSinceLast < 320 && dist < 50) || e.detail >= 2) {
+    if ((timeSinceLast > 30 && timeSinceLast < 450 && dist < 50) || e.detail >= 2) {
       lastClickTime.current = 0;
       if (clickTimer.current) {
         clearTimeout(clickTimer.current);
@@ -1484,19 +1433,10 @@ function InteractiveImage({
       lastClickPos.current = { x: e.clientX, y: e.clientY };
       if (clickTimer.current) clearTimeout(clickTimer.current);
       clickTimer.current = setTimeout(() => {
+        lastClickTime.current = 0;
         onTap();
-      }, 260);
+      }, 300);
     }
-  };
-
-  const handleDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-    if (clickTimer.current) {
-      clearTimeout(clickTimer.current);
-      clickTimer.current = null;
-    }
-    lastClickTime.current = 0;
-    triggerDoubleTapZoom();
   };
 
   // Touch handlers for mobile pinch, pan & tap
@@ -1652,7 +1592,6 @@ function InteractiveImage({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
       onClick={handleClick}
-      onDoubleClick={handleDoubleClick}
       style={{
         position: "absolute",
         inset: 0,
