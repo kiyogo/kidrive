@@ -11,8 +11,8 @@
 | F-07 | Files | Tìm kiếm lọc nhanh | Lọc danh sách tệp trực tiếp theo tên gõ vào | Đã triển khai filter live | VERIFIED |
 | F-08 | Files | Tạo thư mục mới | Dialog nhập tên thư mục, gọi API `POST /nodes` | Đã triển khai `Dialog` tạo thư mục | VERIFIED |
 | F-09 | Files | Tải tệp lên (Upload) | Hỗ trợ chọn tệp, kéo thả (Drag & Drop), xử lý trùng tên | Đã triển khai drag overlay & `DuplicateClashSheet` | VERIFIED |
-| F-10 | Files | Menu chuột phải (Context Menu) | Mở, Tải xuống, Gắn sao, Chia sẻ, Đổi tên, Đổi màu, Thùng rác | Cần tích hợp Đổi màu thư mục (`recolor`) & Di chuyển (`move`) | P1 IN-PROGRESS |
-| F-11 | Files | Bảng chi tiết tệp (Details Pane) | Hiển thị thông số metadata, lịch sử phiên bản, hành động nhanh | Cần thay `window.prompt` bằng `RenameDialog`, thêm `recolor` | P1 IN-PROGRESS |
+| F-10 | Files | Menu chuột phải (Context Menu) | Mở, Tải xuống, Gắn sao, Chia sẻ, Đổi tên, Đổi màu, Thùng rác | Đã tích hợp Đổi màu thư mục (`recolor`) & Di chuyển (`move`) qua dialog | VERIFIED |
+| F-11 | Files | Bảng chi tiết tệp (Details Pane) | Hiển thị thông số metadata, lịch sử phiên bản, hành động nhanh | Đã tích hợp `RenameDialog`, `folderSwatches`, khôi phục phiên bản | VERIFIED |
 | F-12 | Files | Thanh chọn nhiều (Selection Bar) | Chọn tất cả, đếm số lượng, xóa hàng loạt vào thùng rác | Đã triển khai selection floating bar | VERIFIED |
 | F-13 | Files | Kéo thả di chuyển (Drag & Drop Move) | Kéo tệp thả vào thư mục để di chuyển | Đã triển khai qua `dragProps` & `folderProps` | VERIFIED |
 | F-14 | Gallery | Nhóm ảnh theo ngày | Nhóm "Hôm nay", "Hôm qua", hoặc định dạng ngày tháng cụ thể | Đã triển khai nhóm ngày trong `GalleryScreen` | VERIFIED |
@@ -22,7 +22,7 @@
 | F-18 | Preview | Trình xem đa định dạng | Hỗ trợ Ảnh, Video, Âm thanh, PDF, Markdown, Text/Code số dòng | Đã triển khai đầy đủ các viewer | VERIFIED |
 | F-19 | Share | Hộp thoại Chia sẻ (Share Sheet) | Tạo link công khai, mật khẩu, thời hạn, cho phép tải, thu hồi | Đã triển khai `ShareSheet` | VERIFIED |
 | F-20 | Trash | Khôi phục & Xóa vĩnh viễn | Khôi phục tệp, xóa vĩnh viễn, dọn sạch thùng rác | Đã triển khai đầy đủ | VERIFIED |
-| F-21 | Search | Tìm kiếm toàn diện (Omnisearch) | Ô tìm kiếm có debounce, phím tắt, gợi ý trạng thái rỗng, kết quả tệp | Chưa có component `SearchScreen` độc lập | P1 IN-PROGRESS |
+| F-21 | Search | Tìm kiếm toàn diện (Omnisearch) | Ô tìm kiếm có debounce, phím tắt, gợi ý trạng thái rỗng, kết quả tệp | Đã triển khai `SearchScreen` độc lập với debounced live query | VERIFIED |
 | F-22 | Settings | Chuyển đổi Theme | Hỗ trợ 3 chế độ: Hệ thống (System), Sáng (Light), Tối (Dark) | Đã triển khai `ThemeProvider` & `ThemeToggle` | VERIFIED |
 | F-23 | Settings | Ngôn ngữ | Hỗ trợ Tiếng Việt, Tiếng Anh, Tiếng Ả Rập | Đã triển khai `useL10n` | VERIFIED |
 | F-24 | Settings | Quản lý thiết bị | Danh sách thiết bị hiện tại, phê duyệt/thu hồi phiên đăng nhập | Đã triển khai trong `SettingsScreen` | VERIFIED |
