@@ -1119,15 +1119,8 @@ func (a *API) handleListPools(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			// Nếu UsedBytes hiển thị chưa đầy đủ (ví dụ chỉ có refer size của root dataset ~300MB),
-			// lấy tổng used_bytes thực tế của tất cả các datasets con thuộc pool này:
-			var dsSum int64
-			_ = a.db.Read().QueryRowContext(r.Context(),
-				`SELECT COALESCE(SUM(used_bytes), 0) FROM datasets WHERE (pool = ? OR pool = ? OR pool = ? OR name LIKE ? OR name LIKE ? OR name LIKE ?) AND status != 'deleted'`,
-				p.Name, strings.ToUpper(p.Name), strings.ToLower(p.Name),
-				p.Name+"/%", strings.ToUpper(p.Name)+"/%", strings.ToLower(p.Name)+"/%").Scan(&dsSum)
-			if dsSum > p.UsedBytes {
-				p.UsedBytes = dsSum
+			if p.TotalBytes > 0 && p.UsedBytes > p.TotalBytes {
+				p.UsedBytes = p.TotalBytes
 			}
 
 			// Tự động đồng bộ và lưu vào DB để xóa bỏ triệt để dữ liệu ảo / số ổ đĩa sai (chỉ giữ đúng 2 ổ thực tế)

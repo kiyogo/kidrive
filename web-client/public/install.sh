@@ -90,8 +90,8 @@ rm -f "$TMP_BIN"
 
 DOWNLOADED=false
 URLS=(
-  "https://github.com/kiyogo/kidrive/releases/download/v1.1.1/localdrive-linux-${ARCH}"
-  "https://github.com/ngdaison/LocalDrive/releases/download/v1.1.1/localdrive-linux-${ARCH}"
+  "https://github.com/kiyogo/kidrive/releases/download/v1.1.2/localdrive-linux-${ARCH}"
+  "https://github.com/ngdaison/LocalDrive/releases/download/v1.1.2/localdrive-linux-${ARCH}"
   "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH}"
   "https://github.com/ngdaison/LocalDrive/releases/latest/download/localdrive-linux-${ARCH}"
   "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH_LEGACY}"

@@ -294,7 +294,23 @@ func getZFSPoolCapacity(poolName string) (int64, int64, string, error) {
 	if len(fields) >= 4 {
 		size, _ := strconv.ParseInt(strings.TrimSpace(fields[0]), 10, 64)
 		alloc, _ := strconv.ParseInt(strings.TrimSpace(fields[1]), 10, 64)
-		health := strings.TrimSpace(fields[3])
+		rawHealth := strings.TrimSpace(fields[3])
+		health := "healthy"
+		if !strings.EqualFold(rawHealth, "ONLINE") && !strings.EqualFold(rawHealth, "healthy") {
+			health = rawHealth
+		}
+
+		// Lấy chính xác used_bytes từ ZFS dataset gốc (tránh double count)
+		if zfsOut, zfsErr := exec.Command("zfs", "get", "-H", "-p", "-o", "value", "used", poolName).Output(); zfsErr == nil {
+			if zfsUsed, parseErr := strconv.ParseInt(strings.TrimSpace(string(zfsOut)), 10, 64); parseErr == nil && zfsUsed > 0 {
+				alloc = zfsUsed
+			}
+		}
+
+		if size > 0 && alloc > size {
+			alloc = size
+		}
+
 		return size, alloc, health, nil
 	}
 	return 0, 0, "", errors.New("invalid zpool list output")

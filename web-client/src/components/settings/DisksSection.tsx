@@ -2457,29 +2457,34 @@ export function DisksSection({
                     <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0, color: "var(--fg-primary)", letterSpacing: "-0.01em" }}>
                       {p.name}
                     </h3>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 5,
-                        padding: "3px 10px",
-                        borderRadius: 20,
-                        background: p.status === "healthy" ? "rgba(34, 197, 94, 0.1)" : "rgba(239, 68, 68, 0.1)",
-                        color: p.status === "healthy" ? "#16a34a" : "#ef4444",
-                        fontSize: 12,
-                        fontWeight: 600,
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: "50%",
-                          background: p.status === "healthy" ? "#22c55e" : "#ef4444",
-                        }}
-                      />
-                      {p.status === "healthy" ? "Trực tuyến" : p.status}
-                    </span>
+                    {(() => {
+                      const isHealthy = p.status === "healthy" || p.status === "ONLINE" || p.status === "online" || p.status === "Trực tuyến";
+                      return (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 5,
+                            padding: "3px 10px",
+                            borderRadius: 20,
+                            background: isHealthy ? "rgba(34, 197, 94, 0.1)" : "rgba(239, 68, 68, 0.1)",
+                            color: isHealthy ? "#16a34a" : "#ef4444",
+                            fontSize: 12,
+                            fontWeight: 600,
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: "50%",
+                              background: isHealthy ? "#22c55e" : "#ef4444",
+                            }}
+                          />
+                          {isHealthy ? "Trực tuyến" : p.status}
+                        </span>
+                      );
+                    })()}
                     <span
                       style={{
                         padding: "2px 8px",
