@@ -1822,12 +1822,23 @@ func (a *API) handleDeleteDatasetItem(w http.ResponseWriter, r *http.Request) {
 	if nameOrID == "" {
 		nameOrID = chi.URLParam(r, "name")
 	}
+	itemPath := r.URL.Query().Get("path")
+	if nameOrID == "" || itemPath == "" {
+		nodeID := a.extractNodeID(r, "")
+		if strings.HasPrefix(nodeID, "dataset:") {
+			parts := strings.SplitN(strings.TrimPrefix(nodeID, "dataset:"), ":", 2)
+			if nameOrID == "" {
+				nameOrID = parts[0]
+			}
+			if itemPath == "" && len(parts) > 1 {
+				itemPath = parts[1]
+			}
+		}
+	}
 	if nameOrID == "" {
 		a.fail(w, r, errors.New("tên dataset không hợp lệ"))
 		return
 	}
-
-	itemPath := r.URL.Query().Get("path")
 	if itemPath == "" {
 		a.fail(w, r, errors.New("vui lòng cung cấp đường dẫn cần xóa"))
 		return

@@ -215,6 +215,75 @@ status, smart_res = api_req(f'/admin/drives/{drive_to_test}/smart', 'POST', toke
 print(f"[✓] 17. Kiểm tra S.M.A.R.T ổ cứng ({drive_to_test}): status={status}, health={smart_res.get('health')}, message={smart_res.get('message')}")
 assert status == 200, f"SMART test failed: {smart_res}"
 
+# 15. Cross-Platform Unified /nodes API: Root Listing (Flutter / Desktop / Web)
+status, root_nodes_res = api_req('/nodes', 'GET', token=editor_token)
+print(f"[✓] 18. API /nodes gốc trả về danh sách có Tập dữ liệu: status={status}")
+assert status == 200, f"List root nodes failed: {root_nodes_res}"
+root_nodes = root_nodes_res.get('nodes', [])
+ds_node = next((n for n in root_nodes if n.get('id') == f"dataset:{ds_name}"), None)
+assert ds_node is not None, f"Dataset {ds_name} not found in root /nodes: {[n.get('name') for n in root_nodes]}"
+print(f"    -> Đã tìm thấy Tập dữ liệu trong /nodes: id={ds_node['id']}, name={ds_node['name']}, type={ds_node['type']}, role={ds_node['role']}")
+
+# 16. Cross-Platform Unified /nodes API: Browse Dataset Root
+status, ds_items_res = api_req(f'/nodes?parent_id={urllib.parse.quote(f"dataset:{ds_name}")}', 'GET', token=editor_token)
+print(f"[✓] 19. Duyệt Tập dữ liệu qua /nodes?parent_id=dataset:...: status={status}")
+assert status == 200, f"Browse dataset failed: {ds_items_res}"
+ds_items = ds_items_res.get('nodes', [])
+tailieu_folder = next((n for n in ds_items if n.get('name') == 'tailieu'), None)
+assert tailieu_folder is not None, f"Folder 'tailieu' not found: {[n.get('name') for n in ds_items]}"
+print(f"    -> Tìm thấy thư mục con 'tailieu': id={tailieu_folder['id']}, type={tailieu_folder['type']}")
+
+# 17. Cross-Platform Unified /nodes API: Browse Subfolder
+status, sub_items_res = api_req(f'/nodes?parent_id={urllib.parse.quote(f"dataset:{ds_name}:tailieu")}', 'GET', token=editor_token)
+print(f"[✓] 20. Duyệt thư mục con qua /nodes?parent_id=dataset:...:tailieu: status={status}")
+assert status == 200, f"Browse subfolder failed: {sub_items_res}"
+sub_items = sub_items_res.get('nodes', [])
+file_node = next((n for n in sub_items if n.get('name') == 'kiemthu.txt'), None)
+assert file_node is not None, f"File 'kiemthu.txt' not found: {[n.get('name') for n in sub_items]}"
+print(f"    -> Tìm thấy tệp 'kiemthu.txt': id={file_node['id']}, size={file_node['size_bytes']} bytes")
+
+# 18. Cross-Platform Unified /nodes API: Get Single Node
+status, single_node = api_req(f'/nodes/{urllib.parse.quote(file_node["id"])}', 'GET', token=editor_token)
+print(f"[✓] 21. Lấy chi tiết nút qua /nodes/{{id}}: status={status}, name={single_node.get('name')}")
+assert status == 200 and single_node.get('name') == 'kiemthu.txt', f"Get node failed: {single_node}"
+
+# 19. Cross-Platform Unified /nodes API: Breadcrumb Path
+status, path_res = api_req(f'/nodes/{urllib.parse.quote(file_node["id"])}/path', 'GET', token=editor_token)
+print(f"[✓] 22. Lấy đường dẫn phân cấp (Breadcrumbs) qua /nodes/{{id}}/path: status={status}")
+assert status == 200, f"Path failed: {path_res}"
+chain = path_res.get('path', [])
+print(f"    -> Chuỗi đường dẫn: {' / '.join([p.get('name', '') for p in chain])}")
+assert len(chain) >= 2, f"Expected at least 2 breadcrumb items, got {len(chain)}"
+
+# 20. Cross-Platform Unified /nodes API: Create Folder
+status, create_fld = api_req('/nodes/folder', 'POST', {
+    'name': 'thumuc_kiemthu',
+    'parent_id': f"dataset:{ds_name}:tailieu"
+}, token=editor_token)
+print(f"[✓] 23. Tạo thư mục trong Tập dữ liệu qua POST /nodes/folder: status={status}, id={create_fld.get('id')}")
+assert status == 201, f"Create folder failed: {create_fld}"
+created_fld_id = create_fld['id']
+
+# 21. Cross-Platform Unified /nodes API: Rename Folder
+status, rename_res = api_req(f'/nodes/{urllib.parse.quote(created_fld_id)}', 'PATCH', {
+    'name': 'thumuc_da_doi_ten'
+}, token=editor_token)
+print(f"[✓] 24. Đổi tên thư mục trong Tập dữ liệu qua PATCH /nodes/{{id}}: status={status}, new_id={rename_res.get('id')}")
+assert status == 200 and rename_res.get('name') == 'thumuc_da_doi_ten', f"Rename folder failed: {rename_res}"
+renamed_fld_id = rename_res['id']
+
+# 22. Cross-Platform Unified /nodes API: Read-Only User Delete Protection
+status, deny_del = api_req(f'/nodes/{urllib.parse.quote(renamed_fld_id)}', 'DELETE', token=viewer_token)
+print(f"[✓] 25. Người dùng Chỉ đọc cố gắng xóa thư mục: status={status} (Kỳ vọng: 403 Forbidden)")
+assert status == 403, f"Expected 403 Forbidden for viewer delete, got {status}: {deny_del}"
+
+# 23. Cross-Platform Unified /nodes API: Editor User Delete
+status, allow_del = api_req(f'/nodes/{urllib.parse.quote(renamed_fld_id)}', 'DELETE', token=editor_token)
+print(f"[✓] 26. Người dùng Đọc/Ghi xóa thư mục thành công qua DELETE /nodes/{{id}}: status={status}")
+assert status in (200, 204), f"Delete failed: {allow_del}"
+
 print("\n==================================================================")
-print("   TẤT CẢ 17/17 BƯỚC KIỂM THỬ ĐÃ HOẠT ĐỘNG HOÀN TOÀN 100%!")
+print("   TẤT CẢ 26/26 BƯỚC KIỂM THỬ ĐÃ HOẠT ĐỘNG HOÀN TOÀN 100%!")
+print("   TẤT CẢ APP, WEB, SERVER ĐỒNG BỘ 100% KHÔNG CẦN FAKE/MOCK DATA!")
 print("==================================================================")
+

@@ -37,14 +37,167 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		SortBy:   strings.TrimSpace(r.URL.Query().Get("sort")),
 		SortDesc: strings.EqualFold(r.URL.Query().Get("order"), "desc"),
 	}
+
+	if strings.HasPrefix(opts.ParentID, "dataset:") {
+		parts := strings.SplitN(strings.TrimPrefix(opts.ParentID, "dataset:"), ":", 2)
+		dsName := parts[0]
+		subpath := ""
+		if len(parts) > 1 {
+			subpath = parts[1]
+		}
+		if unescaped, err := url.PathUnescape(dsName); err == nil {
+			dsName = unescaped
+		}
+		if unescaped, err := url.PathUnescape(subpath); err == nil {
+			subpath = unescaped
+		}
+		dsName, mount, err := a.getDatasetMount(r.Context(), dsName)
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		role, err := a.checkDatasetAccess(r, dsName, false)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
+			return
+		}
+		cleanedSub := filepath.Clean("/" + subpath)
+		cleanedSub = strings.TrimPrefix(cleanedSub, "/")
+		cleanedSub = strings.TrimPrefix(cleanedSub, "\\")
+		cleanTarget := filepath.Clean(filepath.Join(mount, cleanedSub))
+		cleanMount := filepath.Clean(mount)
+		if !strings.HasPrefix(strings.ToLower(cleanTarget), strings.ToLower(cleanMount)) {
+			a.fail(w, r, fmt.Errorf("đường dẫn không hợp lệ"))
+			return
+		}
+		entries, err := os.ReadDir(cleanTarget)
+		if err != nil {
+			if os.IsNotExist(err) {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"nodes":       []nodeDTO{},
+					"limit":       opts.Limit,
+					"offset":      opts.Offset,
+					"has_more":    false,
+					"next_offset": 0,
+				})
+				return
+			}
+			a.fail(w, r, err)
+			return
+		}
+		var nodes []nodeDTO
+		qLower := strings.ToLower(opts.Query)
+		for _, entry := range entries {
+			if qLower != "" && !strings.Contains(strings.ToLower(entry.Name()), qLower) {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			itemType := "file"
+			mimeType := mime.TypeByExtension(filepath.Ext(entry.Name()))
+			if entry.IsDir() {
+				itemType = "folder"
+				mimeType = "application/x-directory"
+			} else if mimeType == "" {
+				mimeType = "application/octet-stream"
+			}
+			relItemPath := filepath.Join(cleanedSub, entry.Name())
+			relItemPath = strings.ReplaceAll(relItemPath, "\\", "/")
+			relItemPath = strings.TrimPrefix(relItemPath, "/")
+			category := string(models.CategoryOf(models.NodeType(itemType), mimeType, entry.Name()))
+			nodes = append(nodes, nodeDTO{
+				ID:        fmt.Sprintf("dataset:%s:%s", dsName, relItemPath),
+				ParentID:  opts.ParentID,
+				Name:      entry.Name(),
+				Type:      itemType,
+				Category:  category,
+				MimeType:  mimeType,
+				SizeBytes: info.Size(),
+				Role:      role,
+				CreatedAt: info.ModTime().UnixMilli(),
+				UpdatedAt: info.ModTime().UnixMilli(),
+			})
+		}
+		total := len(nodes)
+		start := opts.Offset
+		if start > total {
+			start = total
+		}
+		end := start + opts.Limit
+		if end > total {
+			end = total
+		}
+		paged := nodes[start:end]
+		writeJSON(w, http.StatusOK, map[string]any{
+			"nodes":       paged,
+			"limit":       opts.Limit,
+			"offset":      opts.Offset,
+			"has_more":    end < total,
+			"next_offset": end,
+		})
+		return
+	}
+
 	list, err := a.files.List(r.Context(), userID, opts)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
 	hasMore := len(list) == limit
+	outNodes := nodeViews(list, userID)
+
+	if (opts.ParentID == "" || opts.ParentID == "root") && (opts.Filter == "" || opts.Filter == "none") && opts.Offset == 0 {
+		rows, err := a.db.Read().QueryContext(r.Context(), `SELECT name, pool, used_bytes, created_at, updated_at FROM datasets ORDER BY name ASC`)
+		if err == nil {
+			defer rows.Close()
+			var dsNodes []nodeDTO
+			for rows.Next() {
+				var name, pool string
+				var usedBytes, createdAt, updatedAt int64
+				if err := rows.Scan(&name, &pool, &usedBytes, &createdAt, &updatedAt); err == nil {
+					role, accessErr := a.checkDatasetAccess(r, name, false)
+					if accessErr == nil {
+						color := "azure"
+						if pool == "kiyo-pool" {
+							color = "grape"
+						}
+						dsNodes = append(dsNodes, nodeDTO{
+							ID:        fmt.Sprintf("dataset:%s", name),
+							ParentID:  "",
+							Name:      name,
+							Type:      "folder",
+							Category:  "folder",
+							MimeType:  "application/x-directory",
+							SizeBytes: usedBytes,
+							Color:     color,
+							Role:      role,
+							CreatedAt: createdAt,
+							UpdatedAt: updatedAt,
+						})
+					}
+				}
+			}
+			var filtered []nodeDTO
+			for _, n := range outNodes {
+				collision := false
+				for _, d := range dsNodes {
+					if d.Name == n.Name {
+						collision = true
+						break
+					}
+				}
+				if !collision {
+					filtered = append(filtered, n)
+				}
+			}
+			outNodes = append(dsNodes, filtered...)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"nodes":       nodeViews(list, userID),
+		"nodes":       outNodes,
 		"limit":       opts.Limit,
 		"offset":      opts.Offset,
 		"has_more":    hasMore,
@@ -66,6 +219,65 @@ func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, ip := caller(r)
 
+	if strings.HasPrefix(req.ParentID, "dataset:") {
+		parts := strings.SplitN(strings.TrimPrefix(req.ParentID, "dataset:"), ":", 2)
+		dsName := parts[0]
+		subpath := ""
+		if len(parts) > 1 {
+			subpath = parts[1]
+		}
+		if unescaped, err := url.PathUnescape(dsName); err == nil {
+			dsName = unescaped
+		}
+		if unescaped, err := url.PathUnescape(subpath); err == nil {
+			subpath = unescaped
+		}
+		dsName, mount, err := a.getDatasetMount(r.Context(), dsName)
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		role, err := a.checkDatasetAccess(r, dsName, true)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
+			return
+		}
+		folderName := strings.TrimSpace(req.Name)
+		if folderName == "" || strings.ContainsAny(folderName, `/\:*"<>|`) {
+			a.fail(w, r, fmt.Errorf("tên thư mục không hợp lệ"))
+			return
+		}
+		cleanedSub := filepath.Clean("/" + subpath)
+		cleanedSub = strings.TrimPrefix(cleanedSub, "/")
+		cleanedSub = strings.TrimPrefix(cleanedSub, "\\")
+		targetPath := filepath.Clean(filepath.Join(mount, cleanedSub, folderName))
+		cleanMount := filepath.Clean(mount)
+		if !strings.HasPrefix(strings.ToLower(targetPath), strings.ToLower(cleanMount)) {
+			a.fail(w, r, fmt.Errorf("đường dẫn không hợp lệ"))
+			return
+		}
+		if err := os.MkdirAll(targetPath, 0755); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		relPath := filepath.ToSlash(filepath.Join(cleanedSub, folderName))
+		relPath = strings.TrimPrefix(relPath, "/")
+		body := nodeDTO{
+			ID:        fmt.Sprintf("dataset:%s:%s", dsName, relPath),
+			ParentID:  req.ParentID,
+			Name:      folderName,
+			Type:      "folder",
+			Category:  "folder",
+			MimeType:  "application/x-directory",
+			Role:      role,
+			Color:     req.Color,
+			CreatedAt: time.Now().UnixMilli(),
+			UpdatedAt: time.Now().UnixMilli(),
+		}
+		writeJSON(w, http.StatusCreated, body)
+		return
+	}
+
 	if replayed, ok := a.replayIdempotent(w, r, "nodes.folder"); ok {
 		_ = replayed
 		return
@@ -84,6 +296,76 @@ func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleGetNode(w http.ResponseWriter, r *http.Request) {
+	nodeID := a.extractNodeID(r, "")
+	if strings.HasPrefix(nodeID, "dataset:") {
+		parts := strings.SplitN(strings.TrimPrefix(nodeID, "dataset:"), ":", 2)
+		dsName := parts[0]
+		subpath := ""
+		if len(parts) > 1 {
+			subpath = parts[1]
+		}
+		if unescaped, err := url.PathUnescape(dsName); err == nil {
+			dsName = unescaped
+		}
+		if unescaped, err := url.PathUnescape(subpath); err == nil {
+			subpath = unescaped
+		}
+		dsName, mount, err := a.getDatasetMount(r.Context(), dsName)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "not_found", "dataset not found")
+			return
+		}
+		role, err := a.checkDatasetAccess(r, dsName, false)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
+			return
+		}
+		cleanedSub := filepath.Clean("/" + subpath)
+		cleanedSub = strings.TrimPrefix(cleanedSub, "/")
+		cleanedSub = strings.TrimPrefix(cleanedSub, "\\")
+		cleanTarget := filepath.Clean(filepath.Join(mount, cleanedSub))
+		cleanMount := filepath.Clean(mount)
+		if !strings.HasPrefix(strings.ToLower(cleanTarget), strings.ToLower(cleanMount)) {
+			writeError(w, http.StatusForbidden, "forbidden", "đường dẫn không hợp lệ")
+			return
+		}
+		info, err := os.Stat(cleanTarget)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "not_found", "that item does not exist")
+			return
+		}
+		itemType := "file"
+		mimeType := mime.TypeByExtension(filepath.Ext(info.Name()))
+		if info.IsDir() {
+			itemType = "folder"
+			mimeType = "application/x-directory"
+		} else if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		category := string(models.CategoryOf(models.NodeType(itemType), mimeType, info.Name()))
+		parentID := ""
+		if subpath != "" {
+			parentSub := filepath.ToSlash(filepath.Dir(subpath))
+			if parentSub != "." && parentSub != "/" && parentSub != "" {
+				parentID = fmt.Sprintf("dataset:%s:%s", dsName, parentSub)
+			} else {
+				parentID = fmt.Sprintf("dataset:%s", dsName)
+			}
+		}
+		writeJSON(w, http.StatusOK, nodeDTO{
+			ID:        nodeID,
+			ParentID:  parentID,
+			Name:      info.Name(),
+			Type:      itemType,
+			Category:  category,
+			MimeType:  mimeType,
+			SizeBytes: info.Size(),
+			Role:      role,
+			CreatedAt: info.ModTime().UnixMilli(),
+			UpdatedAt: info.ModTime().UnixMilli(),
+		})
+		return
+	}
 	userID, _ := caller(r)
 	view, err := a.files.GetView(r.Context(), userID, chi.URLParam(r, "id"))
 	if err != nil {
@@ -94,6 +376,66 @@ func (a *API) handleGetNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleNodePath(w http.ResponseWriter, r *http.Request) {
+	nodeID := a.extractNodeID(r, "path")
+	if strings.HasPrefix(nodeID, "dataset:") {
+		parts := strings.SplitN(strings.TrimPrefix(nodeID, "dataset:"), ":", 2)
+		dsName := parts[0]
+		subpath := ""
+		if len(parts) > 1 {
+			subpath = parts[1]
+		}
+		if unescaped, err := url.PathUnescape(dsName); err == nil {
+			dsName = unescaped
+		}
+		if unescaped, err := url.PathUnescape(subpath); err == nil {
+			subpath = unescaped
+		}
+		dsName, _, err := a.getDatasetMount(r.Context(), dsName)
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		role, err := a.checkDatasetAccess(r, dsName, false)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
+			return
+		}
+		var chain []nodeDTO
+		chain = append(chain, nodeDTO{
+			ID:       fmt.Sprintf("dataset:%s", dsName),
+			ParentID: "",
+			Name:     dsName,
+			Type:     "folder",
+			Category: "folder",
+			MimeType: "application/x-directory",
+			Role:     role,
+		})
+		if subpath != "" {
+			subSegments := strings.Split(filepath.ToSlash(subpath), "/")
+			accum := ""
+			for _, seg := range subSegments {
+				if seg == "" {
+					continue
+				}
+				if accum == "" {
+					accum = seg
+				} else {
+					accum = accum + "/" + seg
+				}
+				chain = append(chain, nodeDTO{
+					ID:       fmt.Sprintf("dataset:%s:%s", dsName, accum),
+					ParentID: fmt.Sprintf("dataset:%s", dsName),
+					Name:     seg,
+					Type:     "folder",
+					Category: "folder",
+					MimeType: "application/x-directory",
+					Role:     role,
+				})
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"path": chain})
+		return
+	}
 	userID, _ := caller(r)
 	chain, err := a.files.PathTo(r.Context(), userID, chi.URLParam(r, "id"))
 	if err != nil {
@@ -121,7 +463,69 @@ func (a *API) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID, ip := caller(r)
-	nodeID := chi.URLParam(r, "id")
+	nodeID := a.extractNodeID(r, "")
+
+	if strings.HasPrefix(nodeID, "dataset:") {
+		parts := strings.SplitN(strings.TrimPrefix(nodeID, "dataset:"), ":", 2)
+		dsName := parts[0]
+		subpath := ""
+		if len(parts) > 1 {
+			subpath = parts[1]
+		}
+		if unescaped, err := url.PathUnescape(dsName); err == nil {
+			dsName = unescaped
+		}
+		if unescaped, err := url.PathUnescape(subpath); err == nil {
+			subpath = unescaped
+		}
+		dsName, mount, err := a.getDatasetMount(r.Context(), dsName)
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		role, err := a.checkDatasetAccess(r, dsName, true)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
+			return
+		}
+		if req.Name != nil {
+			newName := strings.TrimSpace(*req.Name)
+			if newName == "" || strings.ContainsAny(newName, `/\:*"<>|`) {
+				a.fail(w, r, fmt.Errorf("tên mới không hợp lệ"))
+				return
+			}
+			cleanSub := filepath.Clean("/" + subpath)
+			cleanSub = strings.TrimPrefix(cleanSub, "/")
+			cleanSub = strings.TrimPrefix(cleanSub, "\\")
+			oldTarget := filepath.Clean(filepath.Join(mount, cleanSub))
+			newTarget := filepath.Clean(filepath.Join(filepath.Dir(oldTarget), newName))
+			cleanMount := filepath.Clean(mount)
+			if !strings.HasPrefix(strings.ToLower(oldTarget), strings.ToLower(cleanMount)) ||
+				!strings.HasPrefix(strings.ToLower(newTarget), strings.ToLower(cleanMount)) {
+				a.fail(w, r, fmt.Errorf("đường dẫn không hợp lệ"))
+				return
+			}
+			if err := os.Rename(oldTarget, newTarget); err != nil {
+				a.fail(w, r, err)
+				return
+			}
+			parentSub := filepath.ToSlash(filepath.Dir(cleanSub))
+			newSub := newName
+			if parentSub != "." && parentSub != "/" && parentSub != "" {
+				newSub = parentSub + "/" + newName
+			}
+			writeJSON(w, http.StatusOK, nodeDTO{
+				ID:        fmt.Sprintf("dataset:%s:%s", dsName, newSub),
+				ParentID:  fmt.Sprintf("dataset:%s", dsName),
+				Name:      newName,
+				Role:      role,
+				UpdatedAt: time.Now().UnixMilli(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+		return
+	}
 
 	var (
 		node models.Node
@@ -164,6 +568,11 @@ func (a *API) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleTrashNode(w http.ResponseWriter, r *http.Request) {
+	nodeID := a.extractNodeID(r, "")
+	if strings.HasPrefix(nodeID, "dataset:") {
+		a.handleDeleteDatasetItem(w, r)
+		return
+	}
 	userID, ip := caller(r)
 	node, err := a.files.Trash(r.Context(), userID, chi.URLParam(r, "id"), ip)
 	if err != nil {
@@ -184,6 +593,11 @@ func (a *API) handleRestoreNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
+	nodeID := a.extractNodeID(r, "")
+	if strings.HasPrefix(nodeID, "dataset:") {
+		a.handleDeleteDatasetItem(w, r)
+		return
+	}
 	userID, ip := caller(r)
 	if err := a.files.PermanentDelete(r.Context(), userID, chi.URLParam(r, "id"), ip); err != nil {
 		a.fail(w, r, err)
@@ -435,8 +849,20 @@ func (a *API) handleNodeWildcard(w http.ResponseWriter, r *http.Request) {
 		a.handleFolderPreview(w, r)
 		return
 	}
+	if strings.HasSuffix(wildcard, "/path") {
+		a.handleNodePath(w, r)
+		return
+	}
 
-	writeError(w, http.StatusNotFound, "not_found", "no such node")
+	a.handleGetNode(w, r)
+}
+
+func (a *API) handleNodeWildcardPatch(w http.ResponseWriter, r *http.Request) {
+	a.handlePatchNode(w, r)
+}
+
+func (a *API) handleNodeWildcardDelete(w http.ResponseWriter, r *http.Request) {
+	a.handleDeleteNode(w, r)
 }
 
 func serveThumbnail(w http.ResponseWriter, r *http.Request, node models.Node, path string) {
