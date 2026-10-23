@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/MultiX0/LocalDrive/server/internal/jobs"
 	"github.com/MultiX0/LocalDrive/server/internal/libraries"
 	mw "github.com/MultiX0/LocalDrive/server/internal/middleware"
+	"github.com/MultiX0/LocalDrive/server/internal/models"
 	"github.com/MultiX0/LocalDrive/server/internal/mounthelper"
 	"github.com/MultiX0/LocalDrive/server/internal/settings"
 	"github.com/MultiX0/LocalDrive/server/internal/shares"
@@ -340,7 +342,38 @@ func (a *API) Router() http.Handler {
 // hands off to tus.
 func (a *API) uploadHandler() http.Handler {
 	strip := http.StripPrefix("/api/v1/uploads", a.tus)
-	return mw.LimitConcurrency(a.uploadSem, mw.ByUser)(strip)
+	limited := mw.LimitConcurrency(a.uploadSem, mw.ByUser)(strip)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, ok := mw.UserFrom(r.Context())
+		if ok && user.Role != models.RoleAdmin {
+			hasPerms := false
+			if user.DatasetPermissions != "" && user.DatasetPermissions != "{}" {
+				var perms map[string]any
+				if err := json.Unmarshal([]byte(user.DatasetPermissions), &perms); err == nil {
+					for _, v := range perms {
+						if v == nil || v == "none" {
+							continue
+						}
+						if s, ok := v.(string); ok && s != "none" {
+							hasPerms = true
+							break
+						}
+						if m, ok := v.(map[string]any); ok {
+							if wr, _ := m["write"].(bool); wr {
+								hasPerms = true
+								break
+							}
+						}
+					}
+				}
+			}
+			if !hasPerms {
+				writeError(w, http.StatusForbidden, "forbidden", "Tài khoản chưa được phân quyền danh mục lưu trữ để tải lên.")
+				return
+			}
+		}
+		limited.ServeHTTP(w, r)
+	})
 }
 
 // requireToken verifies the bearer token and loads the account behind it.

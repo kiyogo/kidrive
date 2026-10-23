@@ -178,6 +178,13 @@ export function FilesBrowser({
     return { level: "none" as const, read: false, write: false, execute: false };
   }, [user, userPerms]);
 
+  // Check if current user has assigned categories:
+  const hasAssignedCategory = useMemo<boolean>(() => {
+    if (!user) return false;
+    if (user.role === "admin") return true;
+    return Object.values(userPerms).some((p) => p.read);
+  }, [user, userPerms]);
+
   // Determine root dataset name if within a dataset hierarchy
   const currentDatasetName = useMemo<string | null>(() => {
     if (trail && trail.length > 0 && trail[0].id.startsWith("dataset:")) {
@@ -195,12 +202,13 @@ export function FilesBrowser({
   const isReadOnly = useMemo<boolean>(() => {
     if (!user) return false;
     if (user.role === "admin") return false;
+    if (!hasAssignedCategory) return true;
     if (currentDatasetName) {
       const perm = getDatasetPerm(currentDatasetName);
       return !perm.write;
     }
     return false;
-  }, [user, currentDatasetName, getDatasetPerm]);
+  }, [user, currentDatasetName, getDatasetPerm, hasAssignedCategory]);
 
   // Is current view forbidden?
   const isForbidden = useMemo<boolean>(() => {
@@ -264,6 +272,10 @@ export function FilesBrowser({
 
   const handleCreateFolder = async () => {
     if (!folderName.trim()) return;
+    if (!hasAssignedCategory) {
+      toast("Tài khoản chưa được chỉ định danh mục lưu trữ. Vui lòng liên hệ quản trị viên!", "error");
+      return;
+    }
     if (isReadOnly) {
       toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này!", "error");
       return;
@@ -396,6 +408,10 @@ export function FilesBrowser({
   };
 
   const handleDatasetUpload = async (files: FileList) => {
+    if (!hasAssignedCategory) {
+      toast("Tài khoản chưa được chỉ định danh mục lưu trữ. Vui lòng liên hệ quản trị viên để được cấp quyền trước khi tải lên!", "error");
+      return;
+    }
     if (isReadOnly) {
       toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này, không thể tải lên!", "error");
       return;
@@ -460,32 +476,35 @@ export function FilesBrowser({
   } = useInfiniteList<NodeModel>({
     pageSize: 50,
     getItemKey: (node) => node.id,
-    deps: [folderId, filter, query, sortBy, sortDir, isForbidden],
+    deps: [folderId, filter, query, sortBy, sortDir, isForbidden, hasAssignedCategory],
     fetchPage: async ({ offset, limit, signal }) => {
-      if (isForbidden) {
+      if (isForbidden || !hasAssignedCategory) {
         return { items: [], hasMore: false };
       }
 
       // If inside a dataset folder:
       if (folderId.startsWith("dataset:")) {
-        const parts = folderId.replace(/^dataset:/, "").split(":");
-        const dsName = parts[0];
-        const subpath = parts.slice(1).join("/");
-        const res = await api.get<{ items: NodeModel[]; role: string }>(
-          Api.datasetItems(dsName, subpath),
-          undefined,
+        const data = await api.get<{ nodes: NodeModel[]; has_more?: boolean; next_offset?: number }>(
+          Api.nodes,
+          {
+            parent_id: folderId,
+            query: query || undefined,
+            sort: sortBy,
+            order: sortDir,
+            limit,
+            offset,
+          },
           { signal }
         );
-        let dsNodes = res?.items ?? [];
+        let dsNodes = data?.nodes ?? [];
         if (query.trim()) {
           const q = query.trim().toLowerCase();
           dsNodes = dsNodes.filter((n) => n.name.toLowerCase().includes(q));
         }
-        const paged = dsNodes.slice(offset, offset + limit);
         return {
-          items: paged,
-          hasMore: offset + limit < dsNodes.length,
-          nextOffset: offset + paged.length,
+          items: dsNodes,
+          hasMore: Boolean(data?.has_more ?? (dsNodes.length >= limit)),
+          nextOffset: data?.next_offset ?? offset + dsNodes.length,
           total: dsNodes.length,
         };
       }
@@ -520,7 +539,7 @@ export function FilesBrowser({
       );
       let fetched = data?.nodes ?? [];
 
-      // If at root level on the first batch, inject system datasets:
+      // If at root level on the first batch, inject root-level datasets:
       if (filter === "none" && !folderId && offset === 0) {
         let sysDatasets: any[] = [];
         try {
@@ -531,16 +550,26 @@ export function FilesBrowser({
         } catch {
           sysDatasets = [];
         }
+
+        const accessible = sysDatasets.filter((ds) => getDatasetPerm(ds.name).read);
+        // Only top-level root datasets (not child datasets whose parent is also accessible)
+        const rootDatasets = accessible.filter((ds) => {
+          return !accessible.some((other) => other.name !== ds.name && ds.name.startsWith(other.name + "/"));
+        });
+
         const datasetNodes: NodeModel[] = [];
-        for (const ds of sysDatasets) {
+        for (const ds of rootDatasets) {
           const perm = getDatasetPerm(ds.name);
-          if (!perm.read) continue; // Cấm truy cập -> hoàn toàn ẩn!
+          let displayName = ds.name;
+          if (displayName.includes("/")) {
+            displayName = displayName.substring(displayName.lastIndexOf("/") + 1);
+          }
           datasetNodes.push({
             id: `dataset:${ds.name}`,
             parent_id: "",
             owner_id: "system",
             library_id: "",
-            name: ds.name,
+            name: displayName,
             type: "folder",
             mime_type: "application/x-directory",
             size_bytes: ds.used_bytes || 0,
@@ -551,8 +580,11 @@ export function FilesBrowser({
             updated_at: ds.updated_at || Date.now() - 3600000,
           });
         }
-        fetched = fetched.filter((n) => !sysDatasets.some((d) => d.name === n.name));
-        fetched = [...datasetNodes, ...fetched];
+        if (datasetNodes.length > 0) {
+          fetched = datasetNodes;
+        } else if (sysDatasets.length > 0) {
+          fetched = [];
+        }
       }
 
       return {
@@ -768,6 +800,10 @@ export function FilesBrowser({
       onDrop={(e) => {
         e.preventDefault();
         setDragging(false);
+        if (!hasAssignedCategory) {
+          toast("Tài khoản chưa được chỉ định danh mục lưu trữ. Vui lòng liên hệ quản trị viên!", "error");
+          return;
+        }
         if (isReadOnly) {
           toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này, không thể tải lên!", "error");
           return;
@@ -1038,10 +1074,10 @@ export function FilesBrowser({
                 title={view === "grid" ? t.viewList : t.viewGrid}
                 onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
               />
-              {filter === "none" && !isReadOnly && (
+              {filter === "none" && !isReadOnly && hasAssignedCategory && (
                 <UtilityButton glyph="folder" title={t.newFolder} onClick={() => { setFolderName(""); setCreateFolderOpen(true); }} />
               )}
-              {!isReadOnly && (
+              {!isReadOnly && hasAssignedCategory && (
                 <Button
                   label={t.upload}
                   glyph="upload"
@@ -1129,7 +1165,7 @@ export function FilesBrowser({
                   title={view === "grid" ? t.viewList : t.viewGrid}
                   onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
                 />
-                {filter === "none" && !isReadOnly && (
+                {filter === "none" && !isReadOnly && hasAssignedCategory && (
                   <UtilityButton
                     glyph="folder"
                     title={t.newFolder}
@@ -1139,7 +1175,7 @@ export function FilesBrowser({
                     }}
                   />
                 )}
-                {!isReadOnly && (
+                {!isReadOnly && hasAssignedCategory && (
                   <Button
                     label={t.upload}
                     glyph="upload"
@@ -1157,7 +1193,26 @@ export function FilesBrowser({
         )}
       </header>
 
-      {isReadOnly && (
+      {!hasAssignedCategory ? (
+        <div
+          style={{
+            padding: "10px 24px",
+            background: "rgba(239, 68, 68, 0.1)",
+            borderBottom: "1px solid rgba(239, 68, 68, 0.25)",
+            color: "var(--danger)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            fontSize: 13,
+            fontWeight: 500,
+          }}
+        >
+          <Icon glyph="lock" size={16} color="var(--danger)" />
+          <span>
+            <b>Chưa phân quyền danh mục:</b> Tài khoản của bạn chưa được chỉ định danh mục lưu trữ nào. Vui lòng liên hệ quản trị viên để được cấp quyền trước khi xem hoặc tải lên tệp tin.
+          </span>
+        </div>
+      ) : isReadOnly ? (
         <div
           style={{
             padding: "10px 24px",
@@ -1176,7 +1231,7 @@ export function FilesBrowser({
             <b>Bộ dữ liệu chỉ đọc:</b> Bạn chỉ có quyền xem nội dung và không thể tải lên, tạo thư mục hoặc xóa tập tin trong bộ dữ liệu này.
           </span>
         </div>
-      )}
+      ) : null}
 
       {filter === "trash" && isMobile && (
         <Banner glyph="recent" message={t.trashRetentionNote({ days: 30 })} tint="var(--fg-secondary)" />
@@ -1263,6 +1318,11 @@ export function FilesBrowser({
         hidden
         onChange={async (e) => {
           if (!e.target.files) return;
+          if (!hasAssignedCategory) {
+            toast("Tài khoản chưa được chỉ định danh mục lưu trữ. Vui lòng liên hệ quản trị viên để được cấp quyền trước khi tải lên!", "error");
+            e.target.value = "";
+            return;
+          }
           const readiness = await checkStorageReadiness();
           if (!readiness.ready) {
             toast(readiness.message, "error");
@@ -1271,6 +1331,7 @@ export function FilesBrowser({
           }
           if (isReadOnly) {
             toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này, không thể tải lên!", "error");
+            e.target.value = "";
             return;
           }
           if (user && user.quota_bytes > 0 && user.quota_bytes_used >= user.quota_bytes) {
@@ -1303,6 +1364,11 @@ export function FilesBrowser({
         {...({ webkitdirectory: "", directory: "" } as any)}
         onChange={async (e) => {
           if (!e.target.files) return;
+          if (!hasAssignedCategory) {
+            toast("Tài khoản chưa được chỉ định danh mục lưu trữ. Vui lòng liên hệ quản trị viên để được cấp quyền trước khi tải lên!", "error");
+            e.target.value = "";
+            return;
+          }
           const readiness = await checkStorageReadiness();
           if (!readiness.ready) {
             toast(readiness.message, "error");
@@ -1311,6 +1377,7 @@ export function FilesBrowser({
           }
           if (isReadOnly) {
             toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này, không thể tải lên!", "error");
+            e.target.value = "";
             return;
           }
           if (user && user.quota_bytes > 0 && user.quota_bytes_used >= user.quota_bytes) {
@@ -1339,6 +1406,12 @@ export function FilesBrowser({
           <ErrorState message={error} onRetry={() => void load()} />
         ) : nodes === null ? (
           view === "grid" && filter !== "trash" ? <GridSkeleton /> : <ListSkeleton />
+        ) : !hasAssignedCategory ? (
+          <EmptyState
+            glyph="folder"
+            title="Chưa được chỉ định danh mục lưu trữ"
+            message="Tài khoản của bạn chưa được phân quyền truy cập danh mục lưu trữ nào. Vui lòng liên hệ quản trị viên để được cấp quyền trước khi xem hoặc tải lên tệp tin."
+          />
         ) : visible.length === 0 ? (
           <EmptyState
             glyph={
@@ -1356,7 +1429,7 @@ export function FilesBrowser({
             }
             title={query ? t.emptySearchTitle : emptyTitle(filter, t)}
             message={query ? t.emptySearchBody : emptyBody(filter, t)}
-            actionLabel={filter === "none" && !query ? t.upload : undefined}
+            actionLabel={filter === "none" && !query && !isReadOnly && hasAssignedCategory ? t.upload : undefined}
             onAction={
               filter === "none" && !query
                 ? (e?: any) => {
@@ -1464,7 +1537,7 @@ export function FilesBrowser({
             glyph: "sort",
             onClick: () => setSortMenu({ anchorRect: overflow?.anchorRect, x: overflow?.x, y: overflow?.y }),
           },
-          ...(!isReadOnly
+          ...(!isReadOnly && hasAssignedCategory
             ? [
                 { label: t.newFolder, glyph: "folder-plus" as Glyph, onClick: () => { setFolderName(""); setCreateFolderOpen(true); } },
                 { label: t.uploadFile, glyph: "upload" as Glyph, onClick: () => fileInput.current?.click() },
@@ -1684,7 +1757,7 @@ export function FilesBrowser({
         y={canvasMenu?.y}
         onClose={() => setCanvasMenu(null)}
         items={[
-          ...(filter === "none" && !isReadOnly
+          ...(filter === "none" && !isReadOnly && hasAssignedCategory
             ? [
                 {
                   label: t.newFolder,

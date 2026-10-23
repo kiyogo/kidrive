@@ -41,8 +41,15 @@ function findNodeInTree(
   depth = 0
 ): { node: FolderTreeNode; depth: number } | null {
   for (const n of tree) {
-    const itemKey = n.name || n.path;
-    if (itemKey === keyOrPath || n.path === keyOrPath || n.id === keyOrPath || n.name === keyOrPath) {
+    const itemKey = (n as any).key || n.name || n.path;
+    if (
+      itemKey === keyOrPath ||
+      n.path === keyOrPath ||
+      n.id === keyOrPath ||
+      n.name === keyOrPath ||
+      (n as any).key === keyOrPath ||
+      (n.path && keyOrPath && (n.path.endsWith("/" + keyOrPath) || keyOrPath.endsWith("/" + n.name)))
+    ) {
       return { node: n, depth };
     }
     if (n.children && n.children.length > 0) {
@@ -68,8 +75,8 @@ function CategoryTreeItem({
   onToggleSelect: (node: FolderTreeNode, depth: number) => void;
   onToggleExpand: (id: string, e: React.MouseEvent) => void;
 }) {
-  const itemKey = node.name || node.path;
-  const isSelected = selectedDatasets.has(itemKey) || Boolean(node.path && selectedDatasets.has(node.path));
+  const itemKey = (node as any).key || node.name || node.path;
+  const isSelected = selectedDatasets.has(itemKey) || Boolean(node.path && selectedDatasets.has(node.path)) || Boolean(selectedDatasets.has(node.name));
   const hasChildren = !!node.children && node.children.length > 0;
   const isExpanded = expandedIds.has(node.id);
 
@@ -201,51 +208,122 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
   const isFetchingMetadataRef = useRef(false);
   const prevViewModeRef = useRef<"list" | "add" | "edit">("list");
 
-  // Load datasets directly from /settings/datasets with deep subdirectories to max depth
+  // Load datasets directly and build matching hierarchical tree (Data -> KiyoVN -> 1Data, etc.)
   const loadStorageMetadata = useCallback(async () => {
     if (isFetchingMetadataRef.current) return;
     isFetchingMetadataRef.current = true;
     setDatasetsLoading(true);
     try {
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
-      const treeRes = await Promise.race([
-        api.get<{ tree: FolderTreeNode[] }>(Api.adminSharesTree).catch(() => null),
-        timeoutPromise,
+      const [dsRes, poolsRes] = await Promise.all([
+        api.get<{ datasets: any[] }>(Api.adminDatasets).catch(() => api.get<{ datasets: any[] }>(Api.datasets).catch(() => null)),
+        api.get<{ pools: any[] }>(Api.adminPools).catch(() => null),
       ]);
-      if (treeRes?.tree && treeRes.tree.length > 0) {
-        const root = treeRes.tree[0];
-        const nodes = root?.children && root.children.length > 0 ? root.children : treeRes.tree;
-        setDatasetTree(nodes);
+      const datasets = dsRes?.datasets || [];
+      const pools = poolsRes?.pools || [];
 
-        // Pre-expand top-level datasets that have children so sub-directories are visible right away
-        setExpandedNodeIds((prev) => {
-          const next = new Set(prev);
-          nodes.forEach((n) => {
-            if (n.children && n.children.length > 0) {
-              next.add(n.id);
-            }
-          });
-          return next;
-        });
-      } else {
-        let dsData: any = await api.get<{ datasets: any[] }>(Api.adminDatasets).catch(() => null);
-        if (!dsData?.datasets || dsData.datasets.length === 0) {
-          dsData = await api.get<{ datasets: any[] }>(Api.datasets).catch(() => null);
-        }
-        if (dsData?.datasets && dsData.datasets.length > 0) {
-          setDatasetTree(
-            dsData.datasets.map((d: any) => ({
-              id: d.id || d.name,
-              name: d.name,
-              path: d.mount || `/DATA/${d.name}`,
-              isDrive: true,
-              children: [],
-            }))
-          );
-        } else {
-          setDatasetTree([]);
-        }
+      // Determine pool names
+      const poolNames = new Set<string>();
+      if (pools && pools.length > 0) {
+        pools.forEach((p: any) => { if (p.name) poolNames.add(p.name); });
       }
+      datasets.forEach((d: any) => {
+        if (d.pool) poolNames.add(d.pool);
+        const slashIdx = d.name.indexOf("/");
+        if (slashIdx !== -1) {
+          poolNames.add(d.name.slice(0, slashIdx));
+        } else {
+          poolNames.add(d.name);
+        }
+      });
+
+      const roots: FolderTreeNode[] = [];
+      const nodeMap = new Map<string, FolderTreeNode>();
+
+      poolNames.forEach((poolName) => {
+        const rootNode: FolderTreeNode = {
+          id: `pool-${poolName}`,
+          name: poolName,
+          path: `/mnt/zfs-recovery/${poolName}`,
+          isDrive: true,
+          children: [],
+        };
+        (rootNode as any).key = poolName;
+        nodeMap.set(poolName, rootNode);
+        roots.push(rootNode);
+      });
+
+      const sorted = [...datasets].sort((a: any, b: any) => a.name.localeCompare(b.name));
+      sorted.forEach((d: any) => {
+        const norm = d.name.replace(/^\/+/, "");
+        const parts = norm.split("/").filter(Boolean);
+        if (parts.length === 0) return;
+
+        const poolName = parts[0];
+        let parent = nodeMap.get(poolName);
+        if (!parent) {
+          parent = {
+            id: `pool-${poolName}`,
+            name: poolName,
+            path: d.mount || `/mnt/zfs-recovery/${poolName}`,
+            isDrive: true,
+            children: [],
+          };
+          (parent as any).key = poolName;
+          nodeMap.set(poolName, parent);
+          roots.push(parent);
+        }
+
+        if (parts.length === 1) {
+          if (d.mount) parent.path = d.mount;
+          if (d.id) parent.id = `ds-${d.id}`;
+          return;
+        }
+
+        let currentPath = poolName;
+        for (let i = 1; i < parts.length; i++) {
+          const part = parts[i];
+          const prevPath = currentPath;
+          currentPath = `${currentPath}/${part}`;
+
+          if (!nodeMap.has(currentPath)) {
+            const isLeaf = i === parts.length - 1;
+            const node: FolderTreeNode = {
+              id: isLeaf && d.id ? `ds-${d.id}` : `node-${currentPath}`,
+              name: part,
+              path: isLeaf && d.mount ? d.mount : `${parent.path}/${part}`,
+              isDrive: false,
+              children: [],
+            };
+            (node as any).key = currentPath;
+            nodeMap.set(currentPath, node);
+
+            const parentNode = nodeMap.get(prevPath);
+            if (parentNode) {
+              if (!parentNode.children) parentNode.children = [];
+              parentNode.children.push(node);
+            }
+          } else if (i === parts.length - 1) {
+            const existing = nodeMap.get(currentPath)!;
+            if (d.mount) existing.path = d.mount;
+            if (d.id) existing.id = `ds-${d.id}`;
+          }
+        }
+      });
+
+      setDatasetTree(roots);
+
+      // Pre-expand all parent nodes so hierarchy is visible right away
+      const expandSet = new Set<string>();
+      const collectParentIds = (nodes: FolderTreeNode[]) => {
+        nodes.forEach((n) => {
+          if (n.children && n.children.length > 0) {
+            expandSet.add(n.id);
+            collectParentIds(n.children);
+          }
+        });
+      };
+      collectParentIds(roots);
+      setExpandedNodeIds(expandSet);
     } catch {
       setDatasetTree([]);
     } finally {
@@ -389,7 +467,7 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
     setPermWrite(true);
     setPermExecute(false);
     setSelectedTreeItems([]);
-    setCategoryPath("/");
+    setCategoryPath("");
 
     setViewMode("add");
     if (updateUrl && typeof window !== "undefined") {
@@ -444,11 +522,19 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
     let hasWrite = true;
     let hasExec = false;
 
+    const seenNodes = new Set<string>();
     Object.entries(parsedPerms).forEach(([key, val]) => {
       if (!val || val === "none") return;
       const found = findNodeInTree(datasetTree, key);
+      const canonicalKey = (found?.node as any)?.key || found?.node.name || key;
+      if (seenNodes.has(canonicalKey) || (found?.node.path && seenNodes.has(found.node.path))) {
+        return;
+      }
+      seenNodes.add(canonicalKey);
+      if (found?.node.path) seenNodes.add(found.node.path);
+
       initialSelectedItems.push({
-        key,
+        key: canonicalKey,
         path: found?.node.path,
         depth: found?.depth ?? 0,
       });
@@ -465,10 +551,11 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
       const targetDepth = initialSelectedItems[0].depth;
       const sameDepthItems = initialSelectedItems.filter((i) => i.depth === targetDepth).slice(0, 2);
       setSelectedTreeItems(sameDepthItems);
-      setCategoryPath(sameDepthItems.map((it) => it.path || it.key).join(", "));
+      const uniquePaths = Array.from(new Set(sameDepthItems.map((it) => it.path || `/${it.key}`)));
+      setCategoryPath(uniquePaths.join(", "));
     } else {
       setSelectedTreeItems([]);
-      setCategoryPath("/");
+      setCategoryPath("");
     }
     setPermRead(hasRead);
     setPermWrite(hasWrite);
@@ -528,8 +615,8 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
   // - Nếu đang bấm ở cây cao hơn rồi bấm cây nhỏ hơn (hoặc ngược lại): tắt cây cũ đi và chỉ chọn cây mới đang bấm
   // - Chỉ chọn được tối đa 2 mục bằng nhau (cùng depth / cùng cấp)
   const handleToggleSelectDataset = (node: FolderTreeNode, depth: number) => {
-    const key = node.name || node.path;
-    const path = node.path;
+    const key = (node as any).key || node.name || node.path;
+    const path = node.path || (key ? `/${key}` : "");
 
     setSelectedTreeItems((prev) => {
       const isAlreadySelected = prev.some(
@@ -547,24 +634,23 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
       } else {
         const prevDepth = prev[0].depth;
 
-        // Nếu bấm vào cây khác cấp (khác độ sâu/level, ví dụ từ cây cao nhất sang cây nhỏ hơn hoặc ngược lại):
+        // Nếu bấm vào cây khác cấp (khác độ sâu/level):
         // Tắt hết cây ở cấp cũ và chỉ hiện đúng cây mình đang bấm!
         if (prevDepth !== depth) {
           nextItems = [{ key, path, depth }];
         } else if (prev.length === 1) {
-          // Cùng cấp (bằng nhau): cho phép chọn tối đa 2 cái bằng nhau
           nextItems = [...prev, { key, path, depth }];
         } else {
-          // Nếu đã có 2 cái cùng cấp rồi: giữ tối đa 2 cái (bỏ cái cũ nhất và thêm cái mới bấm)
           nextItems = [prev[1], { key, path, depth }];
         }
       }
 
-      // Cập nhật thanh đường dẫn ở trên: Nếu chưa chọn gì thì hiện "/", có chọn thì hiện path
+      // Cập nhật thanh đường dẫn ở trên: Nếu chưa chọn gì thì để trống, có chọn thì hiện path (không trùng lặp)
       if (nextItems.length === 0) {
-        setCategoryPath("/");
+        setCategoryPath("");
       } else {
-        setCategoryPath(nextItems.map((it) => it.path || it.key).join(", "));
+        const uniquePaths = Array.from(new Set(nextItems.map((it) => it.path || `/${it.key}`)));
+        setCategoryPath(uniquePaths.join(", "));
       }
 
       return nextItems;
@@ -618,14 +704,24 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
     // Build permissions map
     const permsToSave: Record<string, any> = {};
     const level: PermissionLevel = permWrite ? "editor" : (permRead ? "viewer" : "none");
-    selectedDatasets.forEach((name) => {
-      permsToSave[name] = {
-        level,
-        read: permRead,
-        write: permWrite,
-        execute: permExecute,
-      };
-    });
+    if (selectedTreeItems.length > 0) {
+      selectedTreeItems.forEach((item) => {
+        permsToSave[item.key] = {
+          level,
+          read: permRead,
+          write: permWrite,
+          execute: permExecute,
+        };
+        if (item.path && item.path !== item.key) {
+          permsToSave[item.path] = {
+            level,
+            read: permRead,
+            write: permWrite,
+            execute: permExecute,
+          };
+        }
+      });
+    }
     const permsJsonString = JSON.stringify(permsToSave);
 
     setSubmitting(true);
@@ -1083,7 +1179,7 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
                     type="text"
                     value={categoryPath}
                     onChange={(e) => setCategoryPath(e.target.value)}
-                    placeholder="/"
+                    placeholder="Chưa chọn danh mục"
                     style={{
                       width: "100%",
                       border: "none",

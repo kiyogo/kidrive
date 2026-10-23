@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Button, Sheet, showToast } from "@/components/ui";
 import { api } from "./api";
 import { Api } from "./endpoints";
@@ -44,6 +44,30 @@ export function useUploader(parentId: string, onDone?: () => void) {
     into: string;
   } | null>(null);
 
+  const hasAssignedCategory = useMemo<boolean>(() => {
+    if (!user) return false;
+    if (user.role === "admin") return true;
+    if (!user.dataset_permissions) return false;
+    try {
+      const perms = JSON.parse(user.dataset_permissions);
+      return Object.values(perms).some((p: any) => p && (p.read || p.write || p.level));
+    } catch {
+      return false;
+    }
+  }, [user]);
+
+  const hasWritePermission = useMemo<boolean>(() => {
+    if (!user) return false;
+    if (user.role === "admin") return true;
+    if (!user.dataset_permissions) return false;
+    try {
+      const perms = JSON.parse(user.dataset_permissions);
+      return Object.values(perms).some((p: any) => p && (p.write || p.level === "editor" || p.level === "writer" || p.level === "owner"));
+    } catch {
+      return false;
+    }
+  }, [user]);
+
   const checkQuota = useCallback(
     (incomingBytes = 0): boolean => {
       if (user && user.quota_bytes > 0) {
@@ -85,6 +109,14 @@ export function useUploader(parentId: string, onDone?: () => void) {
   const send = useCallback(
     async (list: File[], into: string, replacing?: Map<File, string>) => {
       if (!list.length) return;
+      if (!hasAssignedCategory) {
+        showToast("Tài khoản chưa được chỉ định danh mục lưu trữ. Vui lòng liên hệ quản trị viên để được cấp quyền trước khi tải lên!", "error");
+        return;
+      }
+      if (!hasWritePermission) {
+        showToast("Bạn chỉ có quyền xem (Chỉ đọc), không thể tải tệp lên!", "error");
+        return;
+      }
       const readiness = await checkStorageReadiness();
       if (!readiness.ready) {
         showToast(readiness.message, "error");
@@ -95,7 +127,7 @@ export function useUploader(parentId: string, onDone?: () => void) {
       const finalInto = resolveTargetInto(into);
       await transfers.enqueue(list, finalInto, onDone, replacing);
     },
-    [onDone, checkQuota, resolveTargetInto],
+    [onDone, checkQuota, resolveTargetInto, hasAssignedCategory, hasWritePermission],
   );
 
   const pickFolder = useCallback(
@@ -103,6 +135,14 @@ export function useUploader(parentId: string, onDone?: () => void) {
       if (!files) return;
       const list = Array.from(files);
       if (!list.length) return;
+      if (!hasAssignedCategory) {
+        showToast("Tài khoản chưa được chỉ định danh mục lưu trữ. Vui lòng liên hệ quản trị viên để được cấp quyền trước khi tải lên!", "error");
+        return;
+      }
+      if (!hasWritePermission) {
+        showToast("Bạn chỉ có quyền xem (Chỉ đọc), không thể tải tệp lên!", "error");
+        return;
+      }
       const readiness = await checkStorageReadiness();
       if (!readiness.ready) {
         showToast(readiness.message, "error");
@@ -119,7 +159,7 @@ export function useUploader(parentId: string, onDone?: () => void) {
         onDone,
       });
     },
-    [parentId, onDone, checkQuota, resolveTargetInto],
+    [parentId, onDone, checkQuota, resolveTargetInto, hasAssignedCategory, hasWritePermission],
   );
 
   const pick = useCallback(
@@ -128,6 +168,14 @@ export function useUploader(parentId: string, onDone?: () => void) {
     async (files: FileList | File[] | null, into = parentId) => {
       const list = files ? Array.from(files) : [];
       if (!list.length) return;
+      if (!hasAssignedCategory) {
+        showToast("Tài khoản chưa được chỉ định danh mục lưu trữ. Vui lòng liên hệ quản trị viên để được cấp quyền trước khi tải lên!", "error");
+        return;
+      }
+      if (!hasWritePermission) {
+        showToast("Bạn chỉ có quyền xem (Chỉ đọc), không thể tải tệp lên!", "error");
+        return;
+      }
       const readiness = await checkStorageReadiness();
       if (!readiness.ready) {
         showToast(readiness.message, "error");

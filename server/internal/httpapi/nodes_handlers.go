@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"mime"
 	"net/http"
@@ -20,6 +21,9 @@ import (
 
 func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	userID, _ := caller(r)
+	user, ok := mw.UserFrom(r.Context())
+	isAdmin := ok && user.Role == models.RoleAdmin
+
 	limit := intQuery(r, "limit", 50)
 	if limit <= 0 || limit > 500 {
 		limit = 50
@@ -38,6 +42,42 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		SortDesc: strings.EqualFold(r.URL.Query().Get("order"), "desc"),
 	}
 
+	// 1. Nếu tài khoản không phải admin và CHƯA được chọn danh mục lưu trữ -> Không hiện dữ liệu và không tải được gì luôn!
+	if !isAdmin {
+		hasPerms := false
+		if ok && user.DatasetPermissions != "" && user.DatasetPermissions != "{}" {
+			var perms map[string]any
+			if err := json.Unmarshal([]byte(user.DatasetPermissions), &perms); err == nil {
+				for _, v := range perms {
+					if v == nil || v == "none" {
+						continue
+					}
+					if s, ok := v.(string); ok && s != "none" {
+						hasPerms = true
+						break
+					}
+					if m, ok := v.(map[string]any); ok {
+						if rVal, _ := m["read"].(bool); rVal {
+							hasPerms = true
+							break
+						}
+					}
+				}
+			}
+		}
+		if !hasPerms {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"nodes":       []nodeDTO{},
+				"limit":       opts.Limit,
+				"offset":      opts.Offset,
+				"has_more":    false,
+				"next_offset": 0,
+			})
+			return
+		}
+	}
+
+	// 2. Nếu đang xem trong một dataset hoặc thư mục con của dataset
 	if strings.HasPrefix(opts.ParentID, "dataset:") {
 		parts := strings.SplitN(strings.TrimPrefix(opts.ParentID, "dataset:"), ":", 2)
 		dsName := parts[0]
@@ -70,56 +110,86 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, r, fmt.Errorf("đường dẫn không hợp lệ"))
 			return
 		}
-		entries, err := os.ReadDir(cleanTarget)
-		if err != nil {
-			if os.IsNotExist(err) {
-				writeJSON(w, http.StatusOK, map[string]any{
-					"nodes":       []nodeDTO{},
-					"limit":       opts.Limit,
-					"offset":      opts.Offset,
-					"has_more":    false,
-					"next_offset": 0,
-				})
-				return
-			}
-			a.fail(w, r, err)
-			return
-		}
+
 		var nodes []nodeDTO
-		qLower := strings.ToLower(opts.Query)
-		for _, entry := range entries {
-			if qLower != "" && !strings.Contains(strings.ToLower(entry.Name()), qLower) {
-				continue
+		childDsNames := make(map[string]bool)
+
+		// Thêm các tập dữ liệu con (child datasets) trực thuộc dataset này nếu đang ở thư mục gốc của dataset (subpath == "")
+		if cleanedSub == "" || cleanedSub == "." {
+			dRows, err := a.db.Read().QueryContext(r.Context(),
+				`SELECT name, used_bytes, created_at, updated_at FROM datasets WHERE name LIKE ? ORDER BY name ASC`,
+				dsName+"/%")
+			if err == nil {
+				defer dRows.Close()
+				for dRows.Next() {
+					var childFullName string
+					var childUsed, childCreated, childUpdated int64
+					if err := dRows.Scan(&childFullName, &childUsed, &childCreated, &childUpdated); err == nil {
+						rel := strings.TrimPrefix(childFullName, dsName+"/")
+						if !strings.Contains(rel, "/") {
+							cRole, cErr := a.checkDatasetAccess(r, childFullName, false)
+							if cErr == nil {
+								childDsNames[strings.ToLower(rel)] = true
+								nodes = append(nodes, nodeDTO{
+									ID:        fmt.Sprintf("dataset:%s", childFullName),
+									ParentID:  opts.ParentID,
+									Name:      rel,
+									Type:      "folder",
+									Category:  "folder",
+									MimeType:  "application/x-directory",
+									SizeBytes: childUsed,
+									Role:      cRole,
+									CreatedAt: childCreated,
+									UpdatedAt: childUpdated,
+								})
+							}
+						}
+					}
+				}
 			}
-			info, err := entry.Info()
-			if err != nil {
-				continue
-			}
-			itemType := "file"
-			mimeType := mime.TypeByExtension(filepath.Ext(entry.Name()))
-			if entry.IsDir() {
-				itemType = "folder"
-				mimeType = "application/x-directory"
-			} else if mimeType == "" {
-				mimeType = "application/octet-stream"
-			}
-			relItemPath := filepath.Join(cleanedSub, entry.Name())
-			relItemPath = strings.ReplaceAll(relItemPath, "\\", "/")
-			relItemPath = strings.TrimPrefix(relItemPath, "/")
-			category := string(models.CategoryOf(models.NodeType(itemType), mimeType, entry.Name()))
-			nodes = append(nodes, nodeDTO{
-				ID:        fmt.Sprintf("dataset:%s:%s", dsName, relItemPath),
-				ParentID:  opts.ParentID,
-				Name:      entry.Name(),
-				Type:      itemType,
-				Category:  category,
-				MimeType:  mimeType,
-				SizeBytes: info.Size(),
-				Role:      role,
-				CreatedAt: info.ModTime().UnixMilli(),
-				UpdatedAt: info.ModTime().UnixMilli(),
-			})
 		}
+
+		entries, err := os.ReadDir(cleanTarget)
+		if err == nil {
+			qLower := strings.ToLower(opts.Query)
+			for _, entry := range entries {
+				if childDsNames[strings.ToLower(entry.Name())] {
+					continue
+				}
+				if qLower != "" && !strings.Contains(strings.ToLower(entry.Name()), qLower) {
+					continue
+				}
+				info, err := entry.Info()
+				if err != nil {
+					continue
+				}
+				itemType := "file"
+				mimeType := mime.TypeByExtension(filepath.Ext(entry.Name()))
+				if entry.IsDir() {
+					itemType = "folder"
+					mimeType = "application/x-directory"
+				} else if mimeType == "" {
+					mimeType = "application/octet-stream"
+				}
+				relItemPath := filepath.Join(cleanedSub, entry.Name())
+				relItemPath = strings.ReplaceAll(relItemPath, "\\", "/")
+				relItemPath = strings.TrimPrefix(relItemPath, "/")
+				category := string(models.CategoryOf(models.NodeType(itemType), mimeType, entry.Name()))
+				nodes = append(nodes, nodeDTO{
+					ID:        fmt.Sprintf("dataset:%s:%s", dsName, relItemPath),
+					ParentID:  opts.ParentID,
+					Name:      entry.Name(),
+					Type:      itemType,
+					Category:  category,
+					MimeType:  mimeType,
+					SizeBytes: info.Size(),
+					Role:      role,
+					CreatedAt: info.ModTime().UnixMilli(),
+					UpdatedAt: info.ModTime().UnixMilli(),
+				})
+			}
+		}
+
 		total := len(nodes)
 		start := opts.Offset
 		if start > total {
@@ -140,6 +210,86 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 3. Ở thư mục gốc (Root)
+	if (opts.ParentID == "" || opts.ParentID == "root") && (opts.Filter == "" || opts.Filter == "none") {
+		rows, err := a.db.Read().QueryContext(r.Context(), `SELECT name, pool, used_bytes, created_at, updated_at FROM datasets ORDER BY name ASC`)
+		if err == nil {
+			defer rows.Close()
+			type dsEntry struct {
+				name      string
+				pool      string
+				usedBytes int64
+				createdAt int64
+				updatedAt int64
+				role      string
+			}
+			var accessible []dsEntry
+			for rows.Next() {
+				var name, pool string
+				var usedBytes, createdAt, updatedAt int64
+				if err := rows.Scan(&name, &pool, &usedBytes, &createdAt, &updatedAt); err == nil {
+					role, accessErr := a.checkDatasetAccess(r, name, false)
+					if accessErr == nil {
+						accessible = append(accessible, dsEntry{
+							name:      name,
+							pool:      pool,
+							usedBytes: usedBytes,
+							createdAt: createdAt,
+							updatedAt: updatedAt,
+							role:      role,
+						})
+					}
+				}
+			}
+
+			// Chỉ lấy những dataset ở CẤP CAO NHẤT trong danh sách được cấp quyền (không hiện con đè lên gốc)
+			var rootDsNodes []nodeDTO
+			for _, d := range accessible {
+				isChild := false
+				for _, other := range accessible {
+					if other.name != d.name && strings.HasPrefix(d.name, other.name+"/") {
+						isChild = true
+						break
+					}
+				}
+				if !isChild {
+					displayName := d.name
+					if idx := strings.LastIndex(d.name, "/"); idx != -1 {
+						displayName = d.name[idx+1:]
+					}
+					color := "azure"
+					if d.pool == "kiyo-pool" {
+						color = "grape"
+					}
+					rootDsNodes = append(rootDsNodes, nodeDTO{
+						ID:        fmt.Sprintf("dataset:%s", d.name),
+						ParentID:  "",
+						Name:      displayName,
+						Type:      "folder",
+						Category:  "folder",
+						MimeType:  "application/x-directory",
+						SizeBytes: d.usedBytes,
+						Color:     color,
+						Role:      d.role,
+						CreatedAt: d.createdAt,
+						UpdatedAt: d.updatedAt,
+					})
+				}
+			}
+
+			if len(rootDsNodes) > 0 || len(accessible) > 0 || !isAdmin {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"nodes":       rootDsNodes,
+					"limit":       opts.Limit,
+					"offset":      opts.Offset,
+					"has_more":    false,
+					"next_offset": len(rootDsNodes),
+				})
+				return
+			}
+		}
+	}
+
 	list, err := a.files.List(r.Context(), userID, opts)
 	if err != nil {
 		a.fail(w, r, err)
@@ -147,54 +297,6 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	hasMore := len(list) == limit
 	outNodes := nodeViews(list, userID)
-
-	if (opts.ParentID == "" || opts.ParentID == "root") && (opts.Filter == "" || opts.Filter == "none") && opts.Offset == 0 {
-		rows, err := a.db.Read().QueryContext(r.Context(), `SELECT name, pool, used_bytes, created_at, updated_at FROM datasets ORDER BY name ASC`)
-		if err == nil {
-			defer rows.Close()
-			var dsNodes []nodeDTO
-			for rows.Next() {
-				var name, pool string
-				var usedBytes, createdAt, updatedAt int64
-				if err := rows.Scan(&name, &pool, &usedBytes, &createdAt, &updatedAt); err == nil {
-					role, accessErr := a.checkDatasetAccess(r, name, false)
-					if accessErr == nil {
-						color := "azure"
-						if pool == "kiyo-pool" {
-							color = "grape"
-						}
-						dsNodes = append(dsNodes, nodeDTO{
-							ID:        fmt.Sprintf("dataset:%s", name),
-							ParentID:  "",
-							Name:      name,
-							Type:      "folder",
-							Category:  "folder",
-							MimeType:  "application/x-directory",
-							SizeBytes: usedBytes,
-							Color:     color,
-							Role:      role,
-							CreatedAt: createdAt,
-							UpdatedAt: updatedAt,
-						})
-					}
-				}
-			}
-			var filtered []nodeDTO
-			for _, n := range outNodes {
-				collision := false
-				for _, d := range dsNodes {
-					if d.Name == n.Name {
-						collision = true
-						break
-					}
-				}
-				if !collision {
-					filtered = append(filtered, n)
-				}
-			}
-			outNodes = append(dsNodes, filtered...)
-		}
-	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"nodes":       outNodes,

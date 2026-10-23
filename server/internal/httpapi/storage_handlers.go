@@ -891,29 +891,73 @@ func (a *API) handleShareFolderTree(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	dsNodes := make([]FolderTreeNodeDTO, 0)
-	for rows.Next() {
-		var id, name, pool, mount string
-		if err := rows.Scan(&id, &name, &pool, &mount); err != nil {
-			a.fail(w, r, err)
-			return
-		}
-		subdirs := readSubdirs(mount, 6)
-		dsNodes = append(dsNodes, FolderTreeNodeDTO{
-			ID:       "ds-" + id,
-			Name:     name,
-			Path:     mount,
-			IsDrive:  true,
-			Children: subdirs,
-		})
+	type rawDs struct {
+		id    string
+		name  string
+		pool  string
+		mount string
 	}
-	if err := rows.Err(); err != nil {
-		a.fail(w, r, err)
-		return
+	var rawList []rawDs
+	for rows.Next() {
+		var d rawDs
+		if err := rows.Scan(&d.id, &d.name, &d.pool, &d.mount); err == nil {
+			rawList = append(rawList, d)
+		}
+	}
+
+	nodeMap := make(map[string]*FolderTreeNodeDTO)
+	var rootNodes []FolderTreeNodeDTO
+
+	for _, d := range rawList {
+		normName := strings.Trim(strings.TrimSpace(d.name), "/")
+		parts := strings.Split(normName, "/")
+		leafName := parts[len(parts)-1]
+		isDrive := len(parts) == 1
+
+		subdirs := readSubdirs(d.mount, 4)
+		node := &FolderTreeNodeDTO{
+			ID:       "ds-" + d.id,
+			Name:     leafName,
+			Path:     d.mount,
+			IsDrive:  isDrive,
+			Children: subdirs,
+		}
+		nodeMap[normName] = node
+	}
+
+	for _, d := range rawList {
+		normName := strings.Trim(strings.TrimSpace(d.name), "/")
+		node := nodeMap[normName]
+		if node == nil {
+			continue
+		}
+
+		parts := strings.Split(normName, "/")
+		if len(parts) == 1 {
+			rootNodes = append(rootNodes, *node)
+		} else {
+			parentPath := strings.Join(parts[:len(parts)-1], "/")
+			if parentNode, ok := nodeMap[parentPath]; ok {
+				// Deduplicate by name if readSubdirs already found this directory
+				alreadyHas := false
+				for idx, ch := range parentNode.Children {
+					if ch.Name == node.Name {
+						parentNode.Children[idx] = *node
+						alreadyHas = true
+						break
+					}
+				}
+				if !alreadyHas {
+					parentNode.Children = append(parentNode.Children, *node)
+				}
+			} else {
+				rootNodes = append(rootNodes, *node)
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"tree": dsNodes,
+		"tree": rootNodes,
 	})
 }
 
@@ -1847,13 +1891,63 @@ func (a *API) checkDatasetAccess(r *http.Request, datasetName string, needEditor
 	return "viewer", nil
 }
 
+func (a *API) resolveRealMountPath(name, mount string) string {
+	cleanMount := filepath.Clean(mount)
+	if fi, err := os.Stat(cleanMount); err == nil && fi.IsDir() {
+		return cleanMount
+	}
+
+	trimmedName := strings.Trim(strings.TrimSpace(name), "/")
+	candidates := []string{
+		filepath.Join("/mnt/zfs-recovery", trimmedName),
+		filepath.Join("/mnt", trimmedName),
+		"/" + trimmedName,
+	}
+
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && fi.IsDir() {
+			return c
+		}
+	}
+
+	if hasZFSTools() {
+		if out, err := exec.Command("zfs", "list", "-H", "-o", "mountpoint", trimmedName).Output(); err == nil {
+			mp := strings.TrimSpace(string(out))
+			if mp != "" && mp != "none" && mp != "legacy" {
+				if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
+					return mp
+				}
+			}
+		}
+	}
+
+	return mount
+}
+
 func (a *API) getDatasetMount(ctx context.Context, nameOrID string) (string, string, error) {
 	var name, mount string
+	clean := strings.Trim(strings.TrimSpace(nameOrID), "/")
 	err := a.db.Read().QueryRowContext(ctx,
-		`SELECT name, mount FROM datasets WHERE name = ? OR id = ?`, nameOrID, nameOrID).Scan(&name, &mount)
+		`SELECT name, mount FROM datasets WHERE name = ? OR id = ? OR mount = ? OR name = ? OR mount = ? LIMIT 1`,
+		nameOrID, nameOrID, nameOrID, clean, "/"+clean).Scan(&name, &mount)
 	if err != nil {
-		return "", "", fmt.Errorf("dataset không tồn tại: %v", err)
+		err2 := a.db.Read().QueryRowContext(ctx,
+			`SELECT name, mount FROM datasets WHERE name LIKE ? OR mount LIKE ? LIMIT 1`,
+			"%"+clean, "%"+clean).Scan(&name, &mount)
+		if err2 != nil {
+			return "", "", fmt.Errorf("dataset không tồn tại: %v", err)
+		}
 	}
+
+	resolvedMount := a.resolveRealMountPath(name, mount)
+	if resolvedMount != mount && resolvedMount != "" {
+		_ = a.db.Write(ctx, func(c context.Context, tx *sql.Tx) error {
+			_, _ = tx.ExecContext(c, `UPDATE datasets SET mount = ? WHERE name = ?`, resolvedMount, name)
+			return nil
+		})
+		mount = resolvedMount
+	}
+
 	return name, mount, nil
 }
 
