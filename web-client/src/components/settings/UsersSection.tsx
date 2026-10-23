@@ -323,17 +323,18 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
 
       setDatasetTree(roots);
 
-      // Pre-expand all parent nodes so hierarchy is visible right away
+      // Pre-expand top 2 levels of nodes so hierarchy is visible without overwhelming
       const expandSet = new Set<string>();
-      const collectParentIds = (nodes: FolderTreeNode[]) => {
+      const collectParentIds = (nodes: FolderTreeNode[], depth = 0) => {
+        if (depth >= 2) return;
         nodes.forEach((n) => {
           if (n.children && n.children.length > 0) {
             expandSet.add(n.id);
-            collectParentIds(n.children);
+            collectParentIds(n.children, depth + 1);
           }
         });
       };
-      collectParentIds(roots);
+      collectParentIds(roots, 0);
       setExpandedNodeIds(expandSet);
     } catch {
       setDatasetTree([]);
@@ -571,10 +572,8 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
     });
 
     if (initialSelectedItems.length > 0) {
-      const targetDepth = initialSelectedItems[0].depth;
-      const sameDepthItems = initialSelectedItems.filter((i) => i.depth === targetDepth).slice(0, 2);
-      setSelectedTreeItems(sameDepthItems);
-      const uniquePaths = Array.from(new Set(sameDepthItems.map((it) => "/" + it.key.replace(/^\/+/, ""))));
+      setSelectedTreeItems(initialSelectedItems);
+      const uniquePaths = Array.from(new Set(initialSelectedItems.map((it) => "/" + it.key.replace(/^\/+/, ""))));
       setCategoryPath(uniquePaths.join(", "));
     } else {
       setSelectedTreeItems([]);
@@ -634,9 +633,7 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
     return () => window.removeEventListener("popstate", syncRouteFromUrl);
   }, [users]);
 
-  // Toggle dataset selection in Danh mục:
-  // - Nếu đang bấm ở cây cao hơn rồi bấm cây nhỏ hơn (hoặc ngược lại): tắt cây cũ đi và chỉ chọn cây mới đang bấm
-  // - Chỉ chọn được tối đa 2 mục bằng nhau (cùng depth / cùng cấp)
+  // Toggle dataset selection in Danh mục (hỗ trợ chọn nhiều danh mục tự do, không giới hạn):
   const handleToggleSelectDataset = (node: FolderTreeNode, depth: number) => {
     const rawKey = (node as any).key || node.name || node.path;
     const cleanKey = rawKey.replace(/^\/+/, "");
@@ -653,20 +650,9 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
         nextItems = prev.filter(
           (item) => item.key.replace(/^\/+/, "") !== cleanKey
         );
-      } else if (prev.length === 0) {
-        nextItems = [{ key: cleanKey, path: cleanPath, depth }];
       } else {
-        const prevDepth = prev[0].depth;
-
-        // Nếu bấm vào cây khác cấp (khác độ sâu/level):
-        // Tắt hết cây ở cấp cũ và chỉ hiện đúng cây mình đang bấm!
-        if (prevDepth !== depth) {
-          nextItems = [{ key: cleanKey, path: cleanPath, depth }];
-        } else if (prev.length === 1) {
-          nextItems = [...prev, { key: cleanKey, path: cleanPath, depth }];
-        } else {
-          nextItems = [prev[1], { key: cleanKey, path: cleanPath, depth }];
-        }
+        // Thêm mục mới được chọn vào danh sách
+        nextItems = [...prev, { key: cleanKey, path: cleanPath, depth }];
       }
 
       // Cập nhật thanh đường dẫn ở trên: Nếu chưa chọn gì thì để trống, có chọn thì hiện path (không trùng lặp)

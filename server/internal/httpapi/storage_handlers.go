@@ -598,6 +598,7 @@ func (a *API) handleListNetworkShares(w http.ResponseWriter, r *http.Request) {
 		s.Browseable = br == 1
 		s.HideUnreadable = hu == 1
 		s.GuestOK = goK == 1
+		s.Path = cleanDisplayPath(s.Path)
 		out = append(out, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -678,8 +679,14 @@ func (a *API) handleCreateNetworkShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cleanPath := cleanDisplayPath(path)
+	realPath := a.resolveRealMountPath(cleanPath, path)
+	if realPath == "" {
+		realPath = cleanPath
+	}
+
 	// Ensure folder exists on disk
-	_ = os.MkdirAll(path, 0755)
+	_ = os.MkdirAll(realPath, 0755)
 
 	purpose := strings.TrimSpace(req.Purpose)
 	if purpose == "" {
@@ -710,7 +717,7 @@ func (a *API) handleCreateNetworkShare(w http.ResponseWriter, r *http.Request) {
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO network_shares (id, name, purpose, path, description, read_only, browseable, hide_unreadable, guest_ok, status, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
-			id, name, purpose, path, req.Description, roInt, brInt, huInt, goInt, now, now)
+			id, name, purpose, cleanPath, req.Description, roInt, brInt, huInt, goInt, now, now)
 		return err
 	})
 	if err != nil {
@@ -719,14 +726,14 @@ func (a *API) handleCreateNetworkShare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Real OS Network Share publish
-	_ = syncSystemNetworkShare(name, path, req.ReadOnly, req.GuestOK, true)
+	_ = syncSystemNetworkShare(name, realPath, req.ReadOnly, req.GuestOK, true)
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"share": NetworkShareDTO{
 			ID:             id,
 			Name:           name,
 			Purpose:        purpose,
-			Path:           path,
+			Path:           cleanPath,
 			Description:    req.Description,
 			ReadOnly:       req.ReadOnly,
 			Browseable:     req.Browseable,
@@ -775,8 +782,13 @@ func (a *API) handleUpdateNetworkShare(w http.ResponseWriter, r *http.Request) {
 			_ = tx.QueryRowContext(ctx, `UPDATE network_shares SET purpose = ?, updated_at = ? WHERE id = ?`, *req.Purpose, now, id)
 		}
 		if req.Path != nil {
-			_ = tx.QueryRowContext(ctx, `UPDATE network_shares SET path = ?, updated_at = ? WHERE id = ?`, *req.Path, now, id)
-			_ = os.MkdirAll(*req.Path, 0755)
+			cleanP := cleanDisplayPath(*req.Path)
+			realP := a.resolveRealMountPath(cleanP, *req.Path)
+			if realP == "" {
+				realP = cleanP
+			}
+			_ = tx.QueryRowContext(ctx, `UPDATE network_shares SET path = ?, updated_at = ? WHERE id = ?`, cleanP, now, id)
+			_ = os.MkdirAll(realP, 0755)
 		}
 		if req.Description != nil {
 			_ = tx.QueryRowContext(ctx, `UPDATE network_shares SET description = ?, updated_at = ? WHERE id = ?`, *req.Description, now, id)
@@ -837,8 +849,13 @@ func (a *API) handleUpdateNetworkShare(w http.ResponseWriter, r *http.Request) {
 	s.HideUnreadable = hu == 1
 	s.GuestOK = goK == 1
 
-	// Synchronize real OS share state
-	_ = syncSystemNetworkShare(s.Name, s.Path, s.ReadOnly, s.GuestOK, s.Status == "active")
+	// Synchronize real OS share state with real physical mount
+	realPath := a.resolveRealMountPath(s.Path, s.Path)
+	if realPath == "" {
+		realPath = s.Path
+	}
+	_ = syncSystemNetworkShare(s.Name, realPath, s.ReadOnly, s.GuestOK, s.Status == "active")
+	s.Path = cleanDisplayPath(s.Path)
 
 	writeJSON(w, http.StatusOK, map[string]any{"share": s})
 }
@@ -876,6 +893,24 @@ func (a *API) handleDeleteNetworkShare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// cleanDisplayPath formats a path cleanly without /mnt/zfs-recovery or duplicate slashes.
+func cleanDisplayPath(p string) string {
+	p = strings.TrimSpace(p)
+	p = filepath.ToSlash(p)
+	for strings.HasPrefix(p, "/mnt/zfs-recovery/") || strings.HasPrefix(p, "/mnt/") {
+		if strings.HasPrefix(p, "/mnt/zfs-recovery/") {
+			p = "/" + strings.TrimPrefix(p, "/mnt/zfs-recovery/")
+		} else if strings.HasPrefix(p, "/mnt/") {
+			p = "/" + strings.TrimPrefix(p, "/mnt/")
+		}
+	}
+	p = filepath.ToSlash(filepath.Clean(p))
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return p
 }
 
 // FolderTreeNodeDTO models an entry in the real share folder tree.
@@ -922,7 +957,7 @@ func readSubdirs(dirPath string, maxDepth int) []FolderTreeNodeDTO {
 		res = append(res, FolderTreeNodeDTO{
 			ID:       "dir-" + strings.ReplaceAll(fullPath, "\\", "_"),
 			Name:     name,
-			Path:     fullPath,
+			Path:     cleanDisplayPath(fullPath),
 			IsDrive:  false,
 			Children: children,
 		})
@@ -990,11 +1025,11 @@ func (a *API) handleShareFolderTree(w http.ResponseWriter, r *http.Request) {
 
 	// Create root drive node for each pool
 	for pName := range poolNames {
-		pMount := a.resolveRealMountPath(pName, "")
+		cleanPoolPath := cleanDisplayPath("/" + pName)
 		pNode := &TreeNode{
 			ID:       "pool-" + pName,
 			Name:     pName,
-			Path:     pMount,
+			Path:     cleanPoolPath,
 			IsDrive:  true,
 			Children: make([]*TreeNode, 0),
 		}
@@ -1022,11 +1057,11 @@ func (a *API) handleShareFolderTree(w http.ResponseWriter, r *http.Request) {
 		poolPart := parts[0]
 		poolNode := nodeMap[strings.ToLower(poolPart)]
 		if poolNode == nil {
-			pMount := a.resolveRealMountPath(poolPart, "")
+			cleanPoolPath := cleanDisplayPath("/" + poolPart)
 			poolNode = &TreeNode{
 				ID:       "pool-" + poolPart,
 				Name:     poolPart,
-				Path:     pMount,
+				Path:     cleanPoolPath,
 				IsDrive:  true,
 				Children: make([]*TreeNode, 0),
 			}
@@ -1035,9 +1070,7 @@ func (a *API) handleShareFolderTree(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if len(parts) == 1 {
-			if d.mount != "" {
-				poolNode.Path = d.mount
-			}
+			poolNode.Path = cleanDisplayPath("/" + poolPart)
 			continue
 		}
 
@@ -1047,21 +1080,22 @@ func (a *API) handleShareFolderTree(w http.ResponseWriter, r *http.Request) {
 			prevPath := curPath
 			curPath = curPath + "/" + partName
 			curKey := strings.ToLower(curPath)
+			cleanNodePath := cleanDisplayPath("/" + curPath)
 
 			existing := nodeMap[curKey]
 			if existing == nil {
 				isLeaf := i == len(parts)-1
-				nodePath := d.mount
+				realDiskPath := d.mount
 				if !isLeaf {
-					nodePath = a.resolveRealMountPath(curPath, "")
+					realDiskPath = a.resolveRealMountPath(curPath, "")
 				}
 				var subdirs []*TreeNode
-				if isLeaf && nodePath != "" {
-					for _, sd := range readSubdirs(nodePath, 3) {
+				if isLeaf && realDiskPath != "" {
+					for _, sd := range readSubdirs(realDiskPath, 2) {
 						subdirs = append(subdirs, &TreeNode{
 							ID:      sd.ID,
 							Name:    sd.Name,
-							Path:    sd.Path,
+							Path:    cleanDisplayPath(sd.Path),
 							IsDrive: false,
 						})
 					}
@@ -1069,7 +1103,7 @@ func (a *API) handleShareFolderTree(w http.ResponseWriter, r *http.Request) {
 				childNode := &TreeNode{
 					ID:       "ds-" + d.id + "-" + partName,
 					Name:     partName,
-					Path:     nodePath,
+					Path:     cleanNodePath,
 					IsDrive:  false,
 					Children: subdirs,
 				}
@@ -1077,11 +1111,51 @@ func (a *API) handleShareFolderTree(w http.ResponseWriter, r *http.Request) {
 
 				parentNode := nodeMap[strings.ToLower(prevPath)]
 				if parentNode != nil {
-					parentNode.Children = append(parentNode.Children, childNode)
+					var existingChild *TreeNode
+					for _, c := range parentNode.Children {
+						if strings.EqualFold(c.Name, partName) {
+							existingChild = c
+							break
+						}
+					}
+					if existingChild != nil {
+						existingChild.Path = cleanNodePath
+						if len(subdirs) > 0 {
+							existingChild.Children = append(existingChild.Children, subdirs...)
+						}
+						nodeMap[curKey] = existingChild
+					} else {
+						parentNode.Children = append(parentNode.Children, childNode)
+					}
 				}
+			} else {
+				existing.Path = cleanNodePath
 			}
 		}
 	}
+
+	var dedupeChildren func(nodes []*TreeNode) []*TreeNode
+	dedupeChildren = func(nodes []*TreeNode) []*TreeNode {
+		seen := make(map[string]*TreeNode)
+		var out []*TreeNode
+		for _, n := range nodes {
+			n.Path = cleanDisplayPath(n.Path)
+			key := strings.ToLower(strings.TrimSpace(n.Name))
+			if existing, found := seen[key]; found {
+				if len(n.Children) > 0 {
+					existing.Children = dedupeChildren(append(existing.Children, n.Children...))
+				}
+			} else {
+				if len(n.Children) > 0 {
+					n.Children = dedupeChildren(n.Children)
+				}
+				seen[key] = n
+				out = append(out, n)
+			}
+		}
+		return out
+	}
+	rootList = dedupeChildren(rootList)
 
 	var sortSubtree func(nodes []*TreeNode)
 	sortSubtree = func(nodes []*TreeNode) {
@@ -2026,11 +2100,6 @@ func (a *API) checkDatasetAccess(r *http.Request, datasetName string, needEditor
 		// Kiểm tra thành phần trong đường dẫn
 		if strings.Contains("/"+cleanName+"/", "/"+kClean+"/") {
 			matchedVal = v
-			break
-		}
-		// Cho phép xem cây thư mục cha nếu được cấp quyền trên tập dữ liệu con (khi chỉ cần xem/list)
-		if !needEditor && strings.HasPrefix(kClean, cleanName+"/") {
-			matchedVal = "viewer"
 			break
 		}
 		// Khớp hậu tố hoặc tiền tố đối xứng

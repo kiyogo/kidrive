@@ -153,6 +153,13 @@ function FolderTreeItem({
   );
 }
 
+export const cleanSharePath = (p: string) => {
+  if (!p) return "/";
+  let s = p.replace(/^\/mnt\/zfs-recovery\//, "/").replace(/^\/mnt\//, "/");
+  s = s.replace(/\/+/g, "/");
+  return s.startsWith("/") ? s : "/" + s;
+};
+
 export function NetworkSharesSection({
   onBack,
   embedded,
@@ -210,7 +217,7 @@ export function NetworkSharesSection({
         id: s.id,
         name: s.name,
         purpose: s.purpose || "Chia sẻ mặc định",
-        path: s.path,
+        path: cleanSharePath(s.path),
         description: s.description || "",
         readOnly: !!s.read_only,
         browseable: s.browseable !== false,
@@ -236,17 +243,18 @@ export function NetworkSharesSection({
           nodes = nodes[0].children;
         }
 
-        // Tự động mở rộng tất cả các cấp thư mục để người dùng thấy rõ cấu trúc cây
+        // Chỉ mở rộng 2 cấp đầu tiên (Pool và các dataset chính), các thư mục con sâu hơn sẽ để người dùng tự mở dần
         const allIds = new Set<string>();
-        const collectIds = (items: FolderTreeNode[]) => {
+        const collectIds = (items: FolderTreeNode[], depth = 0) => {
+          if (depth >= 2) return;
           items.forEach((n) => {
             allIds.add(n.id);
             if (n.children && n.children.length > 0) {
-              collectIds(n.children);
+              collectIds(n.children, depth + 1);
             }
           });
         };
-        collectIds(nodes);
+        collectIds(nodes, 0);
 
         setFolderTree(nodes);
         setExpandedNodeIds(allIds);
@@ -662,7 +670,7 @@ export function NetworkSharesSection({
                             selectedPath={sharePath}
                             expandedIds={expandedNodeIds}
                             onSelect={(node) => {
-                              setSharePath(node.path);
+                              setSharePath(cleanSharePath(node.path));
                               if (!shareName.trim()) {
                                 setShareName(node.name === "/" ? "root" : node.name);
                               }

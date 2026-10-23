@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -286,6 +287,107 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
+			// Nếu là user thường và chỉ được phân quyền đúng 1 dataset (e.g. DATA/KiyoVN)
+			// thì hiển thị thẳng các tệp tin & thư mục con bên trong dataset đó!
+			if !isAdmin && len(rootDsNodes) == 1 {
+				singleDsName := strings.TrimPrefix(rootDsNodes[0].ID, "dataset:")
+				dsName, mount, err := a.getDatasetMount(r.Context(), singleDsName)
+				if err == nil {
+					role := rootDsNodes[0].Role
+					var nodes []nodeDTO
+					childDsNames := make(map[string]bool)
+					dRows, err := a.db.Read().QueryContext(r.Context(),
+						`SELECT name, used_bytes, created_at, updated_at FROM datasets WHERE name LIKE ? ORDER BY name ASC`,
+						dsName+"/%")
+					if err == nil {
+						defer dRows.Close()
+						for dRows.Next() {
+							var childFullName string
+							var childUsed, childCreated, childUpdated int64
+							if err := dRows.Scan(&childFullName, &childUsed, &childCreated, &childUpdated); err == nil {
+								rel := strings.TrimPrefix(childFullName, dsName+"/")
+								if !strings.Contains(rel, "/") {
+									cRole, cErr := a.checkDatasetAccess(r, childFullName, false)
+									if cErr == nil {
+										childDsNames[strings.ToLower(rel)] = true
+										nodes = append(nodes, nodeDTO{
+											ID:        fmt.Sprintf("dataset:%s", childFullName),
+											ParentID:  "",
+											Name:      rel,
+											Type:      "folder",
+											Category:  "folder",
+											MimeType:  "application/x-directory",
+											SizeBytes: childUsed,
+											Role:      cRole,
+											CreatedAt: childCreated,
+											UpdatedAt: childUpdated,
+										})
+									}
+								}
+							}
+						}
+					}
+
+					cleanMount := filepath.Clean(mount)
+					entries, err := os.ReadDir(cleanMount)
+					if err == nil {
+						qLower := strings.ToLower(opts.Query)
+						for _, entry := range entries {
+							if childDsNames[strings.ToLower(entry.Name())] || isIgnoredFolder(entry.Name()) {
+								continue
+							}
+							if qLower != "" && !strings.Contains(strings.ToLower(entry.Name()), qLower) {
+								continue
+							}
+							info, err := entry.Info()
+							if err != nil {
+								continue
+							}
+							itemType := "file"
+							mimeType := mime.TypeByExtension(filepath.Ext(entry.Name()))
+							if entry.IsDir() {
+								itemType = "folder"
+								mimeType = "application/x-directory"
+							} else if mimeType == "" {
+								mimeType = "application/octet-stream"
+							}
+							category := string(models.CategoryOf(models.NodeType(itemType), mimeType, entry.Name()))
+							nodes = append(nodes, nodeDTO{
+								ID:        fmt.Sprintf("dataset:%s:%s", dsName, entry.Name()),
+								ParentID:  "",
+								Name:      entry.Name(),
+								Type:      itemType,
+								Category:  category,
+								MimeType:  mimeType,
+								SizeBytes: info.Size(),
+								Role:      role,
+								CreatedAt: info.ModTime().UnixMilli(),
+								UpdatedAt: info.ModTime().UnixMilli(),
+							})
+						}
+					}
+
+					total := len(nodes)
+					start := opts.Offset
+					if start > total {
+						start = total
+					}
+					end := start + opts.Limit
+					if end > total {
+						end = total
+					}
+					paged := nodes[start:end]
+					writeJSON(w, http.StatusOK, map[string]any{
+						"nodes":       paged,
+						"limit":       opts.Limit,
+						"offset":      opts.Offset,
+						"has_more":    end < total,
+						"next_offset": end,
+					})
+					return
+				}
+			}
+
 			writeJSON(w, http.StatusOK, map[string]any{
 				"nodes":       rootDsNodes,
 				"limit":       opts.Limit,
@@ -295,6 +397,142 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+
+	// 4. Đồng bộ hình ảnh và video từ tất cả các tập dữ liệu được cấp quyền
+	isMediaFilter := opts.Filter == "image" || opts.Filter == "images" || opts.Filter == "gallery" ||
+		opts.Filter == "video" || opts.Filter == "videos"
+	if isMediaFilter {
+		isImg := opts.Filter == "image" || opts.Filter == "images" || opts.Filter == "gallery"
+		var mediaNodes []nodeDTO
+
+		dRows, err := a.db.Read().QueryContext(r.Context(),
+			`SELECT name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY name ASC`)
+		if err == nil {
+			defer dRows.Close()
+			for dRows.Next() {
+				var dName, dPool, dMount string
+				if err := dRows.Scan(&dName, &dPool, &dMount); err == nil {
+					role, accessErr := a.checkDatasetAccess(r, dName, false)
+					if accessErr != nil {
+						continue
+					}
+					realMount := a.resolveRealMountPath(dName, dMount)
+					if realMount == "" {
+						continue
+					}
+					cleanMount := filepath.Clean(realMount)
+					if fi, err := os.Stat(cleanMount); err != nil || !fi.IsDir() {
+						continue
+					}
+
+					_ = filepath.Walk(cleanMount, func(path string, info os.FileInfo, walkErr error) error {
+						if walkErr != nil || info == nil {
+							return nil
+						}
+						if info.IsDir() {
+							if isIgnoredFolder(info.Name()) {
+								return filepath.SkipDir
+							}
+							return nil
+						}
+						ext := strings.ToLower(filepath.Ext(info.Name()))
+						var matchedCategory string
+						var mimeType string
+						if isImg {
+							switch ext {
+							case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".bmp", ".tiff", ".svg", ".ico":
+								matchedCategory = "image"
+								mimeType = mime.TypeByExtension(ext)
+								if mimeType == "" {
+									mimeType = "image/" + strings.TrimPrefix(ext, ".")
+								}
+							}
+						} else {
+							switch ext {
+							case ".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v", ".3gp", ".ts":
+								matchedCategory = "video"
+								mimeType = mime.TypeByExtension(ext)
+								if mimeType == "" {
+									mimeType = "video/" + strings.TrimPrefix(ext, ".")
+								}
+							}
+						}
+						if matchedCategory == "" {
+							return nil
+						}
+						if opts.Query != "" && !strings.Contains(strings.ToLower(info.Name()), strings.ToLower(opts.Query)) {
+							return nil
+						}
+						rel, rErr := filepath.Rel(cleanMount, path)
+						if rErr != nil {
+							return nil
+						}
+						relItemPath := filepath.ToSlash(rel)
+						mediaNodes = append(mediaNodes, nodeDTO{
+							ID:        fmt.Sprintf("dataset:%s:%s", dName, relItemPath),
+							ParentID:  fmt.Sprintf("dataset:%s", dName),
+							Name:      info.Name(),
+							Type:      "file",
+							Category:  matchedCategory,
+							MimeType:  mimeType,
+							SizeBytes: info.Size(),
+							Role:      role,
+							CreatedAt: info.ModTime().UnixMilli(),
+							UpdatedAt: info.ModTime().UnixMilli(),
+						})
+						if len(mediaNodes) >= 2000 {
+							return fmt.Errorf("limit reached")
+						}
+						return nil
+					})
+				}
+			}
+		}
+
+		// Kết hợp với các tệp có sẵn trong SQLite database
+		dbList, dbErr := a.files.List(r.Context(), userID, files.ListOptions{
+			Filter: opts.Filter,
+			Query:  opts.Query,
+			Limit:  500,
+		})
+		if dbErr == nil {
+			for _, v := range nodeViews(dbList, userID) {
+				mediaNodes = append(mediaNodes, v)
+			}
+		}
+
+		sort.Slice(mediaNodes, func(i, j int) bool {
+			if opts.SortBy == "name" {
+				if opts.SortDesc {
+					return strings.ToLower(mediaNodes[i].Name) > strings.ToLower(mediaNodes[j].Name)
+				}
+				return strings.ToLower(mediaNodes[i].Name) < strings.ToLower(mediaNodes[j].Name)
+			}
+			if opts.SortDesc {
+				return mediaNodes[i].UpdatedAt > mediaNodes[j].UpdatedAt
+			}
+			return mediaNodes[i].UpdatedAt < mediaNodes[j].UpdatedAt
+		})
+
+		total := len(mediaNodes)
+		start := opts.Offset
+		if start > total {
+			start = total
+		}
+		end := start + opts.Limit
+		if end > total {
+			end = total
+		}
+		paged := mediaNodes[start:end]
+		writeJSON(w, http.StatusOK, map[string]any{
+			"nodes":       paged,
+			"limit":       opts.Limit,
+			"offset":      opts.Offset,
+			"has_more":    end < total,
+			"next_offset": end,
+		})
+		return
 	}
 
 	list, err := a.files.List(r.Context(), userID, opts)
@@ -923,6 +1161,15 @@ func (a *API) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 		if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp" || ext == ".gif" {
 			http.ServeFile(w, r, cleanTarget)
 			return
+		}
+		if a.thumbs != nil {
+			mimeType := mime.TypeByExtension(ext)
+			if thumbBytes, err := a.thumbs.Generate(r.Context(), cleanTarget, mimeType); err == nil && len(thumbBytes) > 0 {
+				w.Header().Set("Content-Type", "image/jpeg")
+				w.Header().Set("Cache-Control", "private, max-age=86400")
+				w.Write(thumbBytes)
+				return
+			}
 		}
 		writeError(w, http.StatusNotFound, "no_thumbnail", "this file has no preview")
 		return

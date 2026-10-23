@@ -184,15 +184,7 @@ export function FilesBrowser({
       }
     }
 
-    // 3. Cho phép xem danh mục cha nếu được cấp quyền trên danh mục con (để người dùng mở được từ DATA -> KiyoVN -> 1DATA)
-    for (const [k, v] of Object.entries(userPerms)) {
-      const kClean = k.toLowerCase().trim().replace(/^\/+|\/+$/g, "");
-      if (kClean && kClean.startsWith(cleanName + "/")) {
-        return { level: "viewer" as const, read: true, write: false, execute: false };
-      }
-    }
-
-    // 4. Kiểm tra thành phần trong đường dẫn hoặc hậu tố
+    // 3. Kiểm tra thành phần trong đường dẫn hoặc hậu tố
     for (const [k, v] of Object.entries(userPerms)) {
       const kClean = k.toLowerCase().trim().replace(/^\/+|\/+$/g, "");
       if (kClean && (("/" + cleanName + "/").includes("/" + kClean + "/") || cleanName.endsWith("/" + kClean) || kClean.endsWith("/" + cleanName))) {
@@ -204,6 +196,27 @@ export function FilesBrowser({
     if (userPerms["*"]) return userPerms["*"];
     return { level: "none" as const, read: false, write: false, execute: false };
   }, [user, userPerms]);
+
+  // Danh mục gốc được phân quyền cho người dùng này (nếu là user thường)
+  const userRootDatasets = useMemo<string[]>(() => {
+    if (!user || user.role === "admin" || !user.dataset_permissions) return [];
+    const keys = Object.keys(userPerms)
+      .map((k) => k.trim().replace(/^\/+|\/+$/g, ""))
+      .filter((k) => k && k !== "*" && k !== "/");
+    const unique = Array.from(new Set(keys));
+    return unique.filter((item) => {
+      const itemLower = item.toLowerCase();
+      return !unique.some((other) => {
+        const otherLower = other.toLowerCase();
+        return otherLower !== itemLower && itemLower.startsWith(otherLower + "/");
+      });
+    });
+  }, [user, userPerms]);
+
+  // Nếu người dùng chỉ được phân quyền duy nhất 1 danh mục (ví dụ DATA/KiyoVN):
+  const defaultSingleDataset = useMemo<string | null>(() => {
+    return userRootDatasets.length === 1 ? userRootDatasets[0] : null;
+  }, [userRootDatasets]);
 
   // Check if current user has assigned categories:
   const hasAssignedCategory = useMemo<boolean>(() => {
@@ -230,8 +243,11 @@ export function FilesBrowser({
         return trail[0].name;
       }
     }
+    if (user && user.role !== "admin" && defaultSingleDataset) {
+      return defaultSingleDataset;
+    }
     return null;
-  }, [trail, folderId]);
+  }, [trail, folderId, user, defaultSingleDataset]);
 
   // Is current view read-only?
   const isReadOnly = useMemo<boolean>(() => {
@@ -329,6 +345,16 @@ export function FilesBrowser({
         await api.post(Api.datasetCreateFolder, {
           dataset: dsName,
           subpath: subpath,
+          name: folderName.trim(),
+        });
+        setCreateFolderOpen(false);
+        setFolderName("");
+        toast("Đã tạo thư mục mới thành công!", "success");
+        void load();
+      } else if (defaultSingleDataset) {
+        await api.post(Api.datasetCreateFolder, {
+          dataset: defaultSingleDataset,
+          subpath: "",
           name: folderName.trim(),
         });
         setCreateFolderOpen(false);
@@ -559,10 +585,15 @@ export function FilesBrowser({
         };
       }
 
+      let effectiveParentId = filter === "none" ? folderId : "";
+      if (filter === "none" && !folderId && user && user.role !== "admin" && defaultSingleDataset) {
+        effectiveParentId = `dataset:${defaultSingleDataset}`;
+      }
+
       const data = await api.get<{ nodes: NodeModel[]; has_more?: boolean; next_offset?: number }>(
         Api.nodes,
         {
-          parent_id: filter === "none" ? folderId : "",
+          parent_id: effectiveParentId,
           filter: filter === "none" ? undefined : filter,
           query: query || undefined,
           sort: sortBy,
@@ -574,8 +605,8 @@ export function FilesBrowser({
       );
       let fetched = data?.nodes ?? [];
 
-      // If at root level on the first batch, inject root-level datasets:
-      if (filter === "none" && !folderId && offset === 0) {
+      // If at root level on the first batch, inject root-level datasets (only if not directly viewing a single dataset):
+      if (filter === "none" && !folderId && (!user || user.role === "admin" || !defaultSingleDataset) && offset === 0) {
         let sysDatasets: any[] = [];
         try {
           const dsRes = await api.get<{ datasets: any[] }>(Api.datasets, undefined, { signal });
@@ -591,7 +622,7 @@ export function FilesBrowser({
         const rootDatasets = accessible.filter((ds) => {
           const dsNorm = (ds.name || "").toLowerCase().trim().replace(/^\/+|\/+$/g, "");
           const slashParts = dsNorm.split("/").filter(Boolean);
-          if (slashParts.length > 1) {
+          if (user && user.role === "admin" && slashParts.length > 1) {
             const poolPrefix = slashParts[0];
             const hasAncestor = accessible.some((other) => {
               const otherNorm = (other.name || "").toLowerCase().trim().replace(/^\/+|\/+$/g, "");
@@ -736,7 +767,12 @@ export function FilesBrowser({
     else onPreview(node, nodes ? nodes.filter((n) => !isFolder(n)) : undefined);
   };
 
-  const { pick: upload, pickFolder: uploadFolder, dropDataTransfer, sheet: clashSheet, busy: resolvingClash } = useUploader(folderId, () => {
+  const effectiveUploaderFolderId =
+    !folderId && user && user.role !== "admin" && defaultSingleDataset
+      ? `dataset:${defaultSingleDataset}`
+      : folderId;
+
+  const { pick: upload, pickFolder: uploadFolder, dropDataTransfer, sheet: clashSheet, busy: resolvingClash } = useUploader(effectiveUploaderFolderId, () => {
     toast(t.transferCompleted, "success");
     void load();
   });

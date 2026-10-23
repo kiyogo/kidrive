@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, useMemo, use } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BootScreen,
@@ -201,6 +201,30 @@ function parsePathToSection(
 
 function Drive({ initialSlug }: { initialSlug?: string[] }) {
   const t = useL10n();
+  const { user } = useSession();
+
+  // If user is non-admin with a single assigned dataset:
+  const defaultSingleDataset = useMemo<string | null>(() => {
+    if (!user || user.role === "admin" || !user.dataset_permissions) return null;
+    try {
+      const perms = JSON.parse(user.dataset_permissions);
+      const keys = Object.keys(perms)
+        .map((k) => k.trim().replace(/^\/+|\/+$/g, ""))
+        .filter((k) => k && k !== "*" && k !== "/");
+      const unique = Array.from(new Set(keys));
+      const roots = unique.filter((item) => {
+        const itemLower = item.toLowerCase();
+        return !unique.some((other) => {
+          const otherLower = other.toLowerCase();
+          return otherLower !== itemLower && itemLower.startsWith(otherLower + "/");
+        });
+      });
+      return roots.length === 1 ? roots[0] : null;
+    } catch {
+      return null;
+    }
+  }, [user]);
+
   const initial =
     typeof window !== "undefined"
       ? parsePathToSection(window.location.pathname, initialSlug)
@@ -208,9 +232,19 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
 
   const [section, setSection] = useState<Section>(initial.section);
   const [settingsSub, setSettingsSub] = useState<string | undefined>(initial.subSection);
-  const [folder, setFolder] = useState<{ id: string; name: string }[]>(
-    initial.folderId ? [{ id: initial.folderId, name: initial.folderId }] : [],
-  );
+  const [folder, setFolder] = useState<{ id: string; name: string }[]>(() => {
+    if (!initial.folderId) return [];
+    if (defaultSingleDataset && initial.folderId === `dataset:${defaultSingleDataset}`) {
+      return [];
+    }
+    let name = initial.folderId;
+    if (name.includes(":")) {
+      name = name.substring(name.lastIndexOf(":") + 1);
+    } else if (name.includes("/")) {
+      name = name.substring(name.lastIndexOf("/") + 1);
+    }
+    return [{ id: initial.folderId, name }];
+  });
   const [preview, setPreview] = useState<{ node: NodeModel; nodes?: NodeModel[] } | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [newFolderTrigger, setNewFolderTrigger] = useState(0);
@@ -223,12 +257,22 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
       if (parsed.section === "files" && !parsed.folderId) {
         setFolder([]);
       } else if (parsed.folderId) {
-        setFolder([{ id: parsed.folderId, name: parsed.folderId }]);
+        if (defaultSingleDataset && parsed.folderId === `dataset:${defaultSingleDataset}`) {
+          setFolder([]);
+        } else {
+          let name = parsed.folderId;
+          if (name.includes(":")) {
+            name = name.substring(name.lastIndexOf(":") + 1);
+          } else if (name.includes("/")) {
+            name = name.substring(name.lastIndexOf("/") + 1);
+          }
+          setFolder([{ id: parsed.folderId, name }]);
+        }
       }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [defaultSingleDataset]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -266,8 +310,13 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
 
   const current = folder.length ? folder[folder.length - 1] : { id: "", name: t.myFiles };
 
+  const uploadFolderId =
+    section === "files"
+      ? (current.id || (defaultSingleDataset ? `dataset:${defaultSingleDataset}` : ""))
+      : "";
+
   const { pick: pickFiles, pickFolder, sheet: clashSheet } = useUploader(
-    section === "files" ? current.id : "",
+    uploadFolderId,
     () => setRefresh((n) => n + 1),
   );
 
