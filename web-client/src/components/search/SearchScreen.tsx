@@ -9,7 +9,7 @@ import { Api } from "@/lib/endpoints";
 import { bytes, relative } from "@/lib/format";
 import { useL10n } from "@/lib/l10n";
 import { isFolder, type NodeModel } from "@/lib/models";
-import { useInfiniteList, useVirtualWindow } from "@/lib/useInfiniteList";
+import { useInfiniteList } from "@/lib/useInfiniteList";
 
 /**
  * Omnisearch screen, ported from features/search/pages/search_page.dart.
@@ -186,16 +186,9 @@ function SearchResultsList({
   onPreview: (node: NodeModel) => void;
   Sentinel: React.ComponentType;
 }) {
-  const { startIndex, endIndex, topSpacerHeight, bottomSpacerHeight, isVirtual } = useVirtualWindow({
-    itemCount: results.length,
-    itemHeight: 64,
-  });
-  const visible = isVirtual ? results.slice(startIndex, endIndex) : results;
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 640, margin: "0 auto", width: "100%" }}>
-      {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
-      {visible.map((node) => {
+      {results.map((node) => {
         const folder = isFolder(node);
         const category = categoryOfNode(node);
 
@@ -248,7 +241,6 @@ function SearchResultsList({
           </Tappable>
         );
       })}
-      {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
       <Sentinel />
     </div>
   );

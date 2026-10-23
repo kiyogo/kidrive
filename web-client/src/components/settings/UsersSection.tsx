@@ -8,7 +8,7 @@ import { Api } from "@/lib/endpoints";
 import { bytes } from "@/lib/format";
 import { type UserModel } from "@/lib/models";
 import { useSession } from "@/lib/session";
-import { useInfiniteList, useVirtualWindow } from "@/lib/useInfiniteList";
+import { useInfiniteList } from "@/lib/useInfiniteList";
 
 export interface DatasetPermissionItem {
   id: string;

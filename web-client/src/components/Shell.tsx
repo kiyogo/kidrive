@@ -676,6 +676,7 @@ export function Shell({
         <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <div
             ref={contentScrollRef}
+            id="main-scroll-container"
             style={{
               flex: 1,
               minHeight: 0,

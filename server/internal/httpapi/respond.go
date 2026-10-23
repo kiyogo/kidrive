@@ -47,16 +47,17 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 }
 
 // fail maps a domain error onto a status and a plain, direct message. Keeping
+// fail maps a domain error onto a status and a plain, direct message. Keeping
 // this in one place is what stops handlers from inventing their own wording.
 func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, files.ErrNotFound), errors.Is(err, auth.ErrNotFound),
 		errors.Is(err, shares.ErrNotFound), errors.Is(err, libraries.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "that item does not exist")
+		writeError(w, http.StatusNotFound, "not_found", "Mục này không tồn tại hoặc đã bị xóa")
 
 	case errors.Is(err, files.ErrForbidden), errors.Is(err, auth.ErrForbidden),
 		errors.Is(err, shares.ErrForbidden):
-		writeError(w, http.StatusForbidden, "forbidden", "you do not have permission to do that")
+		writeError(w, http.StatusForbidden, "forbidden", "Bạn không có quyền thực hiện thao tác này")
 
 	case errors.Is(err, files.ErrQuota):
 		writeError(w, http.StatusInsufficientStorage, "quota_exceeded", "Dung lượng lưu trữ đã đầy, không thể tải tệp lên")
@@ -78,70 +79,74 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 
 	case errors.Is(err, files.ErrTrashed):
-		writeError(w, http.StatusConflict, "in_trash", "that item is in the trash")
+		writeError(w, http.StatusConflict, "in_trash", "Mục này hiện đang nằm trong thùng rác")
 
 	case errors.Is(err, auth.ErrCredentials):
-		writeError(w, http.StatusUnauthorized, "bad_credentials", "username or password is incorrect")
+		writeError(w, http.StatusUnauthorized, "bad_credentials", "Tên đăng nhập hoặc mật khẩu không chính xác")
 
 	case errors.Is(err, auth.ErrDisabled):
-		writeError(w, http.StatusForbidden, "account_disabled", "this account has been disabled")
+		writeError(w, http.StatusForbidden, "account_disabled", "Tài khoản này đã bị vô hiệu hóa")
 
 	case errors.Is(err, auth.ErrTOTPRequired):
-		writeError(w, http.StatusUnauthorized, "totp_required", "enter the code from your authenticator app")
+		writeError(w, http.StatusUnauthorized, "totp_required", "Vui lòng nhập mã từ ứng dụng xác thực hai bước")
 
 	case errors.Is(err, auth.ErrTOTPInvalid):
-		writeError(w, http.StatusUnauthorized, "totp_invalid", "that code is not valid")
+		writeError(w, http.StatusUnauthorized, "totp_invalid", "Mã xác thực hai bước không hợp lệ")
 
 	case errors.Is(err, auth.ErrSessionInvalid):
-		writeError(w, http.StatusUnauthorized, "session_invalid", "sign in again")
+		writeError(w, http.StatusUnauthorized, "session_invalid", "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại")
 
 	case errors.Is(err, auth.ErrSetupDone):
-		writeError(w, http.StatusConflict, "setup_done", "this server is already set up")
+		writeError(w, http.StatusConflict, "setup_done", "Máy chủ này đã được khởi tạo trước đó")
 
 	case errors.Is(err, auth.ErrSetupRequired):
-		writeError(w, http.StatusConflict, "setup_required", "this server has not been set up yet")
+		writeError(w, http.StatusConflict, "setup_required", "Máy chủ chưa được khởi tạo tài khoản quản trị")
 
 	case errors.Is(err, auth.ErrInviteRequired):
-		writeError(w, http.StatusForbidden, "invite_required", "an invite code is required to create an account here")
+		writeError(w, http.StatusForbidden, "invite_required", "Cần có mã mời để tạo tài khoản mới")
 
 	case errors.Is(err, auth.ErrInviteInvalid):
-		writeError(w, http.StatusBadRequest, "invite_invalid", "that invite code is not valid")
+		writeError(w, http.StatusBadRequest, "invite_invalid", "Mã mời không hợp lệ")
 
 	case errors.Is(err, auth.ErrUserExists):
-		writeError(w, http.StatusConflict, "username_taken", "that username is already taken")
+		writeError(w, http.StatusConflict, "username_taken", "Tên đăng nhập này đã được sử dụng")
 
 	case errors.Is(err, auth.ErrEmailExists):
-		writeError(w, http.StatusConflict, "email_taken", "that email is already in use")
+		writeError(w, http.StatusConflict, "email_taken", "Địa chỉ email này đã được sử dụng")
 
 	case errors.Is(err, auth.ErrWeakPassword), errors.Is(err, auth.ErrInvalidUsername):
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 
 	case errors.Is(err, libraries.ErrOffline):
 		writeError(w, http.StatusServiceUnavailable, "library_offline",
-			"that drive is not connected right now")
+			"Ổ đĩa lưu trữ hiện không kết nối")
 
 	case errors.Is(err, libraries.ErrDuplicate):
-		writeError(w, http.StatusConflict, "already_registered", "that location is already a library")
+		writeError(w, http.StatusConflict, "already_registered", "Đường dẫn lưu trữ này đã được đăng ký")
 
 	case errors.Is(err, libraries.ErrLastOne):
-		writeError(w, http.StatusConflict, "last_library", "this is the only library, add another one first")
+		writeError(w, http.StatusConflict, "last_library", "Đây là thư viện duy nhất, cần tạo thêm trước khi xóa")
 
 	case errors.Is(err, shares.ErrExpired):
-		writeError(w, http.StatusGone, "share_expired", "this link has expired")
+		writeError(w, http.StatusGone, "share_expired", "Liên kết chia sẻ này đã hết hạn")
 
 	case errors.Is(err, shares.ErrPasswordNeeded):
-		writeError(w, http.StatusUnauthorized, "share_password_required", "this link needs a password")
+		writeError(w, http.StatusUnauthorized, "share_password_required", "Liên kết này yêu cầu nhập mật khẩu bảo vệ")
 
 	case errors.Is(err, shares.ErrPasswordWrong):
-		writeError(w, http.StatusUnauthorized, "share_password_wrong", "that password is not correct")
+		writeError(w, http.StatusUnauthorized, "share_password_wrong", "Mật khẩu truy cập không chính xác")
 
 	case errors.Is(err, shares.ErrDownloadBlocked):
-		writeError(w, http.StatusForbidden, "download_disabled", "this link is view only")
+		writeError(w, http.StatusForbidden, "download_disabled", "Liên kết này chỉ hỗ trợ xem trực tiếp, không cho phép tải về")
 
 	default:
 		a.log.Error("unhandled request error",
 			"error", err, "path", r.URL.Path, "method", r.Method)
-		writeError(w, http.StatusInternalServerError, "internal", "something went wrong on the server")
+		msg := err.Error()
+		if msg == "" {
+			msg = "Đã xảy ra lỗi trên máy chủ, vui lòng thử lại sau"
+		}
+		writeError(w, http.StatusInternalServerError, "internal", msg)
 	}
 }
 

@@ -23,7 +23,7 @@ import type { NodeModel } from "@/lib/models";
 import { transfers, type Transfer } from "@/lib/upload";
 import { useUploader } from "@/lib/uploads";
 import { ShareSheet } from "@/components/share/ShareSheet";
-import { useInfiniteList, useVirtualWindow } from "@/lib/useInfiniteList";
+import { useInfiniteList } from "@/lib/useInfiniteList";
 
 /**
  * The image gallery: strictly photos/images only in one timeline.
@@ -318,12 +318,6 @@ function GalleryGridContent({
   setCanvasMenu: (m: { x?: number; y?: number } | null) => void;
   Sentinel: React.ComponentType;
 }) {
-  const { startIndex, endIndex, topSpacerHeight, bottomSpacerHeight, isVirtual } = useVirtualWindow({
-    itemCount: nodes.length,
-    itemHeight: isDesktop ? 60 : 40,
-  });
-  const visibleNodes = isVirtual ? nodes.slice(startIndex, endIndex) : nodes;
-
   return (
     <div
       style={{ padding: isDesktop ? "16px 24px 120px" : "8px 8px 120px" }}
@@ -335,7 +329,6 @@ function GalleryGridContent({
         setCanvasMenu({ x: e.clientX, y: e.clientY });
       }}
     >
-      {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
       <div
         style={{
           display: "grid",
@@ -343,7 +336,7 @@ function GalleryGridContent({
           gap: isDesktop ? 14 : 6,
         }}
       >
-        {visibleNodes.map((n) => {
+        {nodes.map((n) => {
           const ratio =
             n.image_width && n.image_height && n.image_height > 0
               ? Math.min(Math.max(n.image_width / n.image_height, 0.3), 3.0)
@@ -387,7 +380,6 @@ function GalleryGridContent({
           );
         })}
       </div>
-      {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
       <Sentinel />
     </div>
   );

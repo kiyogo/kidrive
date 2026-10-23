@@ -290,7 +290,7 @@ class Client {
       throw new ApiError(
         0,
         "unreachable",
-        "Could not reach the server. Check the address and that it is running.",
+        "Không thể kết nối đến máy chủ. Vui lòng kiểm tra lại địa chỉ máy chủ và kết nối mạng.",
         undefined,
       );
     }
@@ -311,14 +311,36 @@ class Client {
     const parsed = text ? safeJson(text) : null;
 
     if (!response.ok) {
-      const err = (parsed as { error?: { code?: string; message?: string; field?: string } } | null)
-        ?.error;
-      throw new ApiError(
-        response.status,
-        err?.code ?? "error",
-        err?.message ?? `The server returned ${response.status}.`,
-        err?.field,
-      );
+      let errMsg = "";
+      let errCode = "error";
+      let errField: string | undefined = undefined;
+
+      if (parsed && typeof parsed === "object") {
+        const p = parsed as any;
+        if (typeof p.error === "string") {
+          errMsg = p.error;
+        } else if (p.error && typeof p.error === "object") {
+          errMsg = p.error.message || p.error.code || "";
+          errCode = p.error.code || "error";
+          errField = p.error.field;
+        } else if (typeof p.message === "string") {
+          errMsg = p.message;
+        }
+      }
+
+      if (!errMsg) {
+        if (response.status === 403) {
+          errMsg = "Bạn không có quyền thực hiện thao tác này.";
+        } else if (response.status === 404) {
+          errMsg = "Không tìm thấy dữ liệu yêu cầu.";
+        } else if (response.status === 500) {
+          errMsg = "Đã xảy ra sự cố trên máy chủ khi xử lý yêu cầu.";
+        } else {
+          errMsg = `Máy chủ phản hồi mã lỗi ${response.status}.`;
+        }
+      }
+
+      throw new ApiError(response.status, errCode, errMsg, errField);
     }
     return parsed as T;
   }

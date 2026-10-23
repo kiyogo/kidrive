@@ -2247,8 +2247,28 @@ func (a *API) getDatasetMount(ctx context.Context, nameOrID string) (string, str
 		err2 := a.db.Read().QueryRowContext(ctx,
 			`SELECT name, mount FROM datasets WHERE name LIKE ? OR mount LIKE ? LIMIT 1`,
 			"%"+clean, "%"+clean).Scan(&name, &mount)
-		if err2 != nil {
-			return "", "", fmt.Errorf("dataset không tồn tại: %v", err)
+		if err2 == nil {
+			err = nil
+		}
+	}
+	if err != nil {
+		// Kiểm tra nếu là tên Pool trong storage_pools
+		var poolName string
+		if pErr := a.db.Read().QueryRowContext(ctx, `SELECT name FROM storage_pools WHERE name = ? OR id = ? LIMIT 1`, clean, clean).Scan(&poolName); pErr == nil {
+			name = poolName
+			mount = a.resolveRealMountPath(poolName, "/mnt/"+poolName)
+			err = nil
+		}
+	}
+	if err != nil {
+		// Thử tìm đường dẫn mount trực tiếp trên hệ thống
+		realM := a.resolveRealMountPath(clean, "/mnt/"+clean)
+		if fi, sErr := os.Stat(realM); sErr == nil && fi.IsDir() {
+			name = clean
+			mount = realM
+			err = nil
+		} else {
+			return "", "", fmt.Errorf("tập dữ liệu không tồn tại: %s", clean)
 		}
 	}
 
@@ -2258,6 +2278,9 @@ func (a *API) getDatasetMount(ctx context.Context, nameOrID string) (string, str
 			_, _ = tx.ExecContext(c, `UPDATE datasets SET mount = ? WHERE name = ?`, resolvedMount, name)
 			return nil
 		})
+		mount = resolvedMount
+	}
+	if mount == "" && resolvedMount != "" {
 		mount = resolvedMount
 	}
 
@@ -2375,7 +2398,7 @@ func (a *API) handleCreateDatasetFolder(w http.ResponseWriter, r *http.Request) 
 
 	dsName, mount, err := a.getDatasetMount(r.Context(), nameOrID)
 	if err != nil {
-		a.fail(w, r, err)
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("Không tìm thấy tập dữ liệu: %v", err)})
 		return
 	}
 
@@ -2386,8 +2409,8 @@ func (a *API) handleCreateDatasetFolder(w http.ResponseWriter, r *http.Request) 
 	}
 
 	folderName := filepath.Base(strings.TrimSpace(req.Name))
-	if folderName == "" || folderName == "." || folderName == "/" {
-		a.fail(w, r, errors.New("tên thư mục không hợp lệ"))
+	if folderName == "" || folderName == "." || folderName == "/" || strings.ContainsAny(folderName, `/\:*"<>|`) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Tên thư mục không hợp lệ"})
 		return
 	}
 
@@ -2398,13 +2421,14 @@ func (a *API) handleCreateDatasetFolder(w http.ResponseWriter, r *http.Request) 
 	targetDir := filepath.Join(mount, subpath, folderName)
 	cleanTarget := filepath.Clean(targetDir)
 	cleanMount := filepath.Clean(mount)
-	if !strings.HasPrefix(cleanTarget, cleanMount) {
-		a.fail(w, r, errors.New("đường dẫn không hợp lệ"))
+	if !strings.HasPrefix(strings.ToLower(cleanTarget), strings.ToLower(cleanMount)) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Đường dẫn không hợp lệ"})
 		return
 	}
 
 	if err := os.MkdirAll(cleanTarget, 0755); err != nil {
-		a.fail(w, r, err)
+		a.log.Error("mkdir failed", "path", cleanTarget, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("Không thể tạo thư mục vật lý (%s): %v", folderName, err)})
 		return
 	}
 

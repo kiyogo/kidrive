@@ -5,7 +5,7 @@ import { Icon } from "@/components/Icon";
 import { Button, Dialog, DropdownStatus, Tappable, TextField, useDeviceClass, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
-import { useInfiniteList, useVirtualWindow } from "@/lib/useInfiniteList";
+import { useInfiniteList } from "@/lib/useInfiniteList";
 
 export interface NetworkShareItem {
   id: string;

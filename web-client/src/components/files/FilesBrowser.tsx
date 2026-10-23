@@ -34,7 +34,7 @@ import { useL10n, type Strings } from "@/lib/l10n";
 import { FileTileIcon, categoryOfNode } from "./FileTileIcon";
 import { useSession } from "@/lib/session";
 import { wsClient } from "@/lib/websocket";
-import { useInfiniteList, useVirtualWindow } from "@/lib/useInfiniteList";
+import { useInfiniteList } from "@/lib/useInfiniteList";
 
 type ViewMode = "grid" | "list";
 
@@ -365,10 +365,11 @@ export function FilesBrowser({
         await api.post(Api.folder, { name: folderName.trim(), parent_id: folderId });
         setCreateFolderOpen(false);
         setFolderName("");
+        toast("Đã tạo thư mục mới thành công!", "success");
         void load();
       }
-    } catch (e) {
-      toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
+    } catch (e: any) {
+      toast(e?.message || "Không thể tạo thư mục mới. Vui lòng thử lại sau!", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -2182,15 +2183,9 @@ function Grid({
   Sentinel?: React.ComponentType;
 }) {
   const kept = useKeptIds();
-  const { startIndex, endIndex, topSpacerHeight, bottomSpacerHeight, isVirtual } = useVirtualWindow({
-    itemCount: nodes.length,
-    itemHeight: isMobile ? 100 : 60,
-  });
-  const visibleNodes = isVirtual ? nodes.slice(startIndex, endIndex) : nodes;
 
   return (
     <div style={{ padding: isMobile ? "10px 10px 120px" : "13px 13px 120px" }}>
-      {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
       <div
         style={{
           display: "grid",
@@ -2198,7 +2193,7 @@ function Grid({
           gap: isMobile ? 10 : 13,
         }}
       >
-        {visibleNodes.map((node) => (
+        {nodes.map((node) => (
           <Tile
             key={node.id}
             node={node}
@@ -2215,7 +2210,6 @@ function Grid({
           />
         ))}
       </div>
-      {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
       {Sentinel && <Sentinel />}
     </div>
   );
@@ -2450,21 +2444,7 @@ function Tile({
               Chỉ đọc
             </span>
           )}
-          {node.id.startsWith("dataset:") && (
-            <span
-              style={{
-                fontSize: 10,
-                padding: "1px 5px",
-                borderRadius: 4,
-                background: "rgba(76, 141, 255, 0.12)",
-                color: "var(--accent)",
-                fontWeight: 600,
-                flexShrink: 0,
-              }}
-            >
-              Dataset
-            </span>
-          )}
+
           {node.starred && (
             <span style={{ color: "#E8935C", flexShrink: 0 }} title={t.starred}>
               <Icon glyph="star-filled" size={13} color="#E8935C" />
@@ -2560,16 +2540,10 @@ function List({
 }) {
   const t = useL10n();
   const kept = useKeptIds();
-  const { startIndex, endIndex, topSpacerHeight, bottomSpacerHeight, isVirtual } = useVirtualWindow({
-    itemCount: nodes.length,
-    itemHeight: 58,
-  });
-  const visibleNodes = isVirtual ? nodes.slice(startIndex, endIndex) : nodes;
 
   return (
     <div style={{ padding: isMobile ? "8px 10px 120px" : "13px 13px 120px" }}>
-      {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
-      {visibleNodes.map((node) => {
+      {nodes.map((node) => {
         const cat = categoryOfNode(node);
         const selected = !isTrash && selection.has(node.id);
         const selecting = !isTrash && selection.size > 0;
@@ -2702,21 +2676,7 @@ function List({
                     Chỉ đọc
                   </span>
                 )}
-                {!isTrash && node.id.startsWith("dataset:") && (
-                  <span
-                    style={{
-                      fontSize: 10,
-                      padding: "1px 5px",
-                      borderRadius: 4,
-                      background: "rgba(76, 141, 255, 0.12)",
-                      color: "var(--accent)",
-                      fontWeight: 600,
-                      flexShrink: 0,
-                    }}
-                  >
-                    Dataset
-                  </span>
-                )}
+
                 {!isTrash && node.starred && (
                   <Icon glyph="star-filled" size={13} color="#E8935C" />
                 )}
@@ -2780,7 +2740,6 @@ function List({
           </div>
         );
       })}
-      {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
       {Sentinel && <Sentinel />}
     </div>
   );

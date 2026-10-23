@@ -604,7 +604,8 @@ func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := os.MkdirAll(targetPath, 0755); err != nil {
-			a.fail(w, r, err)
+			a.log.Error("mkdir failed", "path", targetPath, "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("Không thể tạo thư mục vật lý (%s): %v", folderName, err)})
 			return
 		}
 		relPath := filepath.ToSlash(filepath.Join(cleanedSub, folderName))

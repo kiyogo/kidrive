@@ -175,6 +175,7 @@ export function useInfiniteList<T>({
       sentinelElementRef.current = node;
       if (!node) return;
 
+      const mainContainer = document.getElementById("main-scroll-container");
       const observer = new IntersectionObserver(
         (entries) => {
           const entry = entries[0];
@@ -183,7 +184,8 @@ export function useInfiniteList<T>({
           }
         },
         {
-          rootMargin: "350px 0px",
+          root: mainContainer || null,
+          rootMargin: "600px 0px",
           threshold: 0,
         },
       );
@@ -201,42 +203,50 @@ export function useInfiniteList<T>({
   useEffect(() => {
     if (!enabled) return;
 
-    let target: HTMLElement | Window | null = null;
+    const targets: (HTMLElement | Window)[] = [window];
+    const mainContainer = document.getElementById("main-scroll-container");
+    if (mainContainer) {
+      targets.push(mainContainer);
+    }
     const sentinel = sentinelElementRef.current;
     if (sentinel) {
       let parent = sentinel.parentElement;
       while (parent) {
         const overflowY = window.getComputedStyle(parent).overflowY;
         if (overflowY === "auto" || overflowY === "scroll") {
-          target = parent;
+          if (!targets.includes(parent)) {
+            targets.push(parent);
+          }
           break;
         }
         parent = parent.parentElement;
       }
     }
-    if (!target) {
-      target = window;
-    }
 
-    const handleScroll = () => {
+    const handleScroll = (e: Event) => {
       if (isFetchingRef.current || !hasMoreRef.current) return;
+      const target = e.currentTarget;
       if (target === window) {
         const scrollHeight = document.documentElement.scrollHeight;
         const scrollTop = window.scrollY || document.documentElement.scrollTop;
         const clientHeight = window.innerHeight;
-        if (scrollHeight - scrollTop - clientHeight < 450) {
+        if (scrollHeight - scrollTop - clientHeight < 600) {
           loadMore();
         }
       } else if (target instanceof HTMLElement) {
-        if (target.scrollHeight - target.scrollTop - target.clientHeight < 450) {
+        if (target.scrollHeight - target.scrollTop - target.clientHeight < 600) {
           loadMore();
         }
       }
     };
 
-    target.addEventListener("scroll", handleScroll, { passive: true });
+    for (const t of targets) {
+      t.addEventListener("scroll", handleScroll, { passive: true });
+    }
     return () => {
-      target?.removeEventListener("scroll", handleScroll);
+      for (const t of targets) {
+        t.removeEventListener("scroll", handleScroll);
+      }
     };
   }, [enabled, loadMore]);
 
