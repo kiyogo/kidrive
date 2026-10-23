@@ -57,7 +57,7 @@ DATA_DIR="/var/lib/localdrive/data"
 BIN_TARGET="/usr/local/bin/localdrive"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
-mkdir -p "$INSTALL_DIR" "$DATA_DIR"
+mkdir -p "$INSTALL_DIR" "$DATA_DIR" "$DATA_DIR/db" "$DATA_DIR/library"
 mkdir -p "/usr/local/bin"
 
 echo -e "${BLUE}[2/5] Đang nạp tệp thực thi LocalDrive...${NC}"
@@ -114,10 +114,13 @@ if [ ! -f "$ENV_FILE" ]; then
   echo -e "${BLUE}[3/5] Khởi tạo cấu hình máy chủ...${NC}"
   cat << 'EOF' > "$ENV_FILE"
 # LocalDrive Environment Configuration
+LOCALDRIVE_HOME=/var/lib/localdrive
+DATA_DIR=/var/lib/localdrive/data
+DB_PATH=/var/lib/localdrive/data/db/localdrive.sqlite
+LOCALDRIVE_DATA_DIR=/var/lib/localdrive/data
+LOCALDRIVE_DATABASE_PATH=/var/lib/localdrive/data/db/localdrive.sqlite
 LOCALDRIVE_PORT=9683
 LOCALDRIVE_WEB_PORT=5437
-LOCALDRIVE_DATA_DIR=/var/lib/localdrive/data
-LOCALDRIVE_DATABASE_PATH=/var/lib/localdrive/localdrive.db
 EOF
 fi
 
@@ -135,8 +138,13 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=${INSTALL_DIR}
+Environment="LOCALDRIVE_HOME=${INSTALL_DIR}"
+Environment="DATA_DIR=${DATA_DIR}"
+Environment="DB_PATH=${DATA_DIR}/db/localdrive.sqlite"
+Environment="LOCALDRIVE_PORT=9683"
+Environment="LOCALDRIVE_WEB_PORT=5437"
 EnvironmentFile=-${ENV_FILE}
-ExecStart=${BIN_TARGET} serve
+ExecStart=${BIN_TARGET} serve --dir ${INSTALL_DIR}
 Restart=always
 RestartSec=5s
 LimitNOFILE=65536

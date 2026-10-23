@@ -53,6 +53,13 @@ func FindInstall(args []string) (Install, error) {
 		}
 	}
 	if dir == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			if _, statErr := os.Stat(filepath.Join(cwd, ".env")); statErr == nil {
+				dir = cwd
+			}
+		}
+	}
+	if dir == "" {
 		dir = DefaultInstallDir()
 	}
 

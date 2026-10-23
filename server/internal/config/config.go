@@ -131,8 +131,15 @@ func Load() (*Config, error) {
 	c.WebAddr = webAddr
 	c.LogLevel = l.str("LOG_LEVEL", "info")
 
-	dataDir := l.str("DATA_DIR", defaultDataDir())
-	c.DBPath = l.path("DB_PATH", filepath.Join(dataDir, "db", "localdrive.sqlite"), true)
+	dataDir := l.str("DATA_DIR", "")
+	if dataDir == "" {
+		dataDir = l.str("LOCALDRIVE_DATA_DIR", defaultDataDir())
+	}
+	dbPath := l.str("DB_PATH", "")
+	if dbPath == "" {
+		dbPath = l.str("LOCALDRIVE_DATABASE_PATH", filepath.Join(dataDir, "db", "localdrive.sqlite"))
+	}
+	c.DBPath = l.path("DB_PATH", dbPath, true)
 	c.LibraryPath = l.path("LIBRARY_PATH", filepath.Join(dataDir, "library"), true)
 	c.ExternalMountsPath = l.path("EXTERNAL_MOUNTS_PATH", filepath.Join(dataDir, "external"), true)
 
