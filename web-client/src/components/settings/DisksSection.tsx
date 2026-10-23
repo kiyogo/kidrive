@@ -2744,7 +2744,7 @@ export function DisksSection({
             <div style={{ padding: "32px 16px", textAlign: "center", color: "var(--fg-secondary)" }}>
               <div style={{ marginBottom: 12, fontSize: 14 }}>Đang quét các ổ đĩa và cấu hình khả dụng trên máy chủ...</div>
             </div>
-          ) : !importData?.can_import || (importData?.available_disks?.length || 0) === 0 ? (
+          ) : !importData?.can_import || (!importData?.suggested_pool && (importData?.available_disks?.length || 0) === 0) ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "8px 0" }}>
               <div
                 style={{
@@ -2796,37 +2796,39 @@ export function DisksSection({
 
               {/* Thông tin cấu hình chi tiết */}
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg-secondary)", marginBottom: 8 }}>
-                    Ổ đĩa tìm thấy ({importData.available_disks.length})
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {importData.available_disks.map((d: any) => (
-                      <div
-                        key={d.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          padding: "10px 14px",
-                          borderRadius: 10,
-                          border: "1px solid var(--stroke)",
-                          background: "var(--bg-elevated)",
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <Icon glyph="drive" size={18} color="var(--accent)" />
-                          <span style={{ fontSize: 13.5, fontWeight: 500, color: "var(--fg-primary)" }}>
-                            {d.label || d.model || d.name}
+                {(importData?.available_disks?.length || 0) > 0 && (
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg-secondary)", marginBottom: 8 }}>
+                      Ổ đĩa tìm thấy ({importData.available_disks.length})
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {importData.available_disks.map((d: any) => (
+                        <div
+                          key={d.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "10px 14px",
+                            borderRadius: 10,
+                            border: "1px solid var(--stroke)",
+                            background: "var(--bg-elevated)",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <Icon glyph="drive" size={18} color="var(--accent)" />
+                            <span style={{ fontSize: 13.5, fontWeight: 500, color: "var(--fg-primary)" }}>
+                              {d.label || d.model || d.name}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--fg-secondary)" }}>
+                            {bytes(d.size_bytes)}
                           </span>
                         </div>
-                        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--fg-secondary)" }}>
-                          {bytes(d.size_bytes)}
-                        </span>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div
                   style={{
@@ -2836,11 +2838,20 @@ export function DisksSection({
                   }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: 13, color: "var(--fg-secondary)" }}>Cơ chế gộp:</span>
+                    <span style={{ fontSize: 13, color: "var(--fg-secondary)" }}>Hệ thống tệp:</span>
                     <span style={{ fontSize: 13, fontWeight: 600, color: "var(--accent)" }}>
-                      Merge Storage (MergerFS)
+                      {importData.suggested_pool?.layout === "ZFS" ? "ZFS (TrueNAS)" : "Merge Storage (MergerFS)"}
                     </span>
                   </div>
+
+                  {Number(importData.suggested_pool?.dataset_count || 0) > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: 13, color: "var(--fg-secondary)" }}>Tập dữ liệu nhận diện:</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#16a34a" }}>
+                        {importData.suggested_pool.dataset_count} tập dữ liệu sẵn sàng kết nối
+                      </span>
+                    </div>
+                  )}
 
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span style={{ fontSize: 13, color: "var(--fg-secondary)" }}>Tổng dung lượng:</span>
