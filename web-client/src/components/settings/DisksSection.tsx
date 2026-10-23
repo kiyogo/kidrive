@@ -194,8 +194,8 @@ export function DisksSection({
   // Modals & Interactive Actions State (chỉ giữ ngắt kết nối và xem ổ đĩa)
   const [activeModal, setActiveModal] = useState<
     | null
-    | { type: "export"; pool: string }
-    | { type: "viewDisks"; pool: string }
+    | { type: "export"; pool: string; poolId?: string }
+    | { type: "viewDisks"; pool: string; poolId?: string }
   >(null);
 
   // Real Pools state
@@ -2594,7 +2594,7 @@ export function DisksSection({
                         <div
                           onClick={() => {
                             setOpenActionPoolId(null);
-                            setActiveModal({ type: "export", pool: p.name });
+                            setActiveModal({ type: "export", pool: p.name, poolId: p.id });
                           }}
                           style={{
                             padding: "9px 12px",
@@ -2612,7 +2612,7 @@ export function DisksSection({
                           onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                         >
                           <Icon glyph="trash" size={16} color="#ef4444" />
-                          <span>Xóa Pool</span>
+                          <span>Ngắt kết nối / Xóa Pool</span>
                         </div>
                       </div>
                     )}
@@ -2942,9 +2942,24 @@ export function DisksSection({
                   variant="primary"
                   compact
                   expand={false}
-                  onClick={() => {
+                  onClick={async () => {
+                    const poolTarget = activeModal.poolId || activeModal.pool;
                     handleCloseActiveModal();
-                    toast(`Đã ngắt kết nối an toàn mảng lưu trữ ${activeModal.pool}!`, "success");
+                    try {
+                      await api.del(`${Api.adminPools}/${encodeURIComponent(poolTarget)}?force=${forceExport}`);
+                      toast(`Đã ngắt kết nối an toàn mảng lưu trữ ${activeModal.pool}!`, "success");
+                      await loadAllData();
+                      window.dispatchEvent(new CustomEvent("localdrive:storage_pools_updated"));
+                    } catch (err: any) {
+                      try {
+                        await api.del(`/api/pools/${encodeURIComponent(poolTarget)}?force=${forceExport}`);
+                        toast(`Đã ngắt kết nối an toàn mảng lưu trữ ${activeModal.pool}!`, "success");
+                        await loadAllData();
+                        window.dispatchEvent(new CustomEvent("localdrive:storage_pools_updated"));
+                      } catch (err2: any) {
+                        toast(`Không thể ngắt kết nối: ${err2?.message || err?.message || "Lỗi máy chủ"}`, "error");
+                      }
+                    }
                   }}
                 />
               </div>

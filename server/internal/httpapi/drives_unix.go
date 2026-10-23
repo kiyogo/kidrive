@@ -149,13 +149,28 @@ func detectHostDrives(registered map[string]struct{}) []driveDTO {
 						}
 					}
 
+					// Check if this device is the OS / system drive
+					isOSDisk := false
+					if dev.MountPoint == "/" || strings.HasPrefix(dev.MountPoint, "/boot") || strings.HasPrefix(dev.MountPoint, "/etc") {
+						isOSDisk = true
+					}
+					for _, child := range dev.Children {
+						if child.MountPoint == "/" || strings.HasPrefix(child.MountPoint, "/boot") || strings.HasPrefix(child.MountPoint, "/etc") {
+							isOSDisk = true
+							break
+						}
+					}
+
 					// If top device is not mounted, check children (partitions)
 					if mountPt == "" && len(dev.Children) > 0 {
 						for _, child := range dev.Children {
 							if child.MountPoint != "" {
-								mountPt = child.MountPoint
-								fsType = child.FsType
-								total, free, used := getMountStats(mountPt)
+								// Do NOT set mountPt to system partitions
+								if !isOSDisk && !strings.HasPrefix(child.MountPoint, "/boot") && child.MountPoint != "/" {
+									mountPt = child.MountPoint
+									fsType = child.FsType
+								}
+								total, free, used := getMountStats(child.MountPoint)
 								if total > 0 {
 									freeBytes += free
 									usedBytes += used
@@ -175,6 +190,9 @@ func detectHostDrives(registered map[string]struct{}) []driveDTO {
 					}
 
 					_, inUse := registered[devPath]
+					if isOSDisk {
+						inUse = true
+					}
 					if !inUse && mountPt != "" {
 						_, inUse = registered[mountPt]
 					}
@@ -199,7 +217,7 @@ func detectHostDrives(registered map[string]struct{}) []driveDTO {
 						BadSectors:        0,
 						SmartStatus:       "PASSED",
 						Mounted:           mountPt != "",
-						Usable:            true,
+						Usable:            !isOSDisk,
 						InUse:             inUse,
 						ReadOnly:          false,
 					})
@@ -231,8 +249,11 @@ func detectHostDrives(registered map[string]struct{}) []driveDTO {
 			if !strings.HasPrefix(devPath, "/dev/") && !strings.HasPrefix(fsType, "zfs") && !strings.HasPrefix(fsType, "btrfs") {
 				continue
 			}
-			// Skip special virtual fs
+			// Skip special virtual fs or system root/boot paths
 			if fsType == "devtmpfs" || fsType == "tmpfs" || fsType == "proc" || fsType == "sysfs" || fsType == "squashfs" {
+				continue
+			}
+			if mountPt == "/" || strings.HasPrefix(mountPt, "/boot") || strings.HasPrefix(mountPt, "/etc") || strings.HasPrefix(mountPt, "/sys") || strings.HasPrefix(mountPt, "/proc") || strings.HasPrefix(mountPt, "/dev") || strings.HasPrefix(mountPt, "/run") {
 				continue
 			}
 			if seenIDs[devPath] || seenIDs[mountPt] {

@@ -160,6 +160,15 @@ rm -f "$TMP_BIN"
 
 echo -e "${GREEN}✓ Đã cập nhật tệp thực thi vào $BIN_TARGET thành công!${NC}"
 
+# Hỗ trợ đọc và kết nối mảng lưu trữ TrueNAS / OpenZFS
+if ! command -v zpool >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    echo -e "${BLUE}Kiểm tra và cài đặt gói hỗ trợ ổ đĩa TrueNAS / ZFS (zfsutils-linux)...${NC}"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq && apt-get install -y -qq zfsutils-linux 2>/dev/null || true
+  fi
+fi
+
 # 7. Khởi tạo cấu hình ban đầu nếu chưa có (Tuyệt đối không ghi đè cấu hình cũ)
 ENV_FILE="$INSTALL_DIR/.env"
 if [ ! -f "$ENV_FILE" ]; then

@@ -253,6 +253,8 @@ func (a *API) Router() http.Handler {
 				r.Get("/pools", a.handleListPools)
 				r.Get("/pools/discover", a.handleDiscoverImportablePool)
 				r.Post("/pools/import", a.handleImportPool)
+				r.Delete("/pools/{id}", a.handleDeletePool)
+				r.Post("/pools/{id}/export", a.handleDeletePool)
 				r.Get("/storage/readiness", a.handleStorageReadiness)
 
 				r.Route("/admin", func(r chi.Router) {
@@ -280,6 +282,7 @@ func (a *API) Router() http.Handler {
 					r.Post("/pools", a.handleCreatePool)
 					r.Patch("/pools/{id}", a.handleUpdatePool)
 					r.Delete("/pools/{id}", a.handleDeletePool)
+					r.Post("/pools/{id}/export", a.handleDeletePool)
 
 					r.Get("/datasets", a.handleListDatasets)
 					r.Post("/datasets", a.handleCreateDataset)

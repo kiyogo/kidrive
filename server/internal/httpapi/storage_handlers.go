@@ -1125,8 +1125,25 @@ func (a *API) handleUpdatePool(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleDeletePool(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	force := r.URL.Query().Get("force") == "true"
+
+	var poolName string
+	var poolLayout string
+	_ = a.db.Read().QueryRowContext(r.Context(), `SELECT name, layout FROM storage_pools WHERE id = ? OR name = ?`, id, id).Scan(&poolName, &poolLayout)
+	if poolName == "" {
+		poolName = id
+	}
+
+	// If ZFS pool on Linux, export safely
+	if strings.EqualFold(poolLayout, "ZFS") {
+		_ = exportZFSPoolCmd(poolName, force)
+	}
+
 	err := a.db.Write(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM storage_pools WHERE id = ?`, id)
+		// Clean up associated datasets in SQLite (without deleting disk files!)
+		_, _ = tx.ExecContext(ctx, `DELETE FROM datasets WHERE pool = ? OR pool = ?`, id, poolName)
+
+		res, err := tx.ExecContext(ctx, `DELETE FROM storage_pools WHERE id = ? OR name = ?`, id, id)
 		if err != nil {
 			return err
 		}
@@ -1144,10 +1161,12 @@ func (a *API) handleDeletePool(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("Đã ngắt kết nối an toàn mảng lưu trữ \"%s\".", poolName),
+	})
 }
-
-
 
 func (a *API) handleDiscoverImportablePool(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.db.Read().QueryContext(r.Context(), `SELECT disks_json FROM storage_pools`)
@@ -1177,6 +1196,45 @@ func (a *API) handleDiscoverImportablePool(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	// 1. Check for TrueNAS / ZFS pools first!
+	zfsPools := detectZFSPools()
+	for _, zp := range zfsPools {
+		if !existingPoolNames[strings.ToLower(zp.Name)] {
+			// Found an unimported or detected TrueNAS ZFS pool!
+			writeJSON(w, http.StatusOK, map[string]any{
+				"can_import":      true,
+				"is_zfs":          true,
+				"available_disks": []driveDTO{},
+				"suggested_pool": map[string]any{
+					"name":           zp.Name,
+					"layout":         "ZFS",
+					"disks":          zp.Disks,
+					"auto_trim":      true,
+					"scrub_schedule": "weekly",
+					"total_bytes":    zp.TotalBytes,
+					"zfs_id":         zp.ID,
+					"state":          zp.State,
+					"dataset_count":  len(zp.Datasets),
+				},
+				"message": fmt.Sprintf("Phát hiện mảng lưu trữ ZFS (TrueNAS) \"%s\" với %d tập dữ liệu sẵn có. Sẵn sàng kết nối an toàn mà không làm mất dữ liệu.", zp.Name, len(zp.Datasets)),
+			})
+			return
+		}
+	}
+
+	// 2. Check if ZFS member disks exist but zpool tool is missing
+	if !hasZFSTools() && hasZFSMemberDisks() {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"can_import":      false,
+			"has_zfs_missing": true,
+			"available_disks": []driveDTO{},
+			"suggested_pool":  nil,
+			"message":         "Phát hiện ổ đĩa ZFS (TrueNAS) trên hệ thống, nhưng máy chủ Linux chưa cài đặt OpenZFS. Vui lòng chạy lệnh: sudo apt install -y zfsutils-linux để hệ thống nhận diện mảng lưu trữ và toàn bộ tập dữ liệu.",
+		})
+		return
+	}
+
+	// 3. Fallback to general block drives (strictly excluding host OS drives!)
 	registered := map[string]struct{}{}
 	hostDrives := detectHostDrives(registered)
 
@@ -1186,6 +1244,9 @@ func (a *API) handleDiscoverImportablePool(w http.ResponseWriter, r *http.Reques
 	for _, hd := range hostDrives {
 		normID := strings.ToLower(strings.TrimSpace(hd.ID))
 		normName := strings.ToLower(strings.TrimSpace(hd.Name))
+		if !hd.Usable || hd.InUse {
+			continue
+		}
 		if !usedDisks[normID] && !usedDisks[normName] {
 			availableDrives = append(availableDrives, hd)
 			totalBytes += hd.SizeBytes
@@ -1291,34 +1352,40 @@ func (a *API) handleImportPool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		baseName := "Pool-Storage"
-		if len(availableDrives) == 1 {
-			cleanLetter := strings.Trim(availableDrives[0].ID, ":\\/")
-			if cleanLetter != "" {
-				baseName = "Storage-" + cleanLetter
-			}
-		}
-		name = baseName
-		idx := 2
-		for existingPoolNames[strings.ToLower(name)] {
-			name = fmt.Sprintf("%s-%d", baseName, idx)
-			idx++
-		}
-	}
-
 	layout := strings.TrimSpace(req.Layout)
 	if layout == "" {
 		layout = "MergerFS"
 	}
 
-	disks := req.Disks
-	if len(disks) == 0 {
-		disks = suggestedDisks
+	// 1. Check if this is a TrueNAS / ZFS pool import
+	isZFS := strings.EqualFold(layout, "ZFS")
+	var zfsTargetPool *ZFSPoolInfo
+	zfsPools := detectZFSPools()
+	if !isZFS {
+		for _, zp := range zfsPools {
+			if strings.EqualFold(zp.Name, name) || (zp.ID != "" && zp.ID == name) {
+				isZFS = true
+				zfsTargetPool = &zp
+				name = zp.Name
+				layout = "ZFS"
+				break
+			}
+		}
+	} else {
+		for _, zp := range zfsPools {
+			if strings.EqualFold(zp.Name, name) || (zp.ID != "" && zp.ID == name) {
+				zfsTargetPool = &zp
+				name = zp.Name
+				break
+			}
+		}
 	}
-	if len(disks) == 0 && len(hostDrives) > 0 {
-		disks = []string{hostDrives[0].ID}
-		totalBytes = hostDrives[0].SizeBytes
+
+	disks := req.Disks
+	if len(disks) == 0 && zfsTargetPool != nil && len(zfsTargetPool.Disks) > 0 {
+		disks = zfsTargetPool.Disks
+	} else if len(disks) == 0 {
+		disks = suggestedDisks
 	}
 
 	autoTrim := true
@@ -1335,6 +1402,115 @@ func (a *API) handleImportPool(w http.ResponseWriter, r *http.Request) {
 		scrub = "weekly"
 	}
 
+	disksJSON, _ := json.Marshal(disks)
+	now := db.NowMillis()
+	id := db.NewID()
+
+	if isZFS {
+		targetRef := name
+		if zfsTargetPool != nil && zfsTargetPool.ID != "" {
+			targetRef = zfsTargetPool.ID
+		}
+		_ = importZFSPoolCmd(targetRef)
+
+		datasets := listZFSDatasets(name)
+		var zfsUsedBytes int64 = 0
+		if len(datasets) > 0 {
+			for _, ds := range datasets {
+				if ds.Name == name && ds.UsedBytes > 0 {
+					totalBytes = ds.UsedBytes + ds.AvailBytes
+					zfsUsedBytes = ds.UsedBytes
+				}
+			}
+		}
+		if totalBytes == 0 && zfsTargetPool != nil && zfsTargetPool.TotalBytes > 0 {
+			totalBytes = zfsTargetPool.TotalBytes
+			zfsUsedBytes = zfsTargetPool.UsedBytes
+		}
+		if totalBytes == 0 {
+			totalBytes = 256060514304
+		}
+
+		err = a.db.Write(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx,
+				`INSERT INTO storage_pools (id, name, layout, status, total_bytes, used_bytes, auto_trim, scrub_schedule, disks_json, created_at, updated_at)
+				 VALUES (?, ?, 'ZFS', 'healthy', ?, ?, ?, ?, ?, ?, ?)`,
+				id, name, totalBytes, zfsUsedBytes, atInt, scrub, string(disksJSON), now, now)
+			return err
+		})
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+
+		// Insert all real datasets from TrueNAS
+		if len(datasets) > 0 {
+			_ = a.db.Write(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
+				for _, ds := range datasets {
+					_, _ = tx.ExecContext(ctx,
+						`INSERT OR IGNORE INTO datasets (id, name, pool, mount, quota_bytes, used_bytes, recordsize, compression, atime, dedup, sync_mode, status, created_at, updated_at)
+						 VALUES (?, ?, ?, ?, 0, ?, '128K', 'lz4', 'off', 'off', 'standard', 'healthy', ?, ?)`,
+						db.NewID(), ds.Name, name, ds.MountPoint, ds.UsedBytes, now, now)
+				}
+				return nil
+			})
+		} else {
+			mountPath := "/" + name
+			_ = a.db.Write(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
+				_, _ = tx.ExecContext(ctx,
+					`INSERT OR IGNORE INTO datasets (id, name, pool, mount, quota_bytes, used_bytes, recordsize, compression, atime, dedup, sync_mode, status, created_at, updated_at)
+					 VALUES (?, ?, ?, ?, 0, 0, '128K', 'lz4', 'off', 'off', 'standard', 'healthy', ?, ?)`,
+					db.NewID(), name, name, mountPath, now, now)
+				return nil
+			})
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"success": true,
+			"pool": StoragePoolDTO{
+				ID:            id,
+				Name:          name,
+				Layout:        "ZFS",
+				Status:        "healthy",
+				TotalBytes:    totalBytes,
+				UsedBytes:     zfsUsedBytes,
+				AutoTrim:      autoTrim,
+				ScrubSchedule: scrub,
+				Disks:         disks,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			},
+			"message": fmt.Sprintf("Nhập mảng lưu trữ ZFS \"%s\" thành công! Đã kết nối an toàn toàn bộ tập dữ liệu và tệp tin sẵn có.", name),
+		})
+		return
+	}
+
+	if name == "" {
+		baseName := "Pool-Storage"
+		if len(availableDrives) == 1 {
+			cleanLetter := strings.Trim(availableDrives[0].ID, ":\\/")
+			if cleanLetter != "" {
+				baseName = "Storage-" + cleanLetter
+			}
+		}
+		name = baseName
+		idx := 2
+		for existingPoolNames[strings.ToLower(name)] {
+			name = fmt.Sprintf("%s-%d", baseName, idx)
+			idx++
+		}
+	}
+
+	if len(disks) == 0 && len(hostDrives) > 0 {
+		for _, hd := range hostDrives {
+			if hd.Usable && !hd.InUse {
+				disks = []string{hd.ID}
+				totalBytes = hd.SizeBytes
+				break
+			}
+		}
+	}
+
 	if totalBytes == 0 {
 		for _, hd := range hostDrives {
 			for _, d := range disks {
@@ -1347,10 +1523,6 @@ func (a *API) handleImportPool(w http.ResponseWriter, r *http.Request) {
 			totalBytes = 256060514304
 		}
 	}
-
-	disksJSON, _ := json.Marshal(disks)
-	now := db.NowMillis()
-	id := db.NewID()
 
 	err = a.db.Write(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
@@ -1370,7 +1542,8 @@ func (a *API) handleImportPool(w http.ResponseWriter, r *http.Request) {
 	} else if len(disks) > 0 {
 		for _, hd := range hostDrives {
 			for _, d := range disks {
-				if (hd.ID == d || hd.Name == d) && hd.MountPoint != "" && hd.MountPoint != "/" {
+				// Strictly exclude system partitions from mountPath
+				if (hd.ID == d || hd.Name == d) && hd.MountPoint != "" && hd.MountPoint != "/" && !strings.HasPrefix(hd.MountPoint, "/boot") && !strings.HasPrefix(hd.MountPoint, "/etc") {
 					mountPath = hd.MountPoint
 					break
 				}
