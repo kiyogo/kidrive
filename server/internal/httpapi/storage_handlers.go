@@ -1230,7 +1230,7 @@ func (a *API) handleDiscoverImportablePool(w http.ResponseWriter, r *http.Reques
 			"scrub_schedule": "weekly",
 			"total_bytes":    totalBytes,
 		},
-		"message": fmt.Sprintf("Phát hiện %d ổ đĩa vật lý khả dụng. Đã tự động cấu hình tối ưu sẵn sàng nhập.", len(availableDrives)),
+		"message": fmt.Sprintf("Phát hiện %d ổ đĩa vật lý khả dụng. Đã cấu hình tối ưu sẵn sàng nhập.", len(availableDrives)),
 	})
 }
 
