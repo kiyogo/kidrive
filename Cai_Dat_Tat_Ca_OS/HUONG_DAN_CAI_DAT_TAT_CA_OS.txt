@@ -8,36 +8,35 @@ hướng dẫn triển khai cho LocalDrive trên tất cả các nền tảng:
 --------------------------------------------------------------------------------
 1. WINDOWS (Thư mục: [1_Windows])
 --------------------------------------------------------------------------------
-- LocalDrive-Setup.exe           : Bộ cài đặt chính thức Inno Setup chuẩn Windows.
+- LocalDrive-win-x64-Setup.exe   : Bộ cài đặt chính thức Inno Setup chuẩn Windows x64.
                                    (Hỗ trợ chọn ngôn ngữ English, Tiếng Việt, العربية;
-                                   tự động tạo shortcut Desktop, menu Start, tuỳ chọn
+                                   tạo shortcut Desktop, menu Start, tuỳ chọn
                                    khởi động cùng Windows, đăng ký gỡ cài đặt sạch sẽ).
+- localdrive-win-x64.exe         : Tệp thực thi nhị phân máy chủ độc lập cho Windows x64.
 - Huong_Dan_Cai_Dat_Windows.txt  : Hướng dẫn chi tiết cài đặt và sử dụng trên Windows.
-- LocalDrive-Windows-Installer.zip: Gói cài đặt portable nén.
-- localdrive.exe                 : Tệp thực thi nhị phân chính thức cho Windows.
 
 --------------------------------------------------------------------------------
 2. LINUX (Thư mục: [2_Linux])
 --------------------------------------------------------------------------------
-- install.sh                     : Script cài đặt 1 lệnh tự động 100% (Ubuntu,
+- install.sh                     : Script cài đặt 1 lệnh chuẩn hóa (Ubuntu,
                                    Debian, CentOS, Rocky Linux, Alpine, Raspberry Pi).
-- localdrive-linux-amd64         : Bản thực thi cho PC / Server / VPS chip Intel & AMD.
+- localdrive-linux-x64           : Bản thực thi cho PC / Server / VPS chip Intel & AMD 64-bit.
 - localdrive-linux-arm64         : Bản thực thi cho Raspberry Pi 4/5, Orange Pi, VPS ARM.
-- LocalDrive-linux-package.tar.gz: Gói lưu trữ nén tar.gz đầy đủ cho Linux.
+- localdrive-linux.tar.gz        : Gói lưu trữ nén tar.gz đầy đủ cho Linux.
 - README_LINUX.md                : Tài liệu hướng dẫn cài đặt và lệnh quản lý systemd.
 
 --------------------------------------------------------------------------------
 3. MACOS (Thư mục: [3_macOS])
 --------------------------------------------------------------------------------
-- localdrive-darwin-arm64        : Bản thực thi cho máy Mac Apple Silicon (M1/M2/M3/M4).
-- localdrive-darwin-amd64        : Bản thực thi cho máy Mac chạy chip Intel.
+- localdrive-macos-arm64         : Bản thực thi cho máy Mac Apple Silicon (M1/M2/M3/M4).
+- localdrive-macos-x64           : Bản thực thi cho máy Mac chạy chip Intel.
 - HUONG_DAN_MACOS.txt            : Hướng dẫn cấp quyền và chạy ngầm bằng launchd.
 
 --------------------------------------------------------------------------------
 4. ANDROID (Thư mục: [4_Android])
 --------------------------------------------------------------------------------
-- LocalDrive.apk                 : Ứng dụng di động cài trực tiếp cho điện thoại & máy tính
-                                   bảng Android (sao lưu ảnh tự động, đồng bộ NAS).
+- LocalDrive-android.apk         : Ứng dụng di động cài trực tiếp cho điện thoại & máy tính
+                                   bảng Android (sao lưu ảnh, đồng bộ NAS).
 - HUONG_DAN_ANDROID.txt          : Hướng dẫn cài đặt và kết nối vào máy chủ qua LAN/WAN.
 
 --------------------------------------------------------------------------------
