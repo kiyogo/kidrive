@@ -1,3 +1,4 @@
+import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:flutter/material.dart';
 
 import '../constants/breakpoints.dart';
@@ -7,6 +8,7 @@ import '../constants/ld_radii.dart';
 import '../theme/ld_theme.dart';
 import 'ld_icons.dart';
 import 'ld_tappable.dart';
+import 'ld_window_bar.dart';
 
 /// The desktop page shell. Not the mobile scaffold with more padding: a
 /// single slim top bar carries the title, the actions, and a search field
@@ -113,6 +115,8 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final showWindowButtons = LdWindowBar.isVisible;
+
     return Container(
       height: 64,
       decoration: BoxDecoration(
@@ -121,50 +125,77 @@ class _TopBar extends StatelessWidget {
           bottom: BorderSide(color: context.surfaces.strokeOutline),
         ),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 13),
-      child: Row(
+      child: Stack(
         children: <Widget>[
-          Expanded(
-            flex: 3,
-            child: titleWidget ??
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    if (title != null)
-                      Text(
-                        title!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    if (subtitle != null)
-                      Text(
-                        subtitle!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                  ],
-                ),
-          ),
-          if (search != null) ...<Widget>[
-            const SizedBox(width: 24),
-            // search is always reachable on desktop, never a separate screen
-            Expanded(flex: 2, child: search!),
-          ],
-          if (actions.isNotEmpty) ...<Widget>[
-            const SizedBox(width: 20),
-            Row(
-              mainAxisSize: MainAxisSize.min,
+          Padding(
+            padding: EdgeInsets.only(
+              left: 13,
+              right: showWindowButtons ? 142 : 13,
+            ),
+            child: Row(
               children: <Widget>[
-                for (var i = 0; i < actions.length; i++) ...<Widget>[
-                  if (i > 0) const SizedBox(width: 8),
-                  actions[i],
+                Expanded(
+                  flex: 3,
+                  child: MoveWindow(
+                    child: Container(
+                      color: Colors.transparent,
+                      alignment: Alignment.centerLeft,
+                      child: titleWidget ??
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              if (title != null)
+                                Text(
+                                  title!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.titleLarge,
+                                ),
+                              if (subtitle != null)
+                                Text(
+                                  subtitle!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                            ],
+                          ),
+                    ),
+                  ),
+                ),
+                if (search != null) ...<Widget>[
+                  const SizedBox(width: 16),
+                  // search is always reachable on desktop, never a separate screen
+                  Flexible(
+                    flex: 2,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 320),
+                      child: search!,
+                    ),
+                  ),
+                ],
+                if (actions.isNotEmpty) ...<Widget>[
+                  const SizedBox(width: 20),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      for (var i = 0; i < actions.length; i++) ...<Widget>[
+                        if (i > 0) const SizedBox(width: 8),
+                        actions[i],
+                      ],
+                    ],
+                  ),
                 ],
               ],
             ),
-          ],
+          ),
+          if (showWindowButtons)
+            const Positioned(
+              top: 0,
+              right: 0,
+              child: LdWindowButtons(),
+            ),
         ],
       ),
     );

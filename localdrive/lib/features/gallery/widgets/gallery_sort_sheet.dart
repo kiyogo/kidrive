@@ -7,8 +7,35 @@ import '../providers/gallery_providers.dart';
 /// headings meaningless, and a sheet that let you pick both independently
 /// would let you pick a combination that cannot be drawn. Here the grouping
 /// options simply go quiet when the chosen order is not a timeline.
-Future<void> showGallerySortSheet(BuildContext context, WidgetRef ref) {
+/// How the gallery is ordered and grouped, in one sheet.
+Future<void> showGallerySortSheet(BuildContext context, WidgetRef ref, {Offset? anchor}) {
   final l10n = L10n.of(context);
+  final sort = ref.read(gallerySortProvider);
+  if (isPointerPlatform || LdDeviceScope.of(context).isDesktop) {
+    return LdContextMenu.show(
+      context,
+      title: l10n.gallerySortTitle,
+      anchor: anchor,
+      actions: [
+        for (final option in GallerySort.values)
+          LdMenuAction(
+            id: option.name,
+            label: _SortBody._sortLabel(l10n, option),
+            glyph: sort.by == option
+                ? (sort.descending ? LdGlyph.arrowDown : LdGlyph.arrowUp)
+                : LdGlyph.check,
+          ),
+      ],
+    ).then((choice) {
+      if (choice == null) return;
+      for (final option in GallerySort.values) {
+        if (option.name == choice) {
+          ref.read(gallerySortProvider.notifier).set(option);
+          break;
+        }
+      }
+    });
+  }
   return LdBottomSheet.show<void>(
     context,
     title: l10n.gallerySortTitle,

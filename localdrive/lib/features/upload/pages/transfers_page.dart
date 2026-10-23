@@ -166,6 +166,9 @@ class _TransferRow extends StatelessWidget {
   String _statusLine(BuildContext context) {
     final l10n = L10n.of(context);
     if (transfer.status == TransferStatus.failed) {
+      if (transfer.failureReason == FailureReason.quota) {
+        return 'Dung lượng lưu trữ đã đầy, không thể tải tệp lên';
+      }
       return transfer.failureMessage.isEmpty
           ? l10n.transferFailed
           : transfer.failureMessage;

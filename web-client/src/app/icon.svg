@@ -1,8 +1,29 @@
-<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" fill="none">
-  <rect width="64" height="64" rx="14" fill="#141414"/>
-  <path d="M12 15 L25 15 L29.5 20 L52 20 Q55.5 20 55.5 23.5 L55.5 44 Q55.5 47.5 52 47.5 L12 47.5 Q8.5 47.5 8.5 44 L8.5 18.5 Q8.5 15 12 15 Z" fill="#2A6FD6"/>
-  <path d="M15.5 22.5 L48.5 22.5 Q50.5 22.5 50.5 24.5 L50.5 42.5 L13.5 42.5 L13.5 24.5 Q13.5 22.5 15.5 22.5 Z" fill="#DCE3EE"/>
-  <path d="M12 27 L52 27 Q55.5 27 55.5 30.5 L55.5 44 Q55.5 47.5 52 47.5 L12 47.5 Q8.5 47.5 8.5 44 L8.5 30.5 Q8.5 27 12 27 Z" fill="#4C8DFF"/>
-  <path d="M26 40.5 A7 7 0 1 1 38 40.5" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round"/>
-  <circle cx="32" cy="37.5" r="2.9" fill="#FFFFFF"/>
+<svg viewBox="5 10 54 42" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <defs>
+    <linearGradient id="fav-back-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1E40AF"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <linearGradient id="fav-front-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="fav-sheet-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#E2E8F0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- logo-back: the folder back and rounded tab -->
+  <path d="M11 12 H24 C27 12 29 17 33 17 H53 C56 17 58 19 58 22 V46 C58 49 56 51 53 51 H11 C8 51 6 49 6 46 V17 C6 14 8 12 11 12 Z" fill="url(#fav-back-grad)"/>
+
+  <!-- logo-sheet: the contents -->
+  <path d="M15 19 H49 C51 19 52 20 52 22 V43 H12 V22 C12 20 13 19 15 19 Z" fill="url(#fav-sheet-grad)"/>
+
+  <!-- logo-front: vibrant azure front flap -->
+  <path d="M11 25 H53 C56 25 58 27 58 30 V46 C58 49 56 51 53 51 H11 C8 51 6 49 6 46 V30 C6 27 8 25 11 25 Z" fill="url(#fav-front-grad)"/>
+  <path d="M11 25 H53 C56 25 58 27 58 30 V31 C58 28 56 26 53 26 H11 C8 26 6 28 6 31 V30 C6 27 8 25 11 25 Z" fill="#FFFFFF" fill-opacity="0.25"/>
+
+  <!-- logo-cloud: the bold, crisp cloud silhouette -->
+  <path d="M 25 46 C 21.7 46 19 43.3 19 40 C 19 37.4 21.2 35.2 24.2 34.5 C 24.5 30.5 28.2 28 32 28 C 35.8 28 39.5 30.5 39.8 34.5 C 42.8 35.2 45 37.4 45 40 C 45 43.3 42.3 46 39 46 Z" fill="#FFFFFF"/>
 </svg>

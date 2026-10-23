@@ -91,9 +91,14 @@ class WebSocketClient {
 
     let url: string;
     try {
-      const parsed = new URL(base);
+      const fallback = typeof window !== "undefined" ? window.location.origin : "http://localhost:9683";
+      const parsed = new URL(base || fallback);
       const scheme = parsed.protocol === "https:" ? "wss:" : "ws:";
-      url = `${scheme}//${parsed.host}${Api.ws}?access_token=${encodeURIComponent(token)}`;
+      let host = parsed.host;
+      if (host.includes(":3000") || host.includes(":5437")) {
+        host = `${parsed.hostname}:9683`;
+      }
+      url = `${scheme}//${host}${Api.ws}?access_token=${encodeURIComponent(token)}`;
     } catch {
       this.scheduleReconnect();
       return;

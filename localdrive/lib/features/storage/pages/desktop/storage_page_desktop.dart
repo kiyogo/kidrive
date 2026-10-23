@@ -1,21 +1,17 @@
 import '../../../../imports.dart';
-import '../../../auth/controller/session_controller.dart';
 import '../../providers/storage_providers.dart';
-import '../../widgets/detected_drives.dart';
-import '../../widgets/library_card.dart';
+import '../../widgets/account_breakdown_section.dart';
 import '../../widgets/storage_total_card.dart';
 
-/// Storage, on desktop. A wide window fits the libraries beside the detected
-/// drives instead of stacking them, which is the whole reason to have a
-/// separate layout rather than a wider phone.
+/// Storage page on desktop: clean Account Storage Dashboard with quota,
+/// progress bar, file category breakdown, and plan status.
 class StoragePageDesktop extends ConsumerWidget {
   const StoragePageDesktop({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = L10n.of(context);
-    final libraries = ref.watch(librariesProvider);
-    final isAdmin = ref.watch(isAdminProvider);
+    final storageAsync = ref.watch(accountStorageProvider);
 
     return LdDesktopScaffold(
       title: l10n.storage,
@@ -24,46 +20,32 @@ class StoragePageDesktop extends ConsumerWidget {
           glyph: LdGlyph.refresh,
           tooltip: l10n.actionRefresh,
           onPressed: () {
-            ref.invalidate(librariesProvider);
-            ref.invalidate(drivesProvider);
+            ref.invalidate(accountStorageProvider);
           },
         ),
       ],
-      body: LdAsync<LibrarySummary>(
-        value: libraries,
+      body: LdAsync<AccountStorageModel>(
+        value: storageAsync,
         errorCopy: LdFormat.errorCopy(context),
-        onRetry: () => ref.invalidate(librariesProvider),
+        onRetry: () => ref.invalidate(accountStorageProvider),
         loading: const Padding(
           padding: EdgeInsets.symmetric(vertical: 40),
           child: Center(child: LdSpinner()),
         ),
-        data: (summary) => SingleChildScrollView(
-          padding: const EdgeInsets.all(13),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              StorageTotalCard(summary: summary),
-              const SizedBox(height: 13),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        data: (storage) => SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 960),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  Expanded(
-                    flex: 3,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        for (final library in summary.libraries)
-                          LibraryCard(library: library, isAdmin: isAdmin),
-                      ],
-                    ),
-                  ),
-                  if (isAdmin) ...<Widget>[
-                    const SizedBox(width: 24),
-                    const Expanded(flex: 2, child: DetectedDrives()),
-                  ],
+                  StorageTotalCard(storage: storage),
+                  const SizedBox(height: 20),
+                  AccountBreakdownSection(storage: storage),
                 ],
               ),
-            ],
+            ),
           ),
         ),
       ),

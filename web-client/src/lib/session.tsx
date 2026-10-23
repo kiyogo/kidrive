@@ -109,9 +109,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (u.must_change_password) {
       setStage("mustChangePassword");
       wsClient.disconnect();
-    } else if (u.must_enable_totp && u.username !== "admin") {
-      setStage("mustEnableTotp");
-      wsClient.disconnect();
     } else {
       setStage("ready");
       wsClient.connect();
@@ -147,9 +144,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     void (async () => {
       let base = api.server;
-      if (!base && typeof window !== "undefined") {
-        // Match Flutter web probe behavior: try origin, then http://localhost:7443
-        const candidates = [window.location.origin, "http://localhost:7443"];
+      if (
+        (!base ||
+          base.includes(":8080") ||
+          base.includes(":7555") ||
+          base.includes(":7443") ||
+          base.includes(":3000")) &&
+        typeof window !== "undefined"
+      ) {
+        // Prioritize backend on 9683, then kinas:9683, host:9683, then origin
+        const hostname = window.location.hostname || "localhost";
+        const candidates = [
+          `http://${hostname}:9683`,
+          "http://kinas:9683",
+          "http://localhost:9683",
+          window.location.origin,
+        ];
         for (const candidate of candidates) {
           try {
             const res = await fetch(`${candidate}${Api.status}`, {
@@ -193,7 +203,90 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setError("That server did not answer. Check the address, or that it is running.");
       }
     })();
+
+    const unbindWs = wsClient.onEvent((ev) => {
+      if (ev.type === "quota.exceeded") {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("ld-toast", {
+              detail: { message: "Dung lượng lưu trữ đã đầy, không thể tải tệp lên", tone: "error" },
+            }),
+          );
+        }
+        void refreshUser();
+      } else if (ev.type === "quota.updated") {
+        void refreshUser();
+      } else if (ev.type === "device.approved") {
+        void refreshUser();
+      } else if (ev.type.startsWith("node.") || ev.type.startsWith("share.")) {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("ld_nodes_changed", { detail: ev }));
+        }
+      }
+    });
+
+    return () => {
+      unbindWs();
+    };
   }, [refreshUser]);
+
+  const cancelPending = useCallback(() => {
+    setPendingSessionId("");
+    api.setTokens(null);
+    setStage("signedOut");
+    wsClient.disconnect();
+  }, []);
+
+  // Active polling while device is waiting for approval
+  useEffect(() => {
+    if (stage !== "pendingApproval" || !pendingSessionId) return;
+
+    let cancelled = false;
+
+    const checkStatus = async () => {
+      try {
+        const res = await api.get<{
+          status: string;
+          access_token?: string;
+          refresh_token?: string;
+        }>(Api.sessionStatus(pendingSessionId));
+
+        if (cancelled) return;
+
+        if (res.access_token) {
+          api.setTokens({
+            access: res.access_token,
+            refresh: res.refresh_token ?? "",
+          });
+          setPendingSessionId("");
+          await refreshUser();
+          return;
+        }
+
+        if (res.status === "denied" || res.status === "revoked") {
+          cancelPending();
+          setError("Thiết bị này đã bị từ chối phê duyệt.");
+        }
+      } catch (err) {
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+          if (!cancelled) {
+            cancelPending();
+            setError("Thiết bị này đã bị từ chối phê duyệt.");
+          }
+        }
+      }
+    };
+
+    void checkStatus();
+    const interval = setInterval(() => {
+      void checkStatus();
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [stage, pendingSessionId, refreshUser, cancelPending]);
 
   const connect = useCallback(async (address: string) => {
     setError("");
@@ -221,7 +314,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       });
 
       // a held device gets a pending token rather than a session
-      if (result.pending) {
+      if (result.pending || result.status === "pending") {
+        if (result.access_token) {
+          api.setTokens({ access: result.access_token, refresh: "" });
+        }
         setPendingSessionId(result.session_id ?? "");
         setStage("pendingApproval");
         return;
@@ -257,7 +353,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         ...(inviteCode ? { invite_code: inviteCode } : {}),
         ...device(),
       });
-      if (result.pending) {
+      if (result.pending || result.status === "pending") {
+        if (result.access_token) {
+          api.setTokens({ access: result.access_token, refresh: "" });
+        }
         setPendingSessionId(result.session_id ?? "");
         setStage("pendingApproval");
         return;
@@ -278,13 +377,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
     api.setTokens(null);
     setUser(null);
-    setStage("signedOut");
-    wsClient.disconnect();
-  }, []);
-
-  const cancelPending = useCallback(() => {
-    setPendingSessionId("");
-    api.setTokens(null);
     setStage("signedOut");
     wsClient.disconnect();
   }, []);

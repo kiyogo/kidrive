@@ -359,7 +359,7 @@ export function TwoFactorSetup({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
               gap: "8px 10px",
               marginTop: 4,
             }}
@@ -368,17 +368,16 @@ export function TwoFactorSetup({
               <span
                 key={c}
                 style={{
-                  padding: "6px 10px",
+                  padding: "6px 6px",
                   background: "var(--bg-sunken)",
                   borderRadius: "var(--r-chip)",
                   fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  fontSize: 13,
-                  letterSpacing: 1,
+                  fontSize: 11.5,
+                  letterSpacing: "0.01em",
                   color: "var(--fg-primary)",
                   textAlign: "center",
                   whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
+                  userSelect: "all",
                 }}
               >
                 {c}

@@ -5,23 +5,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:localdrive/core/theme/ld_theme.dart';
 import 'package:localdrive/features/auth/controller/session_controller.dart';
 import 'package:localdrive/features/auth/models/user_model.dart';
-import 'package:localdrive/features/storage/models/library_model.dart';
+import 'package:localdrive/features/storage/models/account_storage_model.dart';
 import 'package:localdrive/features/storage/widgets/storage_total_card.dart';
 import 'package:localdrive/l10n/generated/app_localizations.dart';
 
-/// Whose number is on the storage screen.
-///
-/// A member must never be shown the server total: on a family server that is
-/// reading how much everyone else keeps. An admin runs the box and does need
-/// it. The two cases share one widget, so they are worth pinning down.
 void main() {
-  // 2.2 MB across the whole server, of which this account owns 49 KB
-  const summary = LibrarySummary(
-    libraries: <LibraryModel>[],
-    totalUsed: 2200000,
-    totalFree: 20100000000,
-    totalBytes: 474200000000,
-  );
 
   UserModel user({required String role}) => UserModel(
         id: 'u1',
@@ -44,8 +32,15 @@ void main() {
           locale: const Locale('en'),
           localizationsDelegates: L10n.localizationsDelegates,
           supportedLocales: L10n.supportedLocales,
-          home: const Scaffold(
-            body: StorageTotalCard(summary: summary),
+          home: Scaffold(
+            body: StorageTotalCard(
+              storage: AccountStorageModel.fromJson({
+                'used_bytes': 49000,
+                'server_total_used': 2200000,
+                'free_bytes': 20100000000,
+                'quota_bytes': 10 * 1024 * 1024 * 1024,
+              }),
+            ),
           ),
         ),
       ),

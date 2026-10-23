@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../constants/ld_colors.dart';
 import '../constants/ld_motion.dart';
 import '../services/desktop_shell_service.dart';
+import '../services/fullscreen_service.dart';
 import '../theme/ld_theme.dart';
 import 'ld_logo.dart';
 import 'ld_tappable.dart';
@@ -28,76 +29,105 @@ class LdWindowBar extends StatelessWidget {
   static bool get isVisible =>
       !kIsWeb &&
       (Platform.isWindows || Platform.isMacOS || Platform.isLinux) &&
-      DesktopShellService.hasWindow;
+      DesktopShellService.hasWindow &&
+      !FullscreenService.instance.isFullscreen;
 
   static const double height = 38;
 
   @override
   Widget build(BuildContext context) {
-    if (!isVisible) return const SizedBox.shrink();
-    final macOS = Platform.isMacOS;
+    return StreamBuilder<bool>(
+      stream: FullscreenService.instance.onFullscreenChange,
+      initialData: FullscreenService.instance.isFullscreen,
+      builder: (context, snapshot) {
+        final isFs = snapshot.data ?? FullscreenService.instance.isFullscreen;
+        if (!isVisible || isFs) return const SizedBox.shrink();
+        final macOS = Platform.isMacOS;
 
-    return SizedBox(
-      height: height,
-      child: Container(
-        // the same surface as everything below it, so the window reads as one
-        // piece rather than a dark strip bolted to the top of the app
-        color: context.surfaces.backgroundPrimary,
-        child: Row(
-          children: <Widget>[
-            // the traffic lights sit here on macOS, so nothing else may
-            if (macOS) const SizedBox(width: 78),
-            Expanded(
-              child: MoveWindow(
-                child: Row(
-                  children: <Widget>[
-                    if (!macOS) ...<Widget>[
-                      const SizedBox(width: 12),
-                      const LdLogo(size: 18, stage: LdLogoStage.complete),
-                      const SizedBox(width: 10),
-                    ],
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.labelSmall!.copyWith(
-                            color: context.surfaces.foregroundSecondary,
+        return SizedBox(
+          height: height,
+          child: Container(
+            // the same surface as everything below it, so the window reads as one
+            // piece rather than a dark strip bolted to the top of the app
+            color: context.surfaces.backgroundPrimary,
+            child: Row(
+              children: <Widget>[
+                // the traffic lights sit here on macOS, so nothing else may
+                if (macOS) const SizedBox(width: 78),
+                Expanded(
+                  child: MoveWindow(
+                    child: Row(
+                      children: <Widget>[
+                        if (!macOS) ...<Widget>[
+                          const SizedBox(width: 12),
+                          const LdLogo(size: 18, stage: LdLogoStage.complete),
+                          const SizedBox(width: 10),
+                        ],
+                        Flexible(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.labelSmall!.copyWith(
+                                  color: context.surfaces.foregroundSecondary,
+                                ),
                           ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
+                if (!macOS) const LdWindowButtons(),
+              ],
             ),
-            if (!macOS) const _WindowButtons(),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
 
-class _WindowButtons extends StatelessWidget {
-  const _WindowButtons();
+class LdWindowButtons extends StatelessWidget {
+  const LdWindowButtons({super.key, this.isDark = false});
+
+  final bool isDark;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: <Widget>[
-        _WindowButton(
-          onTap: appWindow.minimize,
-          builder: _drawMinimize,
-        ),
-        _WindowButton(
-          onTap: appWindow.maximizeOrRestore,
-          builder: _drawMaximize,
-        ),
-        // close hides to the tray rather than quitting: a transfer halfway
-        // through has no reason to die because someone clicked the X. Quit is
-        // a deliberate choice from the tray menu
-        _WindowButton(
-          onTap: appWindow.hide,
-          danger: true,
-          builder: _drawClose,
-        ),
-      ],
+    return StreamBuilder<bool>(
+      stream: FullscreenService.instance.onFullscreenChange,
+      initialData: FullscreenService.instance.isFullscreen,
+      builder: (context, snapshot) {
+        final isFs = snapshot.data ?? FullscreenService.instance.isFullscreen;
+        if (!LdWindowBar.isVisible || isFs || Platform.isMacOS) {
+          return const SizedBox.shrink();
+        }
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            _WindowButton(
+              onTap: appWindow.minimize,
+              builder: _drawMinimize,
+              isDark: isDark,
+            ),
+            _WindowButton(
+              onTap: appWindow.maximizeOrRestore,
+              builder: _drawMaximize,
+              isDark: isDark,
+            ),
+            // close hides to the tray rather than quitting: a transfer halfway
+            // through has no reason to die because someone clicked the X. Quit is
+            // a deliberate choice from the tray menu
+            _WindowButton(
+              onTap: appWindow.hide,
+              danger: true,
+              builder: _drawClose,
+              isDark: isDark,
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -109,11 +139,13 @@ class _WindowButton extends StatefulWidget {
     required this.onTap,
     required this.builder,
     this.danger = false,
+    this.isDark = false,
   });
 
   final VoidCallback onTap;
   final _GlyphPainter builder;
   final bool danger;
+  final bool isDark;
 
   @override
   State<_WindowButton> createState() => _WindowButtonState();
@@ -135,15 +167,19 @@ class _WindowButtonState extends State<_WindowButton> {
         color: _hovered
             ? (widget.danger
                 ? LdColors.filePdf
-                : context.surfaces.backgroundElevated)
+                : (widget.isDark
+                    ? Colors.white.withValues(alpha: 0.15)
+                    : context.surfaces.backgroundElevated))
             : Colors.transparent,
         child: CustomPaint(
           size: const Size.square(10),
           painter: _GlyphPainterDelegate(
             draw: widget.builder,
-            color: _hovered
-                ? context.surfaces.foregroundPrimary
-                : context.surfaces.foregroundSecondary,
+            color: widget.isDark
+                ? (_hovered ? Colors.white : Colors.white70)
+                : (_hovered
+                    ? context.surfaces.foregroundPrimary
+                    : context.surfaces.foregroundSecondary),
           ),
         ),
       ),

@@ -53,6 +53,7 @@ abstract final class Api {
   static const String uploads = '$prefix/uploads';
 
   // libraries and drives
+  static const String storageAccount = '$prefix/storage/account';
   static const String libraries = '$prefix/libraries';
   static String library(String id) => '$prefix/libraries/$id';
   static String librarySetDefault(String id) => '$prefix/libraries/$id/set-default';
@@ -61,6 +62,7 @@ abstract final class Api {
   static String mountDrive(String id) => '$prefix/admin/drives/$id/mount';
   static String formatDrive(String id) => '$prefix/admin/drives/$id/format';
   static const String poolDrives = '$prefix/admin/drives/pool';
+  static String driveSmart(String id) => '$prefix/admin/drives/$id/smart';
 
   // devices and sessions
   static const String sessions = '$prefix/sessions';
@@ -69,15 +71,6 @@ abstract final class Api {
   static String approveDevice(String id) => '$prefix/devices/$id/approve';
   static String denyDevice(String id) => '$prefix/devices/$id/deny';
   static const String adminPendingDevices = '$prefix/admin/devices/pending';
-
-  // admin
-  static const String adminUsers = '$prefix/admin/users';
-  static String resetPassword(String id) => '$prefix/admin/users/$id/reset-password';
-  static String userRole(String id) => '$prefix/admin/users/$id/role';
-  static String userQuota(String id) => '$prefix/admin/users/$id/quota';
-  static String userDisabled(String id) => '$prefix/admin/users/$id/disabled';
-  static const String invites = '$prefix/admin/invites';
-  static String invite(String id) => '$prefix/admin/invites/$id';
 
   // misc
   static const String trash = '$prefix/trash';

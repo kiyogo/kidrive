@@ -1,20 +1,11 @@
 import '../../../imports.dart';
 import '../../auth/controller/session_controller.dart';
-import '../providers/storage_providers.dart';
+import '../models/account_storage_model.dart';
 
-/// What is on the drives, shown above the per library cards.
-///
-/// The headline number is the signed in account's own files, not the server's.
-/// A member seeing the server total would be reading how much everyone else
-/// stores, and on a family server that is not theirs to see. Free space is the
-/// exception and stays device wide, because the disk really is shared and
-/// knowing your own usage tells you nothing about whether there is room.
-///
-/// An admin gets the server wide figure, because running the box is the job.
 class StorageTotalCard extends ConsumerWidget {
-  const StorageTotalCard({super.key, required this.summary});
+  const StorageTotalCard({super.key, required this.storage});
 
-  final LibrarySummary summary;
+  final AccountStorageModel storage;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -22,42 +13,128 @@ class StorageTotalCard extends ConsumerWidget {
     final isAdmin = ref.watch(isAdminProvider);
     final user = ref.watch(currentUserProvider);
 
-    final used = isAdmin || user == null
-        ? summary.totalUsed
-        : user.quotaBytesUsed;
-    final caption = isAdmin || user == null ? l10n.storageTotal : l10n.storageYours;
-    final totalDisk = summary.totalBytes;
-    final totalFree = summary.totalFree;
-    final diskUsed = totalDisk > totalFree ? totalDisk - totalFree : used;
+    final used = isAdmin
+        ? (storage.serverTotalUsed > 0 ? storage.serverTotalUsed : storage.usedBytes)
+        : (user?.quotaBytesUsed ?? storage.usedBytes);
+    final caption = isAdmin ? l10n.storageTotal : l10n.storageYours;
+    final quota = storage.quotaBytes > 0
+        ? storage.quotaBytes
+        : (user?.quotaBytes ?? 0) > 0
+            ? user!.quotaBytes
+            : 10 * 1024 * 1024 * 1024;
+    final free = storage.freeBytes;
+    final percent = quota > 0 ? (used / quota).clamp(0.0, 1.0) : 0.0;
+    final percentFormatted = (percent * 100).toStringAsFixed(1);
+    final isWarn = percent >= 0.95;
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: context.surfaces.backgroundElevated,
         borderRadius: LdRadii.cardRadius,
         border: Border.all(color: context.surfaces.strokeOutline),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x06000000),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(caption, style: Theme.of(context).textTheme.labelSmall),
-          const SizedBox(height: 10),
-          Text(
-            LdFormat.bytes(context, used),
-            style: Theme.of(context).textTheme.displayLarge,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: <Widget>[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: LdColors.wash(LdColors.accentPrimary, 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  caption,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    color: LdColors.accentPrimary,
+                  ),
+                ),
+              ),
+              Text(
+                '${l10n.storage} ${LdFormat.bytes(context, quota)}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: context.surfaces.foregroundSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: <Widget>[
+              Text(
+                LdFormat.bytes(context, used),
+                style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                      fontSize: 34,
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '/ ${LdFormat.bytes(context, quota)}',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: context.surfaces.foregroundSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
-          LdUsageBar(
-            usedBytes: diskUsed,
-            totalBytes: totalDisk,
-            primaryBytes: used,
-            usedLabel: '${l10n.storageUsedOf(
-              LdFormat.bytes(context, diskUsed),
-              LdFormat.bytes(context, totalDisk),
-            )}${used > 0 && diskUsed > used ? ' (LocalDrive: ${LdFormat.bytes(context, used)})' : ''}',
-            freeLabel: l10n.libraryFreeSpace(
-              LdFormat.bytes(context, totalFree),
+          // Progress Bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: Container(
+              height: 10,
+              width: double.infinity,
+              color: context.surfaces.backgroundSunken,
+              child: FractionallySizedBox(
+                alignment: Alignment.centerLeft,
+                widthFactor: percent.clamp(used > 0 ? 0.01 : 0.0, 1.0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: isWarn
+                        ? LdColors.accentWarning
+                        : LdColors.accentPrimary,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
             ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: <Widget>[
+              Text(
+                l10n.sidebarStorageUsed(LdFormat.bytes(context, used)),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: context.surfaces.foregroundSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
+              ),
+              Text(
+                l10n.sidebarStorageFree(LdFormat.bytes(context, free)),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: context.surfaces.foregroundSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
+              ),
+            ],
           ),
         ],
       ),

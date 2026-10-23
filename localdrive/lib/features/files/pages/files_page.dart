@@ -4,6 +4,7 @@ import '../providers/files_providers.dart';
 import '../widgets/desktop/drop_zone.dart';
 import '../widgets/shared/files_browser.dart';
 import '../widgets/shared/files_toolbar.dart';
+import '../widgets/shared/rename_sheet.dart';
 import 'desktop/files_page_desktop.dart';
 import 'mobile/files_page_mobile.dart';
 import 'tablet/files_page_tablet.dart';
@@ -58,7 +59,11 @@ class FilesPageBody extends ConsumerWidget {
     final body = Column(
       children: <Widget>[
         if (selecting)
-          _SelectionBar(query: query)
+          _SelectionBar(
+            query: query,
+            filter: filter,
+            folderId: folderId,
+          )
         else
           FilesToolbar(
             folderId: folderId,
@@ -100,12 +105,21 @@ class FilesPageBody extends ConsumerWidget {
 /// Watches only the current listing, so the action bar rebuilding never drags
 /// the whole page with it.
 class _SelectionBar extends ConsumerWidget {
-  const _SelectionBar({required this.query});
+  const _SelectionBar({
+    required this.query,
+    required this.filter,
+    this.folderId,
+  });
 
   final FolderQuery query;
+  final FilesFilter filter;
+  final String? folderId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = L10n.of(context);
+    final viewMode = ref.watch(viewModeProvider);
+    final compact = LdDeviceScope.of(context).isMobile;
     final nodes = ref.watch(
       folderProvider(query).select(
         (value) => value.maybeWhen(
@@ -115,10 +129,42 @@ class _SelectionBar extends ConsumerWidget {
       ),
     );
     return Padding(
-      padding: const EdgeInsets.all(13),
-      child: Align(
-        alignment: AlignmentDirectional.centerStart,
-        child: SelectionActionBar(nodes: nodes),
+      padding: const EdgeInsets.fromLTRB(13, 13, 13, 13),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: SelectionActionBar(nodes: nodes),
+          ),
+          const SizedBox(width: 16),
+          if (!compact) ...<Widget>[
+            Builder(
+              builder: (context) => LdUtilityButton(
+                glyph: LdGlyph.sort,
+                tooltip: l10n.sortBy,
+                onPressed: () =>
+                    showSortMenu(context, ref, anchor: anchorOf(context)),
+              ),
+            ),
+            const SizedBox(width: 8),
+            LdUtilityButton(
+              glyph: viewMode == ViewMode.grid ? LdGlyph.list : LdGlyph.grid,
+              tooltip: viewMode == ViewMode.grid ? l10n.viewList : l10n.viewGrid,
+              onPressed: () => ref.read(viewModeProvider.notifier).toggle(),
+            ),
+            if (filter == FilesFilter.browse) ...<Widget>[
+              const SizedBox(width: 8),
+              LdUtilityButton(
+                glyph: LdGlyph.plus,
+                tooltip: l10n.newFolder,
+                onPressed: () => showNewFolderSheet(
+                  context,
+                  ref,
+                  parentId: folderId ?? '',
+                ),
+              ),
+            ],
+          ],
+        ],
       ),
     );
   }

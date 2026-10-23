@@ -90,7 +90,7 @@ export function Button({
   type = "button",
 }: {
   label: string;
-  onClick?: () => void;
+  onClick?: (e?: any) => void;
   glyph?: Glyph;
   variant?: "primary" | "secondary" | "quiet" | "text" | "danger" | "destructive";
   expand?: boolean;
@@ -351,10 +351,8 @@ export function SettingRow({
           className="t-body-lg"
           style={{
             color,
-            fontWeight: 400,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
+            fontWeight: 500,
+            lineHeight: 1.35,
           }}
         >
           {label}
@@ -365,9 +363,7 @@ export function SettingRow({
             style={{
               color: "var(--fg-secondary)",
               marginTop: 2,
-              lineHeight: 1.4,
-              whiteSpace: "normal",
-              wordBreak: "break-word",
+              lineHeight: 1.35,
             }}
           >
             {description}
@@ -375,7 +371,17 @@ export function SettingRow({
         )}
       </div>
       {trailing ? (
-        <div style={{ flex: "none", marginInlineStart: 12 }}>{trailing}</div>
+        <div
+          style={{
+            flex: "none",
+            marginInlineStart: 12,
+            display: "flex",
+            alignItems: "center",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {trailing}
+        </div>
       ) : onTap ? (
         <div style={{ flex: "none", marginInlineStart: 8, color: "var(--fg-secondary)" }}>
           <Icon glyph="chevron-right" size={18} />
@@ -443,6 +449,7 @@ export function TextField({
   autoFocus,
   onEnter,
   dir,
+  disabled = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -454,6 +461,7 @@ export function TextField({
   autoFocus?: boolean;
   onEnter?: () => void;
   dir?: "ltr" | "rtl";
+  disabled?: boolean;
 }) {
   const [reveal, setReveal] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -476,21 +484,23 @@ export function TextField({
           background: "var(--bg-elevated)",
           border: `1px solid ${error ? "var(--warning)" : focused ? "var(--accent)" : "var(--stroke)"}`,
           borderRadius: "var(--r-field)",
-          transition: "border-color var(--d-hover) var(--ease)",
+          opacity: disabled ? 0.65 : 1,
+          cursor: disabled ? "not-allowed" : "text",
+          transition: "border-color var(--d-hover) var(--ease), opacity var(--d-hover) var(--ease)",
         }}
       >
-        {glyph && <Icon glyph={glyph} size={18} color="var(--fg-secondary)" />}
         <input
           dir={dir}
           type={actual}
           value={value}
-          autoFocus={autoFocus}
+          autoFocus={autoFocus && !disabled}
+          disabled={disabled}
           placeholder={hint}
-          onFocus={() => setFocused(true)}
+          onFocus={() => !disabled && setFocused(true)}
           onBlur={() => setFocused(false)}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => !disabled && onChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && onEnter) onEnter();
+            if (e.key === "Enter" && onEnter && !disabled) onEnter();
           }}
           style={{
             flex: 1,
@@ -501,6 +511,7 @@ export function TextField({
             color: "var(--fg-primary)",
             font: "inherit",
             fontSize: 14,
+            cursor: disabled ? "not-allowed" : "text",
           }}
         />
         {type === "password" && (
@@ -630,7 +641,9 @@ export function EmptyState({
         justifyContent: "center",
         textAlign: "center",
         padding: compact ? "24px 32px" : "48px 32px",
-        maxWidth: 340,
+        maxWidth: "100%",
+        width: "max-content",
+        boxSizing: "border-box",
         margin: "0 auto",
       }}
     >
@@ -641,6 +654,10 @@ export function EmptyState({
           marginTop: compact ? 16 : 24,
           textAlign: "center",
           lineHeight: 1.3,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          maxWidth: "100%",
         }}
       >
         {title}
@@ -653,6 +670,10 @@ export function EmptyState({
             marginTop: 8,
             textAlign: "center",
             lineHeight: 1.4,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            maxWidth: "100%",
           }}
         >
           {message}
@@ -732,20 +753,124 @@ export function ListSkeleton({ rows: _rows }: { rows?: number } = {}) {
   return <LoadingState size={32} delay={120} />;
 }
 
+/**
+ * DropdownStatus: Unified loading and empty state for dropdown menus, tree pickers,
+ * popovers and select containers. Loading and empty states look 100% identical in layout,
+ * badge size, padding, and typography; only differing in the icon (Spinner vs Icon).
+ */
+export function DropdownStatus({
+  type,
+  glyph = "folder",
+  message,
+  size = 44,
+  iconSize = 22,
+  minHeight,
+}: {
+  type: "loading" | "empty";
+  glyph?: Glyph;
+  message?: string;
+  size?: number;
+  iconSize?: number;
+  minHeight?: number | string;
+}) {
+  // 1. Khi loading: xóa toàn bộ chữ (như ảnh 1)
+  // 2. Khi empty / khác: xóa chữ sau dấu chấm "." (đặc biệt là 'Bấm nút "..." để tạo mới')
+  let displayMessage = "";
+  if (type !== "loading" && message) {
+    const dotIndex = message.indexOf(".");
+    if (dotIndex !== -1) {
+      displayMessage = message.substring(0, dotIndex + 1).trim();
+    } else {
+      displayMessage = message.replace(/\s*Bấm nút.*$/i, "").trim();
+    }
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px 16px",
+        gap: 6,
+        width: "100%",
+        minHeight,
+        boxSizing: "border-box",
+        textAlign: "center",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          lineHeight: 1,
+        }}
+      >
+        {type === "loading" ? (
+          <Spinner size={iconSize} color="var(--accent)" />
+        ) : (
+          <Icon glyph={glyph} size={iconSize} color="var(--fg-secondary)" />
+        )}
+      </div>
+      {displayMessage && (
+        <span
+          style={{
+            fontSize: 13,
+            color: "var(--fg-secondary)",
+            fontWeight: 500,
+            lineHeight: 1.4,
+            textAlign: "center",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {displayMessage}
+        </span>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ toast */
 
 type Toast = { id: number; message: string; tone: "info" | "success" | "error" };
 const ToastCtx = createContext<(m: string, tone?: Toast["tone"]) => void>(() => {});
 export const useToast = () => useContext(ToastCtx);
 
+export function showToast(message: string, tone: "info" | "success" | "error" = "info") {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("ld-toast", { detail: { message, tone } }));
+  }
+}
+
 export function ToastHost({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<Toast[]>([]);
   const next = useRef(1);
+  const lastToastRef = useRef<{ message: string; time: number } | null>(null);
   const { isMobile } = useDeviceClass();
 
   const show = useCallback((message: string, tone: Toast["tone"] = "info") => {
+    const now = Date.now();
+    // Debounce duplicate identical toast messages within 1000ms
+    if (
+      lastToastRef.current &&
+      lastToastRef.current.message === message &&
+      now - lastToastRef.current.time < 1000
+    ) {
+      return;
+    }
+    lastToastRef.current = { message, time: now };
+
     const id = next.current++;
-    setItems((list) => [...list, { id, message, tone }]);
+    setItems((list) => {
+      // Do not stack duplicate notifications with the exact same message
+      if (list.some((t) => t.message === message)) {
+        return list;
+      }
+      return [...list, { id, message, tone }];
+    });
     setTimeout(() => setItems((list) => list.filter((t) => t.id !== id)), 3500);
   }, []);
 
@@ -1081,11 +1206,15 @@ export function Dialog({
   onClose,
   title,
   children,
+  maxWidth = 420,
+  overflow = "auto",
 }: {
   open: boolean;
   onClose: () => void;
   title?: string;
   children: ReactNode;
+  maxWidth?: number;
+  overflow?: "auto" | "visible" | "hidden";
 }) {
   useEffect(() => {
     if (!open) return;
@@ -1107,24 +1236,57 @@ export function Dialog({
         alignItems: "center",
         justifyContent: "center",
         padding: 16,
+        overflowY: "auto",
       }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         className="ld-enter"
         style={{
-          width: "min(420px, 100%)",
+          width: `min(${maxWidth}px, 100%)`,
+          maxHeight: "calc(100vh - 32px)",
+          overflow: overflow,
+          overflowY: overflow,
           background: "var(--bg-elevated)",
           border: "1px solid var(--stroke)",
           borderRadius: "var(--r-card)",
           padding: 24,
         }}
       >
-        {title && (
-          <div className="t-title-md" style={{ marginBottom: 16 }}>
-            {title}
-          </div>
-        )}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: title ? 16 : 8,
+          }}
+        >
+          {title ? (
+            <div className="t-title-md" style={{ margin: 0, fontWeight: 700 }}>
+              {title}
+            </div>
+          ) : (
+            <div />
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Đóng"
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 6,
+              borderRadius: "var(--r-control)",
+              color: "var(--fg-secondary)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Icon glyph="close" size={18} />
+          </button>
+        </div>
         {children}
       </div>
     </div>
@@ -1237,20 +1399,34 @@ export function Menu({
                   alignItems: "center",
                   gap: 14,
                   width: "100%",
-                  padding: "14px 4px",
+                  height: 48,
+                  minHeight: 48,
+                  padding: "0 12px",
                   color: itemColor,
                   boxSizing: "border-box",
                   whiteSpace: "nowrap",
                 }}
               >
-                {item.glyph && <Icon glyph={item.glyph} size={20} color={itemColor} />}
+                <div
+                  style={{
+                    width: 24,
+                    height: 24,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  {item.glyph ? <Icon glyph={item.glyph} size={20} color={itemColor} /> : null}
+                </div>
                 <span
                   className="t-body-lg"
                   style={{
                     color: itemColor,
                     flex: 1,
+                    minWidth: 0,
                     textAlign: "left",
-                    lineHeight: 1.3,
+                    lineHeight: "48px",
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
@@ -1311,7 +1487,12 @@ export function Menu({
         }}
       />
       <div
+        className="menu"
+        role="menu"
         onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onPointerUp={(e) => e.stopPropagation()}
         style={{
           position: "fixed",
           left,
@@ -1340,21 +1521,35 @@ export function Menu({
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 14,
+                gap: 12,
                 width: "100%",
-                padding: "11px 14px",
+                height: 42,
+                minHeight: 42,
+                padding: "0 14px",
                 color: itemColor,
                 boxSizing: "border-box",
               }}
             >
-              {item.glyph && <Icon glyph={item.glyph} size={19} color={itemColor} />}
+              <div
+                style={{
+                  width: 22,
+                  height: 22,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                {item.glyph ? <Icon glyph={item.glyph} size={19} color={itemColor} /> : null}
+              </div>
               <span
                 className="t-body-lg"
                 style={{
                   color: itemColor,
                   flex: 1,
+                  minWidth: 0,
                   textAlign: "left",
-                  lineHeight: "22px",
+                  lineHeight: "42px",
                   whiteSpace: "nowrap",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
@@ -1375,7 +1570,7 @@ export function Menu({
 
 /** The device class, from the width, matching Breakpoints in the app. */
 export function useDeviceClass() {
-  const [width, setWidth] = useState(1280);
+  const [width, setWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1280));
   useEffect(() => {
     const measure = () => setWidth(window.innerWidth);
     measure();
@@ -1385,8 +1580,8 @@ export function useDeviceClass() {
   return useMemo(
     () => ({
       width,
-      isMobile: width < 600,
-      isTablet: width >= 600 && width < 768,
+      isMobile: width < 768,
+      isTablet: width >= 768 && width < 1024,
       isDesktop: width >= 768,
     }),
     [width],
@@ -1466,3 +1661,6 @@ export function SizeSlider({
     </div>
   );
 }
+
+export { CanvasOverlayScrollbar, CanvasScrollContainer } from "./ui/CanvasOverlayScrollbar";
+export type { CanvasOverlayScrollbarProps, CanvasScrollContainerProps } from "./ui/CanvasOverlayScrollbar";

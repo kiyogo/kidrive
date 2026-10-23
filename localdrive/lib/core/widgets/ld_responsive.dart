@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../constants/breakpoints.dart';
+import '../services/desktop_shell_service.dart';
 
 /// The single breakpoint decision point for the whole app. Nothing else reads
 /// a width to pick a layout.
@@ -23,14 +24,23 @@ class LdResponsive extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final deviceClass = DeviceClass.fromWidth(constraints.maxWidth);
+        final isDesktopNative = DesktopShellService.isDesktop;
+        final deviceClass = isDesktopNative
+            ? DeviceClass.desktop
+            : DeviceClass.fromWidth(constraints.maxWidth);
+
         return LdDeviceScope(
           deviceClass: deviceClass,
           child: Builder(
-            builder: (context) => switch (deviceClass) {
-              DeviceClass.desktop => (desktop ?? tablet ?? mobile)(context),
-              DeviceClass.tablet => (tablet ?? mobile)(context),
-              DeviceClass.mobile => mobile(context),
+            builder: (context) {
+              if (isDesktopNative && desktop != null) {
+                return desktop!(context);
+              }
+              return switch (deviceClass) {
+                DeviceClass.desktop => (desktop ?? tablet ?? mobile)(context),
+                DeviceClass.tablet => (tablet ?? mobile)(context),
+                DeviceClass.mobile => mobile(context),
+              };
             },
           ),
         );
@@ -51,6 +61,7 @@ class LdDeviceScope extends InheritedWidget {
   final DeviceClass deviceClass;
 
   static DeviceClass of(BuildContext context) {
+    if (DesktopShellService.isDesktop) return DeviceClass.desktop;
     final scope = context.dependOnInheritedWidgetOfExactType<LdDeviceScope>();
     if (scope != null) return scope.deviceClass;
     return DeviceClass.fromWidth(MediaQuery.sizeOf(context).width);
@@ -107,6 +118,7 @@ bool get isPointerPlatform =>
 /// Nothing about the machine changed in between. A mouse is a mouse at any
 /// window size.
 bool desktopBehaviour(BuildContext context) {
+  if (DesktopShellService.isDesktop) return true;
   if (context.deviceClass.isMobile) return false;
   return isPointerPlatform || context.deviceClass.isDesktop;
 }

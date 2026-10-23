@@ -13,6 +13,19 @@ auto bdw = bitsdojo_window_configure(BDW_CUSTOM_FRAME | BDW_HIDE_ON_STARTUP);
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  HANDLE hMutex = CreateMutex(nullptr, TRUE, L"LocalDriveSingleInstanceMutex");
+  if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    HWND existingWnd = FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"Local Drive");
+    if (existingWnd) {
+      ShowWindow(existingWnd, SW_RESTORE);
+      SetForegroundWindow(existingWnd);
+    }
+    if (hMutex) {
+      CloseHandle(hMutex);
+    }
+    return EXIT_SUCCESS;
+  }
+
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {

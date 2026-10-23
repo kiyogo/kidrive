@@ -67,11 +67,22 @@ class MarqueeRegistry {
   /// Every registered id whose box overlaps [rect], in global coordinates.
   Set<String> hits(Rect rect) {
     final found = <String>{};
+    final normRect = Rect.fromLTRB(
+      rect.left < rect.right ? rect.left : rect.right,
+      rect.top < rect.bottom ? rect.top : rect.bottom,
+      rect.left < rect.right ? rect.right : rect.left,
+      rect.top < rect.bottom ? rect.bottom : rect.top,
+    );
+
     for (final entry in _items.entries) {
+      if (!entry.value.mounted) continue;
       final box = entry.value.findRenderObject() as RenderBox?;
       if (box == null || !box.hasSize || !box.attached) continue;
       final origin = box.localToGlobal(Offset.zero);
-      if (rect.overlaps(origin & box.size)) found.add(entry.key);
+      final itemRect = origin & box.size;
+      if (normRect.overlaps(itemRect)) {
+        found.add(entry.key);
+      }
     }
     return found;
   }
@@ -159,13 +170,16 @@ class _MarqueeSelectionState extends State<MarqueeSelection> {
 
   void _down(PointerDownEvent event) {
     if (event.kind != PointerDeviceKind.mouse) return;
-    if (_onScrollbar(event.position)) return;
-    if (!_onEmptySpace(event.position)) return;
 
     if (event.buttons == kSecondaryMouseButton) {
-      widget.onEmptySecondaryTap?.call(event.position);
+      if (_onEmptySpace(event.position)) {
+        widget.onEmptySecondaryTap?.call(event.position);
+      }
       return;
     }
+
+    if (_onScrollbar(event.position)) return;
+    if (!_onEmptySpace(event.position)) return;
 
     if (event.buttons != kPrimaryMouseButton) return;
     _start(event.position);
@@ -291,9 +305,20 @@ class _MarqueeItemState extends State<MarqueeItem> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final found = MarqueeSelection.of(context);
-    if (found == _registry) return;
-    _registry?.unregister(widget.id);
-    _registry = found?..register(widget.id, context);
+    if (found != _registry) {
+      _registry?.unregister(widget.id);
+      _registry = found;
+    }
+    _registry?.register(widget.id, context);
+  }
+
+  @override
+  void didUpdateWidget(MarqueeItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.id != widget.id) {
+      _registry?.unregister(oldWidget.id);
+      _registry?.register(widget.id, context);
+    }
   }
 
   @override

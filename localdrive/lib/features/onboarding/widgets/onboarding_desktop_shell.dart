@@ -1,3 +1,4 @@
+import 'package:bitsdojo_window/bitsdojo_window.dart';
 import '../../../imports.dart';
 
 /// The steps of first run, in order, so the desktop rail can say where you are.
@@ -81,15 +82,6 @@ class OnboardingDesktopShell extends StatelessWidget {
                                 : _StepState.upcoming,
                       ),
                     const Spacer(),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: const <Widget>[
-                        LdThemeToggle(compact: true),
-                        SizedBox(height: 10),
-                        LdLanguageToggle(compact: true),
-                      ],
-                    ),
                   ],
                 ),
               ),
@@ -100,10 +92,7 @@ class OnboardingDesktopShell extends StatelessWidget {
                 children: <Widget>[
                   Center(
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 64,
-                        vertical: 48,
-                      ),
+                      padding: const EdgeInsets.fromLTRB(64, 76, 64, 48),
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 480),
                         child: Column(
@@ -136,7 +125,7 @@ class OnboardingDesktopShell extends StatelessWidget {
                   ),
                   if (onBack != null)
                     Positioned(
-                      top: 24,
+                      top: 20,
                       left: 24,
                       child: LdButton.text(
                         label: l10n.actionBack,
@@ -144,12 +133,26 @@ class OnboardingDesktopShell extends StatelessWidget {
                         onPressed: onBack,
                       ),
                     ),
+                  if (LdWindowBar.isVisible)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 360,
+                      height: 56,
+                      child: MoveWindow(),
+                    ),
+                  if (LdWindowBar.isVisible)
+                    const Positioned(
+                      top: 0,
+                      right: 0,
+                      child: LdWindowButtons(),
+                    ),
                   Positioned(
-                    top: 24,
-                    right: 24,
-                    child: Row(
+                    top: 20,
+                    right: LdWindowBar.isVisible ? 154 : 24,
+                    child: const Row(
                       mainAxisSize: MainAxisSize.min,
-                      children: const <Widget>[
+                      children: <Widget>[
                         LdThemeToggle(compact: true),
                         SizedBox(width: 8),
                         LdLanguageToggle(compact: true),

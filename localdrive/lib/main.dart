@@ -11,11 +11,13 @@ import 'app.dart';
 import 'core/constants/ld_colors.dart';
 import 'core/services/core_providers.dart';
 import 'core/services/desktop_shell_service.dart';
+import 'core/services/fullscreen_service.dart';
 import 'core/services/secure_store_service.dart';
 import 'core/widgets/ld_error_state.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  FullscreenService.instance.init();
 
   // libmpv, loaded once before anything asks for a player. video_player had no
   // Windows implementation at all, and the community one handed the URL to

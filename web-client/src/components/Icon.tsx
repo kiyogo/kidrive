@@ -19,6 +19,8 @@ export type Glyph =
   | "storage"
   | "drive"
   | "settings"
+  | "tune"
+  | "sliders"
   | "search"
   | "upload"
   | "download"
@@ -40,6 +42,7 @@ export type Glyph =
   | "chevron-right"
   | "chevron-left"
   | "chevron-down"
+  | "chevron-up"
   | "arrow-left"
   | "arrow-up"
   | "arrow-down"
@@ -173,6 +176,17 @@ function renderGlyph(glyph: Glyph, color: string, strokeWidth: number): React.Re
         </>
       );
 
+    case "tune":
+    case "sliders":
+      return (
+        <>
+          <line x1="3" y1="8" x2="21" y2="8" />
+          <line x1="3" y1="16" x2="21" y2="16" />
+          <line x1="8" y1="5" x2="8" y2="11" />
+          <line x1="16" y1="13" x2="16" y2="19" />
+        </>
+      );
+
     case "folder":
       return (
         <path d="M3.5 8 V6.5 Q3.5 5.5 4.5 5.5 H9.5 L11.5 8 H19.5 Q20.5 8 20.5 9 V17.5 Q20.5 18.5 19.5 18.5 H4.5 Q3.5 18.5 3.5 17.5 Z" />
@@ -298,6 +312,9 @@ function renderGlyph(glyph: Glyph, color: string, strokeWidth: number): React.Re
 
     case "chevron-down":
       return <path d="M5.5 9.5 L12 16 L18.5 9.5" />;
+
+    case "chevron-up":
+      return <path d="M5.5 14.5 L12 8 L18.5 14.5" />;
 
     case "arrow-up":
     case "arrowUp":

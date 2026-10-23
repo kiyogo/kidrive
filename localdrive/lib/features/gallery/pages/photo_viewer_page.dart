@@ -1,5 +1,6 @@
 import 'dart:ui' show PointerDeviceKind;
 
+import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/services.dart';
@@ -361,60 +362,83 @@ class _Chrome extends ConsumerWidget {
         // by a rectangle of chrome across the top of it
         _Scrim(
           fromTop: true,
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              child: Row(
-                children: <Widget>[
-                  LdUtilityButton(
-                    glyph: LdGlyph.chevronLeft,
-                    tooltip: l10n.actionBack,
-                    onPressed: () => Navigator.of(context).maybePop(),
+          child: Stack(
+            children: <Widget>[
+              if (LdWindowBar.isVisible)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 140,
+                  height: 36,
+                  child: MoveWindow(),
+                ),
+              SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    8,
+                    6,
+                    LdWindowBar.isVisible ? 146 : 8,
+                    6,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        Text(
-                          node.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
-                              ),
-                        ),
-                        Text(
-                          l10n.galleryPositionOf(
-                            LdFormat.count(context, position),
-                            LdFormat.count(context, total),
-                          ),
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: Colors.white,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Builder(
-                    builder: (context) => LdUtilityButton(
-                      glyph: LdGlyph.more,
-                      tooltip: l10n.moreActions,
-                      onPressed: () => showNodeActions(
-                        context,
-                        ref,
-                        node,
-                        anchorOf(context),
-                        alreadyOpen: true,
+                  child: Row(
+                    children: <Widget>[
+                      LdUtilityButton(
+                        glyph: LdGlyph.chevronLeft,
+                        tooltip: l10n.actionBack,
+                        onPressed: () => Navigator.of(context).maybePop(),
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Text(
+                              node.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                            Text(
+                              l10n.galleryPositionOf(
+                                LdFormat.count(context, position),
+                                LdFormat.count(context, total),
+                              ),
+                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: Colors.white,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Builder(
+                        builder: (context) => LdUtilityButton(
+                          glyph: LdGlyph.more,
+                          tooltip: l10n.moreActions,
+                          onPressed: () => showNodeActions(
+                            context,
+                            ref,
+                            node,
+                            anchorOf(context),
+                            alreadyOpen: true,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+              if (LdWindowBar.isVisible)
+                const Positioned(
+                  top: 0,
+                  right: 0,
+                  child: LdWindowButtons(isDark: true),
+                ),
+            ],
           ),
         ),
         const Spacer(),

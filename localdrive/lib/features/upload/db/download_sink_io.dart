@@ -109,15 +109,13 @@ class DownloadSink {
   /// documents directory on the platforms that have no such folder.
   static Future<Directory> _destination() async {
     if (Platform.isAndroid || Platform.isIOS) {
-      final documents = await getApplicationDocumentsDirectory();
-      return Directory(p.join(documents.path, 'Local Drive'));
+      return getApplicationDocumentsDirectory();
     }
     final downloads = await getDownloadsDirectory();
     if (downloads != null) {
-      return Directory(p.join(downloads.path, 'Local Drive'));
+      return downloads;
     }
-    final documents = await getApplicationDocumentsDirectory();
-    return Directory(p.join(documents.path, 'Local Drive'));
+    return getApplicationDocumentsDirectory();
   }
 
   /// A server can hold names a local filesystem will not take. Separators are

@@ -7,6 +7,7 @@ import '../../../../imports.dart';
 import '../../../upload/controller/transfer_controller.dart';
 import '../../../upload/controller/folder_drop.dart';
 import '../../../upload/widgets/duplicate_sheet.dart';
+import '../../../auth/controller/session_controller.dart';
 import '../../providers/files_providers.dart';
 import 'folder_drop_targets.dart';
 import '../shared/rename_sheet.dart';
@@ -72,6 +73,12 @@ class _FilesDropZoneState extends ConsumerState<FilesDropZone> {
         final names = details.files.map((file) => file.name).toList();
 
         if (messenger == null || !messenger.mounted) return;
+
+        final user = ref.read(currentUserProvider);
+        if (user != null && user.hasQuota && user.quotaBytesUsed >= user.quotaBytes) {
+          LdToast.error(messenger, 'Dung lượng lưu trữ đã đầy, không thể tải tệp lên');
+          return;
+        }
 
         // A browser hands a dropped folder over as its own object rather than
         // a path, with the files inside it nested underneath rather than

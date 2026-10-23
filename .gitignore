@@ -21,10 +21,12 @@ server/Caddyfile
 server/docker-compose.yml
 server/.env
 
-# Backups
+# Backups & Archives
 *.tar.gz
 *.tar.zst
 *.bak
+*.zip
+*.iso
 backups/
 
 # Go & Binaries
@@ -34,13 +36,31 @@ backups/
 /server/localdrive
 /server/localdrive.exe
 /localdrive.exe
+*.exe
 *.exe~
 *.test
 *.out
 vendor/
 SHA256SUMS
+SHA256SUMS.txt
 *.apk
 localdrive-linux-*
+localdrive-darwin-*
+LocalDrive-Setup.exe
+LocalDrive-Windows-Installer.zip
+LocalDrive-linux-package.tar.gz
+
+# Packaging & Scratch Tooling
+dist/
+dist-*/
+windows-app/
+windows-inno-pkg/
+windows-installer/
+scratch/
+g/
+LocalDrive.iss
+installer_crash.log
+c.py
 
 # Flutter and Dart
 .dart_tool/

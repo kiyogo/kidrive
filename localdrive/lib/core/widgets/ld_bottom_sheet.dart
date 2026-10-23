@@ -46,8 +46,8 @@ class LdBottomSheet extends StatelessWidget {
   }) {
     final deviceClass = LdDeviceScope.of(context);
 
-    // a centred dialog on desktop viewports, bottom sheet on mobile and tablet
-    if (deviceClass.isDesktop) {
+    // a centred dialog on desktop viewports/pointer platforms, bottom sheet on mobile and tablet
+    if (isPointerPlatform || deviceClass.isDesktop) {
       return showGeneralDialog<T>(
         context: context,
         barrierDismissible: dismissible,

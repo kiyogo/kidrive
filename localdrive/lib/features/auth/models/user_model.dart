@@ -12,6 +12,7 @@ class UserModel {
     this.mustChangePassword = false,
     this.totpEnabled = false,
     this.mustEnableTotp = false,
+    this.disabled = false,
     this.createdAt = 0,
   });
 
@@ -30,6 +31,7 @@ class UserModel {
   /// themselves; an admin can reset passwords and remove accounts, so that
   /// account is not left on a password alone.
   final bool mustEnableTotp;
+  final bool disabled;
   final int createdAt;
 
   bool get isAdmin => role == 'admin';
@@ -52,27 +54,30 @@ class UserModel {
         role: json['role'] as String? ?? 'member',
         avatarSeed: json['avatar_seed'] as String? ?? '',
         email: json['email'] as String? ?? '',
-        quotaBytes: json['quota_bytes'] as int? ?? 0,
-        quotaBytesUsed: json['quota_bytes_used'] as int? ?? 0,
+        quotaBytes: (json['quota_bytes'] as num?)?.toInt() ?? 0,
+        quotaBytesUsed: (json['quota_bytes_used'] as num?)?.toInt() ?? 0,
         mustChangePassword: json['must_change_password'] as bool? ?? false,
         totpEnabled: json['totp_enabled'] as bool? ?? false,
         mustEnableTotp: json['must_enable_totp'] as bool? ?? false,
+        disabled: json['disabled'] as bool? ?? (json['disabled_at'] != null),
         createdAt: json['created_at'] as int? ?? 0,
       );
 
   UserModel copyWith({
     String? displayName,
+    String? role,
     int? quotaBytes,
     int? quotaBytesUsed,
     bool? mustChangePassword,
     bool? totpEnabled,
     bool? mustEnableTotp,
+    bool? disabled,
   }) =>
       UserModel(
         id: id,
         username: username,
         displayName: displayName ?? this.displayName,
-        role: role,
+        role: role ?? this.role,
         avatarSeed: avatarSeed,
         email: email,
         quotaBytes: quotaBytes ?? this.quotaBytes,
@@ -80,6 +85,7 @@ class UserModel {
         mustChangePassword: mustChangePassword ?? this.mustChangePassword,
         totpEnabled: totpEnabled ?? this.totpEnabled,
         mustEnableTotp: mustEnableTotp ?? this.mustEnableTotp,
+        disabled: disabled ?? this.disabled,
         createdAt: createdAt,
       );
 

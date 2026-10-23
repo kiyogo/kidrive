@@ -1,5 +1,6 @@
 import '../../../core/constants/api_endpoints.dart';
 import '../../../core/services/api_client.dart';
+import '../models/account_storage_model.dart';
 import '../models/library_model.dart';
 
 /// The API surface for libraries and drives.
@@ -7,6 +8,9 @@ class StorageDb {
   const StorageDb(this._api);
 
   final ApiClient _api;
+
+  Future<AccountStorageModel> accountStorage() async =>
+      AccountStorageModel.fromJson(await _api.get(Api.storageAccount));
 
   Future<LibrarySummary> libraries() async =>
       LibrarySummary.fromJson(await _api.get(Api.libraries));
@@ -55,14 +59,14 @@ class StorageDb {
   Future<LibraryModel> pool({
     required String name,
     required List<String> libraryIds,
-    bool makeDefault = false,
+    String? layout,
   }) async =>
       LibraryModel.fromJson(await _api.post(
         Api.poolDrives,
         body: <String, dynamic>{
           'name': name,
           'library_ids': libraryIds,
-          'make_default': makeDefault,
+          'layout': ?layout,
         },
       ));
 }

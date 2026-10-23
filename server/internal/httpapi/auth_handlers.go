@@ -77,8 +77,10 @@ type meBody struct {
 	// An admin can change quotas, reset passwords and remove accounts, so the
 	// account is worth more than any single member's and is not left protected
 	// by a password alone. Members choose for themselves.
-	MustEnableTOTP bool  `json:"must_enable_totp"`
-	CreatedAt      int64 `json:"created_at"`
+	MustEnableTOTP     bool   `json:"must_enable_totp"`
+	DatasetPermissions string `json:"dataset_permissions,omitempty"`
+	Disabled           bool   `json:"disabled"`
+	CreatedAt          int64  `json:"created_at"`
 }
 
 func userBody(u models.User) *meBody {
@@ -86,9 +88,11 @@ func userBody(u models.User) *meBody {
 		ID: u.ID, Username: u.Username, DisplayName: u.PublicName(), Email: u.Email,
 		Role: string(u.Role), AvatarSeed: u.AvatarSeed, QuotaBytes: u.QuotaBytes,
 		QuotaBytesUsed: u.QuotaBytesUsed, MustChangePassword: u.MustChangePassword,
-		TOTPEnabled:    u.TOTPEnabled,
-		MustEnableTOTP: u.Role == models.RoleAdmin && !u.TOTPEnabled,
-		CreatedAt:      u.CreatedAt,
+		TOTPEnabled:        u.TOTPEnabled,
+		MustEnableTOTP:     u.Role == models.RoleAdmin && !u.TOTPEnabled,
+		DatasetPermissions: u.DatasetPermissions,
+		Disabled:           u.DisabledAt > 0,
+		CreatedAt:          u.CreatedAt,
 	}
 }
 

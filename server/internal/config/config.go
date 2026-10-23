@@ -15,9 +15,10 @@ import (
 
 // Config is the fully validated runtime configuration.
 type Config struct {
-	Env    string // dev | production
-	Addr   string
-	DBPath string
+	Env     string // dev | production
+	Addr    string
+	WebAddr string
+	DBPath  string
 
 	LibraryPath        string
 	ExternalMountsPath string
@@ -92,11 +93,42 @@ func Load() (*Config, error) {
 	if c.Env != "dev" && c.Env != "production" {
 		l.fail("APP_ENV must be dev or production, got %q", c.Env)
 	}
-	// 7443 is the port every guide, the app's own default and the QR code all
-	// assume. It used to default to 8080, which is the port the server listens
-	// on inside the container with Caddy in front of it; compose sets that
-	// explicitly now, so the default belongs to the case with nothing in front.
-	c.Addr = l.str("LISTEN_ADDR", ":7443")
+	// 9683 is the backend API port, 5437 is the web client port.
+	addr := l.str("LISTEN_ADDR", "")
+	if addr == "" {
+		if p := l.str("LOCALDRIVE_PORT", ""); p != "" {
+			if !strings.HasPrefix(p, ":") {
+				p = ":" + p
+			}
+			addr = p
+		} else if p := l.str("PORT", ""); p != "" {
+			if !strings.HasPrefix(p, ":") {
+				p = ":" + p
+			}
+			addr = p
+		} else {
+			addr = ":9683"
+		}
+	}
+	c.Addr = addr
+
+	webAddr := l.str("WEB_LISTEN_ADDR", "")
+	if webAddr == "" {
+		if p := l.str("LOCALDRIVE_WEB_PORT", ""); p != "" {
+			if !strings.HasPrefix(p, ":") {
+				p = ":" + p
+			}
+			webAddr = p
+		} else if p := l.str("WEB_PORT", ""); p != "" {
+			if !strings.HasPrefix(p, ":") {
+				p = ":" + p
+			}
+			webAddr = p
+		} else {
+			webAddr = ":5437"
+		}
+	}
+	c.WebAddr = webAddr
 	c.LogLevel = l.str("LOG_LEVEL", "info")
 
 	dataDir := l.str("DATA_DIR", defaultDataDir())

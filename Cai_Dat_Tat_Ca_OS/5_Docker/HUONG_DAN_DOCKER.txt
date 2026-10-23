@@ -1,0 +1,22 @@
+================================================================================
+             HƯỚNG DẪN CHẠY LOCAL DRIVE BẰNG DOCKER
+================================================================================
+
+1. CHẠY BẰNG DOCKER COMPOSE:
+   Chỉ cần đứng tại thư mục này và chạy:
+   docker compose up -d
+
+2. CHẠY BẰNG 1 LỆNH DOCKER RUN:
+   docker run -d \
+     --name localdrive \
+     --restart unless-stopped \
+     -p 7443:7443 \
+     -v /duong/dan/data:/var/lib/localdrive/data \
+     -v /duong/dan/db:/var/lib/localdrive \
+     localdrive:latest
+
+3. DÀNH CHO NAS SYNOLOGY, QNAP, TRUENAS, UNRAID:
+   - Import tệp docker-compose.yml vào Container Manager (Synology) hoặc Container Station (QNAP).
+   - Chọn thư mục mount lưu trữ trên ổ đĩa NAS của bạn.
+   - Truy cập qua IP của NAS trên cổng 7443: http://<IP_NAS>:7443
+================================================================================

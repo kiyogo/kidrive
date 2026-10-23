@@ -36,7 +36,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   ref.onDispose(refresh.dispose);
 
   return GoRouter(
-    initialLocation: Routes.files,
+    initialLocation: Routes.welcome,
     refreshListenable: refresh,
     debugLogDiagnostics: false,
     redirect: (context, routerState) {
@@ -223,6 +223,12 @@ final routerProvider = Provider<GoRouter>((ref) {
                   GoRoute(
                     path: section.id,
                     pageBuilder: _page(SettingsPage(section: section.id)),
+                    routes: <RouteBase>[
+                      GoRoute(
+                        path: 'add',
+                        pageBuilder: _page(SettingsPage(section: '${section.id}/add')),
+                      ),
+                    ],
                   ),
             ],
           ),

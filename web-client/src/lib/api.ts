@@ -59,7 +59,7 @@ export function schemeFor(host: string): "http" | "https" {
 
 /** Turns whatever somebody typed into an absolute base url. */
 export function normaliseServer(input: string): string {
-  const raw = input.trim();
+  const raw = input.trim().replace(/\/+$/, "");
   if (!raw) return "";
 
   const hadScheme = /^https?:\/\//i.test(raw);
@@ -72,8 +72,19 @@ export function normaliseServer(input: string): string {
     return "";
   }
 
-  // a bare address means "my Local Drive server", which is on its own port
-  if (!url.port && !hadScheme) url.port = String(DEFAULT_PORT);
+  // if no port was specified, default to Local Drive's port (9683),
+  // unless it is a public domain with https
+  if (!url.port) {
+    const isPublicHttps =
+      url.protocol === "https:" &&
+      !url.hostname.endsWith(".local") &&
+      !url.hostname.endsWith(".lan") &&
+      !url.hostname.endsWith(".home") &&
+      !/^\d{1,3}(\.\d{1,3}){3}$/.test(url.hostname);
+    if (!isPublicHttps) {
+      url.port = String(DEFAULT_PORT);
+    }
+  }
 
   return `${url.protocol}//${url.host}`.replace(/\/+$/, "");
 }
@@ -89,12 +100,15 @@ class Client {
 
   load() {
     if (typeof window === "undefined") return;
-    this.base = localStorage.getItem(KEY_BASE) ?? "";
+    this.base = localStorage.getItem(KEY_BASE) ?? (window.location.origin || "http://localhost:9683");
     this.access = localStorage.getItem(KEY_ACCESS) ?? "";
     this.refresh = localStorage.getItem(KEY_REFRESH) ?? "";
   }
 
   get server() {
+    if (!this.base && typeof window !== "undefined") {
+      this.base = localStorage.getItem(KEY_BASE) ?? (window.location.origin || "http://localhost:9683");
+    }
     return this.base;
   }
 
@@ -111,8 +125,14 @@ class Client {
   }
 
   setServer(url: string) {
+    const prev = this.base;
     this.base = url;
-    if (typeof window !== "undefined") localStorage.setItem(KEY_BASE, url);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(KEY_BASE, url);
+      if (prev !== url) {
+        window.dispatchEvent(new CustomEvent("ld_server_changed", { detail: url }));
+      }
+    }
   }
 
   setTokens(t: Tokens | null) {
@@ -133,14 +153,61 @@ class Client {
   absolute(path: string): string {
     if (!path) return "";
     if (/^https?:\/\//i.test(path)) return path;
-    return `${this.base}${path.startsWith("/") ? "" : "/"}${path}`;
+    const base = this.server || (typeof window !== "undefined" ? window.location.origin : "http://localhost:9683");
+    return `${base}${path.startsWith("/") ? "" : "/"}${path}`;
   }
 
-  /** A share link the server already made absolute is left alone. */
+  /**
+   * Turns a share link into a public URL using the active web client origin (port 3000)
+   * or the domain configured in Security Settings if set.
+   */
   publicLink(raw: string): string {
     if (!raw) return raw;
-    if (/^https?:\/\//i.test(raw)) return raw;
-    return this.absolute(raw);
+
+    let path = raw;
+    if (/^https?:\/\//i.test(raw)) {
+      try {
+        const u = new URL(raw);
+        path = u.pathname + u.search;
+      } catch {
+        path = raw;
+      }
+    }
+    if (!path.startsWith("/")) path = `/${path}`;
+
+    // 1. Check if custom domain is set in settings
+    let customDomain = "";
+    let customPort: number | null = null;
+    let customSsl = false;
+    if (typeof window !== "undefined") {
+      try {
+        const secRaw = localStorage.getItem("ld.settings.security");
+        if (secRaw) {
+          const sec = JSON.parse(secRaw);
+          if (sec.domain && typeof sec.domain === "string") {
+            const d = sec.domain.trim();
+            if (d && d !== "localdrive.lan" && d !== "localhost") {
+              customDomain = d;
+              if (sec.port) customPort = Number(sec.port);
+              if (sec.forceHttps || sec.sslEnabled) customSsl = true;
+            }
+          }
+        }
+      } catch {}
+    }
+
+    if (customDomain) {
+      const scheme = customSsl ? "https" : "http";
+      const portPart = customPort && customPort !== 80 && customPort !== 443 ? `:${customPort}` : "";
+      return `${scheme}://${customDomain}${portPart}${path}`;
+    }
+
+    // 2. Default to web client origin (port 5437)
+    if (typeof window !== "undefined") {
+      return `${window.location.origin}${path}`;
+    }
+
+    return `http://localhost:5437${path}`;
   }
 
   /**
@@ -169,7 +236,7 @@ class Client {
    * The header is both the working answer and the safer one.
    */
   async bytes(path: string, signal?: AbortSignal): Promise<Response> {
-    if (!this.base) throw new ApiError(0, "no_server", "No server is set.");
+    if (!this.server) throw new ApiError(0, "no_server", "No server is set.");
     const token =
       this.access || (typeof window === "undefined" ? "" : localStorage.getItem(KEY_ACCESS) ?? "");
     const response = await fetch(this.absolute(path), {
@@ -192,9 +259,14 @@ class Client {
       retry?: boolean;
     } = {},
   ): Promise<T> {
+    if (!this.base && typeof window !== "undefined") {
+      this.base = localStorage.getItem(KEY_BASE) ?? (window.location.origin || "http://localhost:9683");
+    }
     if (!this.base) throw new ApiError(0, "no_server", "No server is set.");
 
-    const url = new URL(this.absolute(path));
+    const rawUrl = this.absolute(path);
+    const fallbackBase = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:9683";
+    const url = new URL(rawUrl, fallbackBase);
     for (const [k, v] of Object.entries(options.query ?? {})) {
       if (v === undefined || v === null || v === "") continue;
       url.searchParams.set(k, String(v));
@@ -224,9 +296,11 @@ class Client {
     }
 
     // one silent refresh, then give up and let the session end
-    if (response.status === 401 && this.refresh && options.retry !== false) {
-      const ok = await this.refreshOnce();
-      if (ok) return this.request<T>(method, path, { ...options, retry: false });
+    if (response.status === 401) {
+      if (this.refresh && options.retry !== false) {
+        const ok = await this.refreshOnce();
+        if (ok) return this.request<T>(method, path, { ...options, retry: false });
+      }
       this.setTokens(null);
       this.onSignedOut?.();
     }
@@ -249,8 +323,12 @@ class Client {
     return parsed as T;
   }
 
-  get<T>(path: string, query?: Record<string, string | number | boolean | undefined | null>) {
-    return this.request<T>("GET", path, { query });
+  get<T>(
+    path: string,
+    query?: Record<string, string | number | boolean | undefined | null>,
+    options?: { signal?: AbortSignal },
+  ) {
+    return this.request<T>("GET", path, { query, signal: options?.signal });
   }
   post<T>(path: string, body?: unknown) {
     return this.request<T>("POST", path, { body });

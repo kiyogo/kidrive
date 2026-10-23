@@ -2,6 +2,8 @@ import '../../../../imports.dart';
 import '../../../auth/controller/session_controller.dart';
 import '../../settings_section.dart';
 import '../../widgets/account_card.dart';
+import '../../widgets/account_dialogs.dart';
+import '../../widgets/kiyo_drive_settings.dart';
 
 /// Settings, on desktop.
 ///
@@ -43,7 +45,8 @@ class SettingsPageDesktop extends ConsumerWidget {
         sections: sections,
         selected: current.id,
         onSelected: (id) => context.go(Routes.settingsSection(id)),
-        child: current.build() ?? const _AccountSection(),
+        child: current.build(isAdd: section?.endsWith('/add') == true) ??
+            const _AccountSection(),
       ),
     );
   }
@@ -69,6 +72,35 @@ class _AccountSection extends ConsumerWidget {
             children: <Widget>[
               const AccountCard(),
               const SizedBox(height: 24),
+              LdSettingGroup(
+                title: l10n.settingsAccount,
+                children: <Widget>[
+                  LdSettingRow(
+                    label: 'Đổi tên hiển thị',
+                    glyph: LdGlyph.person,
+                    onTap: () => showEditNameSheet(context, ref),
+                  ),
+                  LdSettingRow(
+                    label: l10n.newPassword,
+                    glyph: LdGlyph.lock,
+                    onTap: () => showChangePasswordSheet(context, ref),
+                  ),
+                  LdSettingRow(
+                    label: l10n.settingsSignOut,
+                    glyph: LdGlyph.logout,
+                    destructive: true,
+                    onTap: () => ref.read(sessionProvider.notifier).signOut(),
+                  ),
+                  LdSettingRow(
+                    label: 'Đăng xuất & Về màn hình bắt đầu',
+                    description: 'Ngắt kết nối máy chủ và trở về màn hình chào mừng',
+                    glyph: LdGlyph.server,
+                    destructive: true,
+                    onTap: () => ref.read(sessionProvider.notifier).switchNode(),
+                  ),
+                ],
+              ),
+              const KiyoDriveSettingsGroup(),
               LdSettingGroup(
                 title: l10n.storage,
                 children: <Widget>[

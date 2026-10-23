@@ -132,6 +132,10 @@ func NewHandler(d HandlerDeps) (*handler.Handler, error) {
 				return handler.HTTPResponse{}, err
 			}
 
+			// bytes are now firmly in object storage - sync to mirror and virtual drive
+			d.Files.AddToMirror(hook.Context, node)
+			d.Files.SyncFileToVirtualDrive(hook.Context, node)
+
 			// only now, with the bytes actually in storage. Queued any earlier
 			// these read an object that does not exist yet and fail for good
 			d.Files.ScheduleDerived(node)
@@ -155,7 +159,7 @@ func translate(err error) error {
 	case errors.Is(err, files.ErrForbidden):
 		return handler.NewError("ERR_FORBIDDEN", "you cannot add to that folder", http.StatusForbidden)
 	case errors.Is(err, files.ErrQuota):
-		return handler.NewError("ERR_QUOTA", "not enough space left in this account", http.StatusInsufficientStorage)
+		return handler.NewError("ERR_QUOTA", "Dung lượng lưu trữ đã đầy, không thể tải tệp lên", http.StatusInsufficientStorage)
 	case errors.Is(err, files.ErrInvalidName):
 		return handler.NewError("ERR_INVALID_NAME", "that filename cannot be used", http.StatusBadRequest)
 	case errors.Is(err, files.ErrNotAFolder):

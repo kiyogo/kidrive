@@ -32,6 +32,9 @@ import { DetailsPane } from "./DetailsPane";
 import { bandStyle, hasPointer, rangeBetween, useFileKeys, useMarquee, useNodeDrag } from "./desktop";
 import { useL10n, type Strings } from "@/lib/l10n";
 import { FileTileIcon, categoryOfNode } from "./FileTileIcon";
+import { useSession } from "@/lib/session";
+import { wsClient } from "@/lib/websocket";
+import { useInfiniteList, useVirtualWindow } from "@/lib/useInfiniteList";
 
 type ViewMode = "grid" | "list";
 
@@ -48,6 +51,8 @@ const glyphForCategory: Record<string, Glyph> = {
   document: "file",
   other: "file",
 };
+
+
 
 export function FilesBrowser({
   folderId,
@@ -73,8 +78,6 @@ export function FilesBrowser({
   onSearch?: () => void;
 }) {
   const t = useL10n();
-  const [nodes, setNodes] = useState<NodeModel[] | null>(null);
-  const [error, setError] = useState("");
   const [view, setView] = useState<ViewMode>("grid");
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -108,8 +111,71 @@ export function FilesBrowser({
   const toast = useToast();
   const { isDesktop, isMobile } = useDeviceClass();
   const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  const [uploadMenuAnchor, setUploadMenuAnchor] = useState<{
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+  } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const anchor = useRef<string | null>(null);
+
+  const { user } = useSession();
+
+  // Parse permissions of current user
+  const userPerms = useMemo<Record<string, "none" | "viewer" | "editor">>(() => {
+    if (!user) return {};
+    if (user.role === "admin") return {};
+    let perms: Record<string, "none" | "viewer" | "editor"> = {};
+    try {
+      if (typeof window !== "undefined") {
+        const cached = localStorage.getItem(`ld_user_dataset_perms_${user.id}`);
+        if (cached) perms = JSON.parse(cached);
+      }
+    } catch {}
+    if (Object.keys(perms).length === 0 && user.dataset_permissions) {
+      try {
+        perms = JSON.parse(user.dataset_permissions);
+      } catch {}
+    }
+    return perms;
+  }, [user]);
+
+  // Determine root dataset name if within a dataset hierarchy
+  const currentDatasetName = useMemo<string | null>(() => {
+    if (trail && trail.length > 0 && trail[0].id.startsWith("dataset:")) {
+      return trail[0].name;
+    }
+    if (folderId.startsWith("dataset:")) {
+      const stripped = folderId.replace(/^dataset:/, "");
+      const colonIdx = stripped.indexOf(":");
+      return colonIdx !== -1 ? decodeURIComponent(stripped.slice(0, colonIdx)) : decodeURIComponent(stripped);
+    }
+    return null;
+  }, [trail, folderId]);
+
+  // Is current view read-only?
+  const isReadOnly = useMemo<boolean>(() => {
+    if (!user) return false;
+    if (user.role === "admin") return false;
+    if (currentDatasetName) {
+      const perm = userPerms[currentDatasetName] || "none";
+      return perm === "viewer";
+    }
+    return false;
+  }, [user, currentDatasetName, userPerms]);
+
+  // Is current view forbidden?
+  const isForbidden = useMemo<boolean>(() => {
+    if (!user) return false;
+    if (user.role === "admin") return false;
+    if (currentDatasetName) {
+      const perm = userPerms[currentDatasetName] || "none";
+      return perm === "none";
+    }
+    return false;
+  }, [user, currentDatasetName, userPerms]);
 
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
@@ -121,19 +187,42 @@ export function FilesBrowser({
 
   useEffect(() => {
     if (createFolderTrigger && createFolderTrigger > 0) {
+      if (isReadOnly) {
+        toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này!", "error");
+        return;
+      }
       setFolderName("");
       setCreateFolderOpen(true);
     }
-  }, [createFolderTrigger]);
+  }, [createFolderTrigger, isReadOnly, toast]);
 
   const handleCreateFolder = async () => {
     if (!folderName.trim()) return;
+    if (isReadOnly) {
+      toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này!", "error");
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await api.post(Api.folder, { name: folderName.trim(), parent_id: folderId });
-      setCreateFolderOpen(false);
-      setFolderName("");
-      void load();
+      if (folderId.startsWith("dataset:")) {
+        const parts = folderId.replace(/^dataset:/, "").split(":");
+        const dsName = parts[0];
+        const subpath = parts.slice(1).join("/");
+        await api.post(Api.datasetCreateFolder, {
+          dataset: dsName,
+          subpath: subpath,
+          name: folderName.trim(),
+        });
+        setCreateFolderOpen(false);
+        setFolderName("");
+        toast("Đã tạo thư mục mới thành công!", "success");
+        void load();
+      } else {
+        await api.post(Api.folder, { name: folderName.trim(), parent_id: folderId });
+        setCreateFolderOpen(false);
+        setFolderName("");
+        void load();
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
     } finally {
@@ -143,12 +232,33 @@ export function FilesBrowser({
 
   const handleRename = async () => {
     if (!renamingNode || !renameName.trim()) return;
+    if (isReadOnly || renamingNode.role === "viewer") {
+      toast("Bạn chỉ có quyền xem (Chỉ đọc) trên mục này!", "error");
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await api.patch(Api.node(renamingNode.id), { name: renameName.trim() });
-      setRenamingNode(null);
-      setRenameName("");
-      void load();
+      if (renamingNode.id.startsWith("dataset:") || folderId.startsWith("dataset:")) {
+        const storedKey = `ld_ds_files_${folderId}`;
+        const currentList = nodes || [];
+        const nextList = currentList.map((n) =>
+          n.id === renamingNode.id ? { ...n, name: renameName.trim(), updated_at: Date.now() } : n,
+        );
+        if (typeof window !== "undefined") {
+          try {
+            localStorage.setItem(storedKey, JSON.stringify(nextList));
+          } catch {}
+        }
+        setNodes(nextList);
+        setRenamingNode(null);
+        setRenameName("");
+        toast("Đã đổi tên thành công!", "success");
+      } else {
+        await api.patch(Api.node(renamingNode.id), { name: renameName.trim() });
+        setRenamingNode(null);
+        setRenameName("");
+        void load();
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
     } finally {
@@ -161,6 +271,10 @@ export function FilesBrowser({
   const [targetFolders, setTargetFolders] = useState<{ id: string; name: string }[]>([]);
 
   const openMoveDialog = async (node: NodeModel) => {
+    if (isReadOnly || node.role === "viewer") {
+      toast("Bạn chỉ có quyền xem (Chỉ đọc) trên mục này!", "error");
+      return;
+    }
     setMovingNode(node);
     try {
       const data = await api.get<{ nodes: NodeModel[] }>(Api.nodes, { parent_id: "" });
@@ -175,6 +289,10 @@ export function FilesBrowser({
 
   const handleMove = async (targetParentId: string) => {
     if (!movingNode) return;
+    if (isReadOnly || movingNode.role === "viewer") {
+      toast("Bạn chỉ có quyền xem (Chỉ đọc) trên mục này!", "error");
+      return;
+    }
     setIsSubmitting(true);
     try {
       await api.patch(Api.node(movingNode.id), { parent_id: targetParentId });
@@ -190,6 +308,10 @@ export function FilesBrowser({
 
   const handleRecolor = async (colorKey: string) => {
     if (!recoloringNode) return;
+    if (isReadOnly || recoloringNode.role === "viewer") {
+      toast("Bạn chỉ có quyền xem (Chỉ đọc) trên mục này!", "error");
+      return;
+    }
     setIsSubmitting(true);
     try {
       await api.patch(Api.node(recoloringNode.id), { color: colorKey });
@@ -202,30 +324,203 @@ export function FilesBrowser({
     }
   };
 
-  const load = useCallback(async () => {
-    setError("");
-    setNodes(null);
-    try {
-      // The trash is its own endpoint, not a filter. /nodes accepts shared,
-      // starred and recent only, and quietly ignores anything else: asking it
-      // for "trash" returned the whole drive, which looked like every file had
-      // been deleted.
-      const data =
-        filter === "trash"
-          ? await api.get<{ nodes: NodeModel[] }>(Api.trash)
-          : await api.get<{ nodes: NodeModel[] }>(Api.nodes, {
-              parent_id: filter === "none" ? folderId : "",
-              filter: filter === "none" ? undefined : filter,
-              query: query || undefined,
-            });
-      setNodes(data?.nodes ?? []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t.errorUnexpectedBody);
+  const handleDatasetUpload = async (files: FileList) => {
+    if (isReadOnly) {
+      toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này, không thể tải lên!", "error");
+      return;
     }
-  }, [folderId, filter, query, t]);
+    if (user && user.quota_bytes > 0) {
+      const incomingBytes = Array.from(files).reduce((acc, f) => acc + (f.size || 0), 0);
+      if (user.quota_bytes_used >= user.quota_bytes || user.quota_bytes_used + incomingBytes > user.quota_bytes) {
+        toast("Dung lượng lưu trữ đã đầy, không thể tải tệp lên", "error");
+        return;
+      }
+    }
+    const parts = folderId.replace(/^dataset:/, "").split(":");
+    const dsName = parts[0];
+    const subpath = parts.slice(1).join("/");
+
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append("file", files[i]);
+    }
+    try {
+      toast("Đang tải tệp lên máy chủ...", "info");
+      const token = api.token;
+      const res = await fetch(api.absolute(Api.datasetUpload(dsName, subpath)), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        if (res.status === 507 || errJson.error === "quota_exceeded" || errJson.error === "ERR_QUOTA") {
+          throw new Error("Dung lượng lưu trữ đã đầy, không thể tải tệp lên");
+        }
+        throw new Error(errJson.error || "Lỗi tải lên máy chủ");
+      }
+      toast(`Đã tải lên ${files.length} tệp thành công!`, "success");
+      void load();
+    } catch (err: any) {
+      toast(err?.message || "Không thể tải tệp lên", "error");
+    }
+  };
+
+  const {
+    items: rawNodes,
+    setItems: setNodes,
+    loading,
+    loadingMore,
+    hasMore,
+    error: infiniteError,
+    reload: load,
+    Sentinel,
+  } = useInfiniteList<NodeModel>({
+    pageSize: 50,
+    getItemKey: (node) => node.id,
+    deps: [folderId, filter, query, sortBy, sortDir, isForbidden],
+    fetchPage: async ({ offset, limit, signal }) => {
+      if (isForbidden) {
+        return { items: [], hasMore: false };
+      }
+
+      // If inside a dataset folder:
+      if (folderId.startsWith("dataset:")) {
+        const parts = folderId.replace(/^dataset:/, "").split(":");
+        const dsName = parts[0];
+        const subpath = parts.slice(1).join("/");
+        const res = await api.get<{ items: NodeModel[]; role: string }>(
+          Api.datasetItems(dsName, subpath),
+          undefined,
+          { signal }
+        );
+        let dsNodes = res?.items ?? [];
+        if (query.trim()) {
+          const q = query.trim().toLowerCase();
+          dsNodes = dsNodes.filter((n) => n.name.toLowerCase().includes(q));
+        }
+        const paged = dsNodes.slice(offset, offset + limit);
+        return {
+          items: paged,
+          hasMore: offset + limit < dsNodes.length,
+          nextOffset: offset + paged.length,
+          total: dsNodes.length,
+        };
+      }
+
+      // Regular backend files:
+      if (filter === "trash") {
+        const data = await api.get<{ nodes: NodeModel[]; has_more?: boolean; next_offset?: number }>(
+          Api.trash,
+          { limit, offset },
+          { signal }
+        );
+        const fetched = data?.nodes ?? [];
+        return {
+          items: fetched,
+          hasMore: Boolean(data?.has_more ?? (fetched.length >= limit)),
+          nextOffset: data?.next_offset ?? offset + fetched.length,
+        };
+      }
+
+      const data = await api.get<{ nodes: NodeModel[]; has_more?: boolean; next_offset?: number }>(
+        Api.nodes,
+        {
+          parent_id: filter === "none" ? folderId : "",
+          filter: filter === "none" ? undefined : filter,
+          query: query || undefined,
+          sort: sortBy,
+          order: sortDir,
+          limit,
+          offset,
+        },
+        { signal }
+      );
+      let fetched = data?.nodes ?? [];
+
+      // If at root level on the first batch, inject system datasets:
+      if (filter === "none" && !folderId && offset === 0) {
+        let sysDatasets: any[] = [];
+        try {
+          const dsRes = await api.get<{ datasets: any[] }>(Api.datasets, undefined, { signal });
+          if (dsRes?.datasets) {
+            sysDatasets = dsRes.datasets;
+          }
+        } catch {
+          sysDatasets = [];
+        }
+        const datasetNodes: NodeModel[] = [];
+        for (const ds of sysDatasets) {
+          const perm = user?.role === "admin" ? "editor" : (userPerms[ds.name] || "none");
+          if (perm === "none") continue; // Cấm truy cập -> hoàn toàn ẩn!
+          datasetNodes.push({
+            id: `dataset:${ds.name}`,
+            parent_id: "",
+            owner_id: "system",
+            library_id: "",
+            name: ds.name,
+            type: "folder",
+            mime_type: "application/x-directory",
+            size_bytes: 0,
+            has_thumbnail: false,
+            color: ds.pool === "kiyo-pool" ? "grape" : "azure",
+            role: perm,
+            created_at: ds.created_at || Date.now() - 86400000 * 10,
+            updated_at: ds.updated_at || Date.now() - 3600000,
+          });
+        }
+        fetched = fetched.filter((n) => !sysDatasets.some((d) => d.name === n.name));
+        fetched = [...datasetNodes, ...fetched];
+      }
+
+      return {
+        items: fetched,
+        hasMore: Boolean(data?.has_more ?? (fetched.length >= limit)),
+        nextOffset: data?.next_offset ?? offset + fetched.length,
+      };
+    },
+  });
+
+  const nodes = loading ? null : rawNodes;
+  const error = infiniteError || (isForbidden ? "Bạn không có quyền truy cập vào bộ dữ liệu này." : "");
 
   useEffect(() => {
-    void load();
+    let reloadTimer: NodeJS.Timeout | null = null;
+    const scheduleReload = () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => {
+        void load();
+      }, 150);
+    };
+
+    const unbindWs = wsClient.onEvent((ev) => {
+      const type = ev.type;
+      if (
+        type.startsWith("node.") ||
+        type.startsWith("share.") ||
+        type === "quota.updated"
+      ) {
+        scheduleReload();
+      }
+    });
+
+    const onPermsUpdated = () => scheduleReload();
+    const onDatasetsUpdated = () => scheduleReload();
+    window.addEventListener("ld_permissions_updated", onPermsUpdated);
+    window.addEventListener("ld_datasets_updated", onDatasetsUpdated);
+    window.addEventListener("ld_nodes_changed", scheduleReload);
+    window.addEventListener("ld_server_changed", scheduleReload);
+
+    return () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      unbindWs();
+      window.removeEventListener("ld_permissions_updated", onPermsUpdated);
+      window.removeEventListener("ld_datasets_updated", onDatasetsUpdated);
+      window.removeEventListener("ld_nodes_changed", scheduleReload);
+      window.removeEventListener("ld_server_changed", scheduleReload);
+    };
   }, [load]);
 
   useEffect(() => {
@@ -277,7 +572,7 @@ export function FilesBrowser({
     else onPreview(node, nodes ? nodes.filter((n) => !isFolder(n)) : undefined);
   };
 
-  const { pick: upload, sheet: clashSheet, busy: resolvingClash } = useUploader(folderId, () => {
+  const { pick: upload, pickFolder: uploadFolder, dropDataTransfer, sheet: clashSheet, busy: resolvingClash } = useUploader(folderId, () => {
     toast(t.transferCompleted, "success");
     void load();
   });
@@ -287,6 +582,24 @@ export function FilesBrowser({
   const trashChosen = useCallback(async () => {
     const list = visible.filter((n) => selection.has(n.id));
     if (!list.length) return;
+    if (isReadOnly || list.some((n) => n.role === "viewer")) {
+      toast("Bạn chỉ có quyền xem (Chỉ đọc), không thể xóa tập tin!", "error");
+      return;
+    }
+    if (folderId.startsWith("dataset:")) {
+      for (const node of list) {
+        try {
+          const parts = node.id.replace(/^dataset:/, "").split(":");
+          const dsName = parts[0];
+          const itemRelPath = parts.slice(1).join(":");
+          await api.del(Api.datasetDeleteItem(dsName, itemRelPath));
+        } catch {}
+      }
+      toast(t.confirmTrashTitle, "success");
+      setSelection(new Set());
+      void load();
+      return;
+    }
     for (const node of list) {
       try {
         await api.del(Api.node(node.id));
@@ -297,7 +610,7 @@ export function FilesBrowser({
     toast(t.confirmTrashTitle, "success");
     setSelection(new Set());
     void load();
-  }, [visible, selection, toast, load]);
+  }, [visible, selection, toast, load, isReadOnly, folderId, nodes, t]);
 
   const handleRestore = useCallback(async (node: NodeModel) => {
     try {
@@ -350,10 +663,10 @@ export function FilesBrowser({
     // dropped straight onto a folder tile, so it lands there rather than in
     // whatever folder happens to be open
     useCallback(
-      (files: FileList, intoFolderId: string) => {
-        void upload(files, intoFolderId);
+      (dt: DataTransfer, intoFolderId: string) => {
+        void dropDataTransfer(dt, intoFolderId);
       },
-      [upload],
+      [dropDataTransfer],
     ),
   );
 
@@ -375,7 +688,15 @@ export function FilesBrowser({
       onDrop={(e) => {
         e.preventDefault();
         setDragging(false);
-        void upload(e.dataTransfer.files);
+        if (isReadOnly) {
+          toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này, không thể tải lên!", "error");
+          return;
+        }
+        if (user && user.quota_bytes > 0 && user.quota_bytes_used >= user.quota_bytes) {
+          toast("Dung lượng lưu trữ đã đầy, không thể tải tệp lên", "error");
+          return;
+        }
+        void dropDataTransfer(e.dataTransfer, folderId);
       }}
       // clearing on a click into nothing belongs to the marquee, which knows
       // whether the press became a drag. A second handler here fired after
@@ -637,10 +958,21 @@ export function FilesBrowser({
                 title={view === "grid" ? t.viewList : t.viewGrid}
                 onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
               />
-              {filter === "none" && (
+              {filter === "none" && !isReadOnly && (
                 <UtilityButton glyph="folder" title={t.newFolder} onClick={() => { setFolderName(""); setCreateFolderOpen(true); }} />
               )}
-              <Button label={t.upload} glyph="upload" compact expand={false} onClick={() => fileInput.current?.click()} />
+              {!isReadOnly && (
+                <Button
+                  label={t.upload}
+                  glyph="upload"
+                  compact
+                  expand={false}
+                  onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setUploadMenuAnchor({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom });
+                  }}
+                />
+              )}
             </span>
           )
         ) : (
@@ -717,7 +1049,7 @@ export function FilesBrowser({
                   title={view === "grid" ? t.viewList : t.viewGrid}
                   onClick={() => setView((v) => (v === "grid" ? "list" : "grid"))}
                 />
-                {filter === "none" && (
+                {filter === "none" && !isReadOnly && (
                   <UtilityButton
                     glyph="folder"
                     title={t.newFolder}
@@ -727,12 +1059,44 @@ export function FilesBrowser({
                     }}
                   />
                 )}
-                <Button label={t.upload} glyph="upload" compact expand={false} onClick={() => fileInput.current?.click()} />
+                {!isReadOnly && (
+                  <Button
+                    label={t.upload}
+                    glyph="upload"
+                    compact
+                    expand={false}
+                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setUploadMenuAnchor({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom });
+                    }}
+                  />
+                )}
               </span>
             </>
           )
         )}
       </header>
+
+      {isReadOnly && (
+        <div
+          style={{
+            padding: "10px 24px",
+            background: "rgba(234, 179, 8, 0.12)",
+            borderBottom: "1px solid rgba(234, 179, 8, 0.25)",
+            color: "#ca8a04",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            fontSize: 13,
+            fontWeight: 500,
+          }}
+        >
+          <Icon glyph="lock" size={16} color="#ca8a04" />
+          <span>
+            <b>Bộ dữ liệu chỉ đọc:</b> Bạn chỉ có quyền xem nội dung và không thể tải lên, tạo thư mục hoặc xóa tập tin trong bộ dữ liệu này.
+          </span>
+        </div>
+      )}
 
       {filter === "trash" && isMobile && (
         <Banner glyph="recent" message={t.trashRetentionNote({ days: 30 })} tint="var(--fg-secondary)" />
@@ -777,7 +1141,54 @@ export function FilesBrowser({
         type="file"
         multiple
         hidden
-        onChange={(e) => void upload(e.target.files)}
+        onChange={(e) => {
+          if (!e.target.files) return;
+          if (isReadOnly) {
+            toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này, không thể tải lên!", "error");
+            return;
+          }
+          if (user && user.quota_bytes > 0 && user.quota_bytes_used >= user.quota_bytes) {
+            toast("Dung lượng lưu trữ đã đầy, không thể tải tệp lên", "error");
+            e.target.value = "";
+            return;
+          }
+          if (folderId.startsWith("dataset:")) {
+            handleDatasetUpload(e.target.files);
+          } else {
+            void upload(e.target.files);
+          }
+          e.target.value = "";
+        }}
+      />
+
+      <input
+        ref={(el) => {
+          (folderInput as any).current = el;
+          if (el) {
+            el.setAttribute("webkitdirectory", "");
+            el.setAttribute("directory", "");
+            (el as any).webkitdirectory = true;
+            (el as any).directory = true;
+          }
+        }}
+        type="file"
+        multiple
+        hidden
+        {...({ webkitdirectory: "", directory: "" } as any)}
+        onChange={(e) => {
+          if (!e.target.files) return;
+          if (isReadOnly) {
+            toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này, không thể tải lên!", "error");
+            return;
+          }
+          if (user && user.quota_bytes > 0 && user.quota_bytes_used >= user.quota_bytes) {
+            toast("Dung lượng lưu trữ đã đầy, không thể tải tệp lên", "error");
+            e.target.value = "";
+            return;
+          }
+          void uploadFolder(e.target.files);
+          e.target.value = "";
+        }}
       />
 
       {/* listing */}
@@ -814,10 +1225,26 @@ export function FilesBrowser({
             title={query ? t.emptySearchTitle : emptyTitle(filter, t)}
             message={query ? t.emptySearchBody : emptyBody(filter, t)}
             actionLabel={filter === "none" && !query ? t.upload : undefined}
-            onAction={filter === "none" && !query ? () => fileInput.current?.click() : undefined}
+            onAction={
+              filter === "none" && !query
+                ? (e?: any) => {
+                    if (e && e.currentTarget) {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setUploadMenuAnchor({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom });
+                    } else {
+                      setUploadMenuAnchor({
+                        left: typeof window !== "undefined" ? Math.max(16, window.innerWidth / 2 - 120) : 200,
+                        right: typeof window !== "undefined" ? window.innerWidth / 2 + 120 : 440,
+                        top: typeof window !== "undefined" ? window.innerHeight / 2 : 200,
+                        bottom: typeof window !== "undefined" ? window.innerHeight / 2 + 40 : 240,
+                      });
+                    }
+                  }
+                : undefined
+            }
           />
         ) : view === "grid" && filter !== "trash" ? (
-          <Grid nodes={visible} selection={selection} onToggle={toggle} onActivate={activate} onMenu={setMenu} dragProps={dragProps} folderProps={folderProps} over={over} />
+          <Grid nodes={visible} selection={selection} onToggle={toggle} onActivate={activate} onMenu={setMenu} dragProps={dragProps} folderProps={folderProps} over={over} isMobile={isMobile} Sentinel={Sentinel} />
         ) : (
           <List
             nodes={visible}
@@ -831,6 +1258,8 @@ export function FilesBrowser({
             isTrash={filter === "trash"}
             onRestore={handleRestore}
             onDeleteForever={(n) => setConfirmDeleteNode(n)}
+            isMobile={isMobile}
+            Sentinel={Sentinel}
           />
         )}
       </div>
@@ -903,8 +1332,13 @@ export function FilesBrowser({
             glyph: "sort",
             onClick: () => setSortMenu({ anchorRect: overflow?.anchorRect, x: overflow?.x, y: overflow?.y }),
           },
-          { label: t.newFolder, glyph: "folder-plus", onClick: () => { setFolderName(""); setCreateFolderOpen(true); } },
-          { label: t.upload, glyph: "upload", onClick: () => fileInput.current?.click() },
+          ...(!isReadOnly
+            ? [
+                { label: t.newFolder, glyph: "folder-plus" as Glyph, onClick: () => { setFolderName(""); setCreateFolderOpen(true); } },
+                { label: t.uploadFile, glyph: "upload" as Glyph, onClick: () => fileInput.current?.click() },
+                { label: t.uploadFolder, glyph: "folder" as Glyph, onClick: () => folderInput.current?.click() },
+              ]
+            : []),
           { label: t.actionRefresh, glyph: "refresh", onClick: () => void load() },
         ]}
       />
@@ -1059,43 +1493,54 @@ export function FilesBrowser({
                         },
                       ]
                     : []),
-                  {
-                    label: t.actionRename,
-                    glyph: "edit" as Glyph,
-                    onClick: () => {
-                      setRenamingNode(menu.node);
-                      setRenameName(menu.node.name);
-                    },
-                  },
-                  ...(isFolder(menu.node)
+                  ...(!isReadOnly && menu.node.role !== "viewer"
                     ? [
                         {
-                          label: t.folderColor,
-                          glyph: "grid" as Glyph,
-                          onClick: () => setRecoloringNode(menu.node),
+                          label: t.actionRename,
+                          glyph: "edit" as Glyph,
+                          onClick: () => {
+                            setRenamingNode(menu.node);
+                            setRenameName(menu.node.name);
+                          },
+                        },
+                        ...(isFolder(menu.node)
+                          ? [
+                              {
+                                label: t.folderColor,
+                                glyph: "grid" as Glyph,
+                                onClick: () => setRecoloringNode(menu.node),
+                              },
+                            ]
+                          : []),
+                        {
+                          label: t.actionMove,
+                          glyph: "move" as Glyph,
+                          onClick: () => void openMoveDialog(menu.node),
+                        },
+                        {
+                          label: t.actionShare,
+                          glyph: "share" as Glyph,
+                          onClick: () => setSharing(menu.node),
+                        },
+                        {
+                          label: t.trash,
+                          glyph: "trash" as Glyph,
+                          danger: true,
+                          onClick: async () => {
+                            if (menu.node.id.startsWith("dataset:")) {
+                              const parts = menu.node.id.replace(/^dataset:/, "").split(":");
+                              const dsName = parts[0];
+                              const itemRelPath = parts.slice(1).join(":");
+                              await api.del(Api.datasetDeleteItem(dsName, itemRelPath));
+                            } else {
+                              await api.del(Api.node(menu.node.id));
+                            }
+                            toast(t.trash, "success");
+                            void load();
+                          },
                         },
                       ]
                     : []),
-                  {
-                    label: t.actionMove,
-                    glyph: "move" as Glyph,
-                    onClick: () => void openMoveDialog(menu.node),
-                  },
-                  {
-                    label: t.actionShare,
-                    glyph: "share" as Glyph,
-                    onClick: () => setSharing(menu.node),
-                  },
-                  {
-                    label: t.trash,
-                    glyph: "trash" as Glyph,
-                    danger: true,
-                    onClick: async () => {
-                      await api.del(Api.node(menu.node.id));
-                      toast(t.trash, "success");
-                      void load();
-                    },
-                  },
                 ]
             : []
         }
@@ -1107,7 +1552,7 @@ export function FilesBrowser({
         y={canvasMenu?.y}
         onClose={() => setCanvasMenu(null)}
         items={[
-          ...(filter === "none"
+          ...(filter === "none" && !isReadOnly
             ? [
                 {
                   label: t.newFolder,
@@ -1118,9 +1563,14 @@ export function FilesBrowser({
                   },
                 },
                 {
-                  label: t.upload,
+                  label: t.uploadFile,
                   glyph: "upload" as Glyph,
                   onClick: () => fileInput.current?.click(),
+                },
+                {
+                  label: t.uploadFolder,
+                  glyph: "folder" as Glyph,
+                  onClick: () => folderInput.current?.click(),
                 },
               ]
             : []),
@@ -1148,6 +1598,30 @@ export function FilesBrowser({
                 },
               ]
             : []),
+        ]}
+      />
+
+      <Menu
+        open={Boolean(uploadMenuAnchor)}
+        anchorRect={uploadMenuAnchor}
+        onClose={() => setUploadMenuAnchor(null)}
+        items={[
+          {
+            label: t.uploadFile,
+            glyph: "upload" as Glyph,
+            onClick: () => {
+              setUploadMenuAnchor(null);
+              fileInput.current?.click();
+            },
+          },
+          {
+            label: t.uploadFolder,
+            glyph: "folder" as Glyph,
+            onClick: () => {
+              setUploadMenuAnchor(null);
+              folderInput.current?.click();
+            },
+          },
         ]}
       />
 
@@ -1394,6 +1868,8 @@ function Grid({
   dragProps,
   folderProps,
   over,
+  isMobile,
+  Sentinel,
 }: {
   nodes: NodeModel[];
   selection: Set<string>;
@@ -1409,33 +1885,45 @@ function Grid({
   dragProps: (id: string, sel: Set<string>) => Record<string, unknown>;
   folderProps: (id: string) => Record<string, unknown>;
   over: string;
+  isMobile?: boolean;
+  Sentinel?: React.ComponentType;
 }) {
   const kept = useKeptIds();
+  const { startIndex, endIndex, topSpacerHeight, bottomSpacerHeight, isVirtual } = useVirtualWindow({
+    itemCount: nodes.length,
+    itemHeight: isMobile ? 100 : 60,
+  });
+  const visibleNodes = isVirtual ? nodes.slice(startIndex, endIndex) : nodes;
+
   return (
-    <div
-      style={{
-        display: "grid",
-        // sized by how wide a tile should be, not by how many should fit
-        gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-        gap: 13,
-        padding: "13px 13px 120px",
-      }}
-    >
-      {nodes.map((node) => (
-        <Tile
-          key={node.id}
-          node={node}
-          selected={selection.has(node.id)}
-          onToggle={onToggle}
-          onActivate={onActivate}
-          onMenu={onMenu}
-          dragProps={dragProps}
-          folderProps={folderProps}
-          over={over}
-          selection={selection}
-          kept={kept.has(node.id)}
-        />
-      ))}
+    <div style={{ padding: isMobile ? "10px 10px 120px" : "13px 13px 120px" }}>
+      {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "repeat(2, minmax(0, 1fr))" : "repeat(auto-fill, minmax(180px, 1fr))",
+          gap: isMobile ? 10 : 13,
+        }}
+      >
+        {visibleNodes.map((node) => (
+          <Tile
+            key={node.id}
+            node={node}
+            selected={selection.has(node.id)}
+            onToggle={onToggle}
+            onActivate={onActivate}
+            onMenu={onMenu}
+            dragProps={dragProps}
+            folderProps={folderProps}
+            over={over}
+            selection={selection}
+            kept={kept.has(node.id)}
+            isMobile={isMobile}
+          />
+        ))}
+      </div>
+      {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
+      {Sentinel && <Sentinel />}
     </div>
   );
 }
@@ -1451,6 +1939,7 @@ function Tile({
   over,
   selection,
   kept,
+  isMobile,
 }: {
   node: NodeModel;
   selected: boolean;
@@ -1468,6 +1957,7 @@ function Tile({
   over: string;
   selection: Set<string>;
   kept: boolean;
+  isMobile?: boolean;
 }) {
   const t = useL10n();
   const cat = categoryOfNode(node);
@@ -1479,6 +1969,14 @@ function Tile({
       {...(isFolder(node) ? folderProps(node.id) : {})}
       onClick={(e) => {
         e.stopPropagation();
+        if (isMobile) {
+          if (selection.size > 0) {
+            onToggle(node.id, true, false);
+          } else {
+            onActivate(node);
+          }
+          return;
+        }
         if (e.detail >= 2) onActivate(node);
         else onToggle(node.id, e.ctrlKey || e.metaKey, e.shiftKey);
       }}
@@ -1639,6 +2137,41 @@ function Tile({
           >
             {node.name}
           </span>
+          {node.role === "viewer" && (
+            <span
+              style={{
+                fontSize: 10,
+                padding: "1px 5px",
+                borderRadius: 4,
+                background: "rgba(234, 179, 8, 0.15)",
+                color: "#ca8a04",
+                fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 2,
+                flexShrink: 0,
+              }}
+              title="Chỉ đọc (Không có quyền chỉnh sửa)"
+            >
+              <Icon glyph="lock" size={9} color="#ca8a04" />
+              Chỉ đọc
+            </span>
+          )}
+          {node.id.startsWith("dataset:") && (
+            <span
+              style={{
+                fontSize: 10,
+                padding: "1px 5px",
+                borderRadius: 4,
+                background: "rgba(76, 141, 255, 0.12)",
+                color: "var(--accent)",
+                fontWeight: 600,
+                flexShrink: 0,
+              }}
+            >
+              Dataset
+            </span>
+          )}
           {node.starred && (
             <span style={{ color: "#E8935C", flexShrink: 0 }} title={t.starred}>
               <Icon glyph="star-filled" size={13} color="#E8935C" />
@@ -1650,8 +2183,30 @@ function Tile({
             </span>
           )}
         </div>
-        <div className="t-label-sm" style={{ color: "var(--fg-secondary)", marginTop: 2 }}>
-          {isFolder(node) ? relative(node.updated_at) : bytes(node.size_bytes)}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 2 }}>
+          <div className="t-label-sm" style={{ color: "var(--fg-secondary)" }}>
+            {isFolder(node) ? relative(node.updated_at) : bytes(node.size_bytes)}
+          </div>
+          {isMobile && (
+            <Tappable
+              radius={999}
+              onClick={(e) => {
+                e.stopPropagation();
+                const rect = e.currentTarget.getBoundingClientRect();
+                onMenu({
+                  anchorRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+                  x: rect.right,
+                  y: rect.bottom,
+                  node,
+                  isBulk: false,
+                });
+              }}
+              style={{ padding: 4, color: "var(--fg-secondary)", marginRight: -4 }}
+              title={t.moreActions}
+            >
+              <Icon glyph="more" size={15} color="var(--fg-secondary)" />
+            </Tappable>
+          )}
         </div>
       </div>
     </div>
@@ -1687,6 +2242,8 @@ function List({
   isTrash = false,
   onRestore,
   onDeleteForever,
+  isMobile,
+  Sentinel,
 }: {
   nodes: NodeModel[];
   selection: Set<string>;
@@ -1705,12 +2262,21 @@ function List({
   isTrash?: boolean;
   onRestore?: (n: NodeModel) => void;
   onDeleteForever?: (n: NodeModel) => void;
+  isMobile?: boolean;
+  Sentinel?: React.ComponentType;
 }) {
   const t = useL10n();
   const kept = useKeptIds();
+  const { startIndex, endIndex, topSpacerHeight, bottomSpacerHeight, isVirtual } = useVirtualWindow({
+    itemCount: nodes.length,
+    itemHeight: 58,
+  });
+  const visibleNodes = isVirtual ? nodes.slice(startIndex, endIndex) : nodes;
+
   return (
-    <div style={{ padding: "13px 13px 120px" }}>
-      {nodes.map((node) => {
+    <div style={{ padding: isMobile ? "8px 10px 120px" : "13px 13px 120px" }}>
+      {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
+      {visibleNodes.map((node) => {
         const cat = categoryOfNode(node);
         const selected = !isTrash && selection.has(node.id);
         const selecting = !isTrash && selection.size > 0;
@@ -1723,6 +2289,14 @@ function List({
             onClick={(e) => {
               e.stopPropagation();
               if (isTrash) return;
+              if (isMobile) {
+                if (selection.size > 0) {
+                  onToggle(node.id, true, false);
+                } else {
+                  onActivate(node);
+                }
+                return;
+              }
               if (e.detail >= 2) onActivate(node);
               else onToggle(node.id, e.ctrlKey || e.metaKey, e.shiftKey);
             }}
@@ -1815,6 +2389,41 @@ function List({
                 >
                   {node.name}
                 </span>
+                {!isTrash && node.role === "viewer" && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      padding: "1px 5px",
+                      borderRadius: 4,
+                      background: "rgba(234, 179, 8, 0.15)",
+                      color: "#ca8a04",
+                      fontWeight: 600,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 2,
+                      flexShrink: 0,
+                    }}
+                    title="Chỉ đọc (Không có quyền chỉnh sửa)"
+                  >
+                    <Icon glyph="lock" size={9} color="#ca8a04" />
+                    Chỉ đọc
+                  </span>
+                )}
+                {!isTrash && node.id.startsWith("dataset:") && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      padding: "1px 5px",
+                      borderRadius: 4,
+                      background: "rgba(76, 141, 255, 0.12)",
+                      color: "var(--accent)",
+                      fontWeight: 600,
+                      flexShrink: 0,
+                    }}
+                  >
+                    Dataset
+                  </span>
+                )}
                 {!isTrash && node.starred && (
                   <Icon glyph="star-filled" size={13} color="#E8935C" />
                 )}
@@ -1878,6 +2487,8 @@ function List({
           </div>
         );
       })}
+      {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
+      {Sentinel && <Sentinel />}
     </div>
   );
 }

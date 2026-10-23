@@ -70,7 +70,11 @@ export function DetailsPane({
   return (
     <aside
       onClick={(e) => e.stopPropagation()}
-      className="ld-enter"
+      onPointerDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerUp={(e) => e.stopPropagation()}
+      className="ld-enter menu"
+      role="region"
       style={{
         position: "absolute",
         insetInlineEnd: 0,
@@ -84,14 +88,30 @@ export function DetailsPane({
         padding: 20,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
-        <span
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18, minWidth: 0, width: "100%" }}>
+        <h2
           className="t-title-sm"
-          style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            lineHeight: "24px",
+            color: "var(--fg-primary)",
+            margin: 0,
+            display: "block",
+          }}
+          title={node.name}
         >
           {node.name}
-        </span>
-        <Tappable onClick={onClose} radius={999} style={{ padding: 6 }} title={t.actionCancel}>
+        </h2>
+        <Tappable
+          onClick={onClose}
+          radius={999}
+          style={{ padding: 6, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+          title={t.actionCancel}
+        >
           <Icon glyph="close" size={18} />
         </Tappable>
       </div>
@@ -363,16 +383,52 @@ function Facts({ node }: { node: NodeModel }) {
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {rows.map(([k, v], i) => (
-        <div key={i} style={{ display: "flex", gap: 12 }}>
-          <span className="t-body-sm" style={{ color: "var(--fg-muted)", width: 92, flex: "none" }}>
-            {k}
-          </span>
-          <span className="t-body-md" style={{ overflowWrap: "anywhere" }}>
-            {v}
-          </span>
-        </div>
-      ))}
+      {rows.map(([k, v], i) => {
+        const isName = k === t.sortName;
+        return (
+          <div key={i} style={{ display: "flex", alignItems: isName ? "flex-start" : "center", gap: 12 }}>
+            <span
+              className="t-body-sm"
+              style={{
+                color: "var(--fg-muted)",
+                width: 104,
+                minWidth: 104,
+                flexShrink: 0,
+                whiteSpace: "nowrap",
+                lineHeight: "20px",
+              }}
+            >
+              {k}
+            </span>
+            <span
+              className="t-body-md"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                lineHeight: "20px",
+                color: "var(--fg-primary)",
+                ...(isName
+                  ? {
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      overflowWrap: "anywhere",
+                      wordBreak: "break-word",
+                      maxHeight: "40px",
+                    }
+                  : {
+                      overflowWrap: "anywhere",
+                    }),
+              }}
+              title={v}
+            >
+              {v}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -388,24 +444,64 @@ function Action({
   onClick: () => void;
   danger?: boolean;
 }) {
+  const itemColor = danger ? "var(--warning)" : "var(--fg-primary)";
   return (
     <Tappable
       onClick={onClick}
-      radius={12}
+      radius={10}
       style={{
         display: "flex",
         alignItems: "center",
         gap: 12,
         width: "100%",
-        padding: "11px 12px",
-        color: danger ? "var(--warning)" : "var(--fg-primary)",
+        height: 44,
+        minHeight: 44,
+        padding: "0 12px",
+        color: itemColor,
+        boxSizing: "border-box",
       }}
     >
-      <Icon glyph={glyph} size={18} color={danger ? "var(--warning)" : "var(--fg-secondary)"} />
-      <span className="t-body-lg" style={{ flex: 1 }}>
+      <div
+        style={{
+          width: 24,
+          height: 24,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <Icon glyph={glyph} size={18} color={danger ? "var(--warning)" : "var(--fg-secondary)"} />
+      </div>
+      <span
+        className="t-body-md"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          fontWeight: 500,
+          color: itemColor,
+          textAlign: "left",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          lineHeight: "44px",
+        }}
+      >
         {label}
       </span>
-      <Icon glyph="chevron-right" size={16} color="var(--fg-muted)" />
+      <div
+        style={{
+          width: 16,
+          height: 16,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <Icon glyph="chevron-right" size={14} color="var(--fg-muted)" />
+      </div>
     </Tappable>
   );
 }
+

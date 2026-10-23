@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 import '../../../core/router/deep_links.dart';
+import '../../../core/services/desktop_shell_service.dart';
 import '../../../imports.dart';
 import '../../auth/controller/session_controller.dart';
 import '../../upload/controller/transfer_controller.dart';
@@ -41,7 +42,7 @@ class _DeepLinkListenerState extends ConsumerState<DeepLinkListener> {
         .deepLinks
         .listen((link) => unawaited(_openLink(link)));
 
-    if (kIsWeb) return;
+    if (kIsWeb || DesktopShellService.isDesktop) return;
 
     // a share that arrived while the app was already running
     _shares = ReceiveSharingIntent.instance.getMediaStream().listen(

@@ -900,7 +900,11 @@ export function SetupScreen() {
 
   const go = async () => {
     if (password !== confirm) {
-      setError("Those passwords do not match.");
+      setError(t.passwordsDoNotMatch);
+      return;
+    }
+    if (password.length < 6) {
+      setError(t.passwordTooShort);
       return;
     }
     setBusy(true);
@@ -908,7 +912,7 @@ export function SetupScreen() {
     try {
       await setupFirstAdmin({ username: username.trim(), password, serverName: serverName.trim() });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create the account.");
+      setError(e instanceof Error ? e.message : t.errorUnexpectedTitle);
     } finally {
       setBusy(false);
     }
@@ -946,10 +950,10 @@ export function SetupScreen() {
       <div className="ld-enter" style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <Mark size={64} />
         <h1 className="t-headline" style={{ margin: "24px 0 8px", textAlign: "center" }}>
-          Make your account
+          {t.setupTitle}
         </h1>
         <p className="t-body-md" style={{ color: "var(--fg-secondary)", margin: "0 0 24px", textAlign: "center" }}>
-          This server has nobody on it yet. The first account becomes the administrator.
+          {t.setupBody}
         </p>
         <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
           <TextField value={serverName} onChange={setServerName} label={t.serverNameLabel} glyph="server" dir="ltr" />
@@ -978,10 +982,10 @@ export function PendingApprovalScreen() {
       <div className="ld-enter" style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
         <Mark size={72} stage="connected" />
         <h1 className="t-headline" style={{ margin: "26px 0 8px" }}>
-          Waiting to be let in
+          {t.waitingForApprovalTitle}
         </h1>
         <p className="t-body-md" style={{ color: "var(--fg-secondary)", margin: "0 0 24px", maxWidth: 420 }}>
-          This is a new device, so somebody already signed in has to approve it.
+          {t.waitingForApprovalBody}
         </p>
         <Spinner size={28} />
         <div style={{ width: "100%", marginTop: 28 }}>

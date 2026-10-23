@@ -1,16 +1,18 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Button, Sheet } from "@/components/ui";
+import { Button, Sheet, showToast } from "@/components/ui";
 import { api } from "./api";
 import { Api } from "./endpoints";
 import { useL10n } from "./l10n";
+import { useSession } from "./session";
+import { executeFolderUpload, planDataTransfer, planFromFiles } from "./folderUpload";
 import { isFolder, type NodeModel } from "./models";
 import { transfers } from "./upload";
 
 /**
- * Picking files, including the question that has to be asked when a name is
- * already taken. Ported from upload/widgets/duplicate_sheet.
+ * Picking files and uncompressed folders, including the question that has to
+ * be asked when a name is already taken. Ported from upload/widgets/duplicate_sheet.
  *
  * It lives here rather than in the files browser because two places start an
  * upload: the button in the shell and the browser's own drop target. Two
@@ -19,6 +21,7 @@ import { transfers } from "./upload";
  */
 export function useUploader(parentId: string, onDone?: () => void) {
   const t = useL10n();
+  const { user } = useSession();
   const [clash, setClash] = useState<{
     files: File[];
     clashes: File[];
@@ -26,12 +29,48 @@ export function useUploader(parentId: string, onDone?: () => void) {
     into: string;
   } | null>(null);
 
+  const checkQuota = useCallback(
+    (incomingBytes = 0): boolean => {
+      if (user && user.quota_bytes > 0) {
+        if (
+          user.quota_bytes_used >= user.quota_bytes ||
+          user.quota_bytes_used + incomingBytes > user.quota_bytes
+        ) {
+          showToast("Dung lượng lưu trữ đã đầy, không thể tải tệp lên", "error");
+          return false;
+        }
+      }
+      return true;
+    },
+    [user],
+  );
+
   const send = useCallback(
     async (list: File[], into: string, replacing?: Map<File, string>) => {
       if (!list.length) return;
+      const totalSize = list.reduce((acc, f) => acc + (f.size || 0), 0);
+      if (!checkQuota(totalSize)) return;
       await transfers.enqueue(list, into, onDone, replacing);
     },
-    [onDone],
+    [onDone, checkQuota],
+  );
+
+  const pickFolder = useCallback(
+    async (files: FileList | File[] | null, into = parentId) => {
+      if (!files) return;
+      const list = Array.from(files);
+      if (!list.length) return;
+      const totalSize = list.reduce((acc, f) => acc + (f.size || 0), 0);
+      if (!checkQuota(totalSize)) return;
+
+      const plan = planFromFiles(files);
+      await executeFolderUpload({
+        plan,
+        destinationParentId: into,
+        onDone,
+      });
+    },
+    [parentId, onDone, checkQuota],
   );
 
   const pick = useCallback(
@@ -40,6 +79,18 @@ export function useUploader(parentId: string, onDone?: () => void) {
     async (files: FileList | File[] | null, into = parentId) => {
       const list = files ? Array.from(files) : [];
       if (!list.length) return;
+
+      const totalSize = list.reduce((acc, f) => acc + (f.size || 0), 0);
+      if (!checkQuota(totalSize)) return;
+
+      // If any file has relative path, it's a folder upload
+      const hasRelativePath = list.some(
+        (f) => (f as any).webkitRelativePath && String((f as any).webkitRelativePath).includes("/"),
+      );
+      if (hasRelativePath) {
+        await pickFolder(list, into);
+        return;
+      }
 
       // failing to read the destination is not a reason to block an upload:
       // the server renames rather than overwrites, so the worst case is a
@@ -65,7 +116,27 @@ export function useUploader(parentId: string, onDone?: () => void) {
       }
       setClash({ files: list, clashes, existing, into });
     },
-    [parentId, send],
+    [parentId, send, pickFolder, checkQuota],
+  );
+
+  const dropDataTransfer = useCallback(
+    async (dt: DataTransfer, into = parentId) => {
+      if (!checkQuota()) return;
+      const plan = await planDataTransfer(dt);
+      const totalSize = plan.files.reduce((acc, f) => acc + (f.file.size || 0), 0);
+      if (!checkQuota(totalSize)) return;
+      if (plan.folders.length > 0) {
+        await executeFolderUpload({
+          plan,
+          destinationParentId: into,
+          onDone,
+        });
+      } else {
+        const plainFiles = plan.files.map((p) => p.file);
+        await pick(plainFiles, into);
+      }
+    },
+    [parentId, onDone, pick, checkQuota],
   );
 
   // one question for the whole batch: asking per file would mean twelve
@@ -122,5 +193,5 @@ export function useUploader(parentId: string, onDone?: () => void) {
     </Sheet>
   ) : null;
 
-  return { pick, sheet, busy: clash !== null };
+  return { pick, pickFolder, dropDataTransfer, sheet, busy: clash !== null };
 }

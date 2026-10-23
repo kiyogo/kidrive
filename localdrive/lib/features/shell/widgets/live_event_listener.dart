@@ -6,6 +6,9 @@ import '../../offline/controller/offline_controller.dart';
 import '../../storage/providers/storage_providers.dart';
 import '../../videos/providers/videos_providers.dart';
 
+import '../../upload/controller/transfer_controller.dart';
+import '../../upload/models/transfer_model.dart';
+
 /// One listener for the whole app turns live events into cache invalidations
 /// and toasts, so no page has to subscribe itself.
 ///
@@ -25,6 +28,19 @@ class LiveEventListener extends ConsumerWidget {
 
     ref.listen(eventStreamProvider, (previous, next) {
       next.whenData((event) => _handle(context, ref, event));
+    });
+
+    ref.listen<List<TransferModel>>(transferControllerProvider, (previous, next) {
+      final prevFailed = previous
+              ?.where((t) => t.failureReason == FailureReason.quota)
+              .map((t) => t.id)
+              .toSet() ??
+          <String>{};
+      final hasNewQuotaFailure = next.any(
+          (t) => t.failureReason == FailureReason.quota && !prevFailed.contains(t.id));
+      if (hasNewQuotaFailure && context.mounted) {
+        LdToast.error(context, 'Dung lượng lưu trữ đã đầy, không thể tải tệp lên');
+      }
     });
 
     // a reconnect refetches, since events may have been missed while the
@@ -64,6 +80,9 @@ class LiveEventListener extends ConsumerWidget {
               quotaBytes: event.payload['quota_bytes'] as int? ?? 0,
               quotaBytesUsed: event.payload['quota_bytes_used'] as int? ?? 0,
             );
+
+      case 'quota.exceeded':
+        LdToast.error(context, 'Dung lượng lưu trữ đã đầy, không thể tải tệp lên');
 
       case WsEvents.shareReceived:
         // the receiving side gets the sender's face and the item's own icon,

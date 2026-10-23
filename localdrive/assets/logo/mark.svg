@@ -1,28 +1,37 @@
 <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" fill="none">
-  <!-- The Local Drive mark. Solid layered panels, not a thin outline: a back
-       panel with the tab, a sheet peeking out of the opening, and a front
-       panel over it, the way a real folder reads at a glance.
+  <!-- The Local Drive mark. Modern layered folder panels with an Apple-style
+       smooth sloped tab, crisp sheet, vibrant azure front panel, and a bold,
+       crystal-clear cloud silhouette that stays sharp at any scale.
 
        The app draws this same geometry in code so each layer can animate
        independently during onboarding. This file is the source for the raster
        exports, and the two must stay in step. -->
 
-  <!-- logo-back: the folder back and its tab, always visible -->
-  <path id="logo-back" d="M10 12 L24 12 L29 18 L54 18 Q58 18 58 22 L58 46
-    Q58 50 54 50 L10 50 Q6 50 6 46 L6 16 Q6 12 10 12 Z" fill="#2A6FD6"/>
+  <defs>
+    <linearGradient id="logo-back-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1E40AF"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <linearGradient id="logo-front-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="logo-sheet-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#E2E8F0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- logo-back: the folder back and its modern rounded tab, always visible -->
+  <path id="logo-back" d="M11 12 H24 C27 12 29 17 33 17 H53 C56 17 58 19 58 22 V46 C58 49 56 51 53 51 H11 C8 51 6 49 6 46 V17 C6 14 8 12 11 12 Z" fill="url(#logo-back-grad)"/>
 
   <!-- logo-sheet: the contents, rising out of the opening on connect -->
-  <path id="logo-sheet" d="M14 21 L50 21 Q52 21 52 23 L52 44 L12 44 L12 23
-    Q12 21 14 21 Z" fill="#DCE3EE"/>
+  <path id="logo-sheet" d="M15 19 H49 C51 19 52 20 52 22 V43 H12 V22 C12 20 13 19 15 19 Z" fill="url(#logo-sheet-grad)"/>
 
-  <!-- logo-front: the front panel, the brightest shape -->
-  <path id="logo-front" d="M10 26 L54 26 Q58 26 58 30 L58 46 Q58 50 54 50
-    L10 50 Q6 50 6 46 L6 30 Q6 26 10 26 Z" fill="#4C8DFF"/>
+  <!-- logo-front: the front panel, vibrant azure with sleek top highlight -->
+  <path id="logo-front" d="M11 25 H53 C56 25 58 27 58 30 V46 C58 49 56 51 53 51 H11 C8 51 6 49 6 46 V30 C6 27 8 25 11 25 Z" fill="url(#logo-front-grad)"/>
+  <path id="logo-front-highlight" d="M11 25 H53 C56 25 58 27 58 30 V31 C58 28 56 26 53 26 H11 C8 26 6 28 6 31 V30 C6 27 8 25 11 25 Z" fill="#FFFFFF" fill-opacity="0.25"/>
 
-  <!-- logo-arc: the sync arc on the front panel, draws in on the language step -->
-  <path id="logo-arc" d="M25.5 41.5 A8 8 0 1 1 38.5 41.5" stroke="#FFFFFF"
-    stroke-width="3" stroke-linecap="round"/>
-
-  <!-- logo-node: the connection dot, fills solid on the server connect step -->
-  <circle id="logo-node" cx="32" cy="38" r="3.2" fill="#FFFFFF"/>
+  <!-- logo-cloud: the bold, crisp cloud silhouette, centered on the front flap -->
+  <path id="logo-cloud" d="M 25 46 C 21.7 46 19 43.3 19 40 C 19 37.4 21.2 35.2 24.2 34.5 C 24.5 30.5 28.2 28 32 28 C 35.8 28 39.5 30.5 39.8 34.5 C 42.8 35.2 45 37.4 45 40 C 45 43.3 42.3 46 39 46 Z" fill="#FFFFFF"/>
 </svg>

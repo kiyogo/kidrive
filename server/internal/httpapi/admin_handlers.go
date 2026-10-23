@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/MultiX0/LocalDrive/server/internal/audit"
+	"github.com/MultiX0/LocalDrive/server/internal/auth"
 	mw "github.com/MultiX0/LocalDrive/server/internal/middleware"
 	"github.com/MultiX0/LocalDrive/server/internal/models"
 	"github.com/MultiX0/LocalDrive/server/internal/settings"
@@ -14,6 +15,33 @@ import (
 )
 
 func (a *API) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
+	limit := intQuery(r, "limit", 0)
+	offset := intQuery(r, "offset", 0)
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
+	sortBy := strings.TrimSpace(r.URL.Query().Get("sort"))
+	order := strings.TrimSpace(r.URL.Query().Get("order"))
+
+	if limit > 0 {
+		list, total, err := a.auth.ListUsersPaged(r.Context(), limit, offset, search, sortBy, order)
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		out := make([]*meBody, 0, len(list))
+		for _, u := range list {
+			out = append(out, userBody(u))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"users":       out,
+			"total":       total,
+			"limit":       limit,
+			"offset":      offset,
+			"has_more":    int64(offset+len(out)) < total,
+			"next_offset": offset + len(out),
+		})
+		return
+	}
+
 	list, err := a.auth.ListUsers(r.Context())
 	if err != nil {
 		a.fail(w, r, err)
@@ -24,6 +52,88 @@ func (a *API) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		out = append(out, userBody(u))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"users": out})
+}
+
+type adminCreateUserReq struct {
+	Username           string `json:"username"`
+	Password           string `json:"password"`
+	DisplayName        string `json:"display_name"`
+	Email              string `json:"email"`
+	Role               string `json:"role"`
+	QuotaBytes         int64  `json:"quota_bytes"`
+	DatasetPermissions string `json:"dataset_permissions"`
+}
+
+func (a *API) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
+	var req adminCreateUserReq
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	adminID, ip := caller(r)
+	created, err := a.auth.AdminCreateUser(r.Context(), adminID, auth.AdminCreateUserParams{
+		Username:           req.Username,
+		Password:           req.Password,
+		DisplayName:        req.DisplayName,
+		Email:              req.Email,
+		Role:               models.Role(strings.TrimSpace(req.Role)),
+		QuotaBytes:         req.QuotaBytes,
+		DatasetPermissions: req.DatasetPermissions,
+	}, ip)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"user": userBody(created)})
+}
+
+type adminUpdateUserReq struct {
+	Username           string  `json:"username"`
+	Password           string  `json:"password"`
+	DisplayName        string  `json:"display_name"`
+	Email              string  `json:"email"`
+	Role               string  `json:"role"`
+	QuotaBytes         *int64  `json:"quota_bytes"`
+	Disabled           *bool   `json:"disabled"`
+	DatasetPermissions *string `json:"dataset_permissions"`
+}
+
+func (a *API) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
+	var req adminUpdateUserReq
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	adminID, ip := caller(r)
+	targetID := chi.URLParam(r, "id")
+	err := a.auth.AdminUpdateUser(r.Context(), adminID, targetID, auth.AdminUpdateUserParams{
+		Username:           req.Username,
+		Password:           req.Password,
+		DisplayName:        req.DisplayName,
+		Email:              req.Email,
+		Role:               models.Role(strings.TrimSpace(req.Role)),
+		QuotaBytes:         req.QuotaBytes,
+		Disabled:           req.Disabled,
+		DatasetPermissions: req.DatasetPermissions,
+	}, ip)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	updated, err := a.auth.UserByID(r.Context(), targetID)
+	if err != nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"user": userBody(updated)})
+}
+
+func (a *API) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	adminID, ip := caller(r)
+	targetID := chi.URLParam(r, "id")
+	if err := a.auth.AdminDeleteUser(r.Context(), adminID, targetID, ip); err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type resetPasswordRequest struct {

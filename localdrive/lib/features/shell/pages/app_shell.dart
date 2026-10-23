@@ -1,4 +1,5 @@
 import 'package:url_launcher/url_launcher.dart';
+import '../../../core/services/desktop_shell_service.dart';
 import '../../../imports.dart';
 import '../../auth/controller/session_controller.dart';
 import '../../files/providers/files_providers.dart';
@@ -57,6 +58,9 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   @override
   Widget build(BuildContext context) {
+    if (DesktopShellService.isDesktop) {
+      return _DesktopShell(child: widget.child);
+    }
     return LdResponsive(
       mobile: (context) => _MobileShell(child: widget.child),
       tablet: (context) => _MobileShell(child: widget.child),
@@ -305,71 +309,91 @@ class _DesktopShell extends ConsumerWidget {
       }
     }
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Column(
-        children: <Widget>[
-          // Minimise, maximise and close, drawn in the brand rather than the
-          // system's. Every other desktop screen already had this through
-          // LdDesktopScaffold; the main shell builds its own Scaffold and so
-          // came up with no window controls and its header against the corner.
-          const LdWindowBar(),
-          Expanded(
-            child: Row(
-              children: <Widget>[
-                LdSidebar(
-                  currentIndex: current,
-                  onSelected: (index) => context.go(destinations[index].route),
-                  onTertiarySelected: (index) {
-                    final route = destinations[index].route;
-                    if (kIsWeb) {
-                      launchUrl(Uri.parse(route), webOnlyWindowName: '_blank');
-                    } else {
-                      context.go(route);
-                    }
-                  },
-                  items: destinations
-                      .map((d) => d.item)
-                      .toList(growable: false),
-                  header: Builder(
-                    builder: (context) => LdButton(
-                      label: l10n.upload,
-                      glyph: LdGlyph.upload,
-                      compact: true,
-                      onPressed: () => unawaitedCreate(
-                        context,
-                        ref,
-                        anchor: anchorOf(context),
-                      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 800;
+
+        return Scaffold(
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          body: Stack(
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  LdSidebar(
+                    compact: compact,
+                    currentIndex: current,
+                    onSelected: (index) => context.go(destinations[index].route),
+                    onTertiarySelected: (index) {
+                      final route = destinations[index].route;
+                      if (kIsWeb) {
+                        launchUrl(Uri.parse(route), webOnlyWindowName: '_blank');
+                      } else {
+                        context.go(route);
+                      }
+                    },
+                    items: destinations
+                        .map((d) => d.item)
+                        .toList(growable: false),
+                    header: compact
+                        ? Builder(
+                            builder: (context) => Center(
+                              child: LdUtilityButton(
+                                glyph: LdGlyph.upload,
+                                tooltip: l10n.upload,
+                                onPressed: () => unawaitedCreate(
+                                  context,
+                                  ref,
+                                  anchor: anchorOf(context),
+                                ),
+                              ),
+                            ),
+                          )
+                        : Builder(
+                            builder: (context) => LdButton(
+                              label: l10n.upload,
+                              glyph: LdGlyph.upload,
+                              compact: true,
+                              onPressed: () => unawaitedCreate(
+                                context,
+                                ref,
+                                anchor: anchorOf(context),
+                              ),
+                            ),
+                          ),
+                    footer: compact ? null : const _QuotaFooter(),
+                  ),
+                  Expanded(
+                    child: Column(
+                      children: <Widget>[
+                        const _Banners(),
+                        Expanded(
+                          child: Stack(
+                            children: <Widget>[
+                              child,
+                              const Positioned(
+                                right: 20,
+                                bottom: 20,
+                                width: 360,
+                                child: UploadsTray(),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  footer: const _QuotaFooter(),
+                ],
+              ),
+              if (LdWindowBar.isVisible)
+                const Positioned(
+                  top: 0,
+                  right: 0,
+                  child: LdWindowButtons(),
                 ),
-                Expanded(
-                  child: Column(
-                    children: <Widget>[
-                      const _Banners(),
-                      Expanded(
-                        child: Stack(
-                          children: <Widget>[
-                            child,
-                            const Positioned(
-                              right: 20,
-                              bottom: 20,
-                              width: 360,
-                              child: UploadsTray(),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -403,71 +427,118 @@ class _QuotaFooter extends ConsumerWidget {
       orElse: () => -1,
     );
 
-    // nothing useful to say until at least one of the two numbers is known
-    if (diskFree < 0 && !user.hasQuota) return const SizedBox.shrink();
-
     final used = user.quotaBytesUsed;
-    final quotaLeft = user.hasQuota ? user.quotaBytes - used : null;
 
-    // the disk can be the tighter limit even with a generous quota
-    final limit = switch ((quotaLeft, diskFree)) {
-      (null, final free) => free,
-      (final left, < 0) => left!,
-      (final left, final free) => left! < free ? left : free,
-    };
-    // only a floor. An upper clamp here used to be written as `1 << 62`, which
-    // is fine on the vm and wrong on the web: dart compiles a shift to
-    // javascript's 32 bit bitwise operator, so the bound wrapped to something
-    // tiny and clamped a real 14 GB of free space down to zero.
-    final remaining = limit < 0 ? 0 : limit;
+    // Determine max capacity: user quota, or library total, or fallback 10 GB
+    final int maxCapacity;
+    if (user.quotaBytes > 0) {
+      maxCapacity = user.quotaBytes;
+    } else {
+      final summaryTotal = libraries.maybeWhen(
+        data: (summary) => summary.totalBytes > 0
+            ? summary.totalBytes
+            : (used + (summary.totalFree > 0 ? summary.totalFree : 0)),
+        orElse: () => 0,
+      );
+      maxCapacity = summaryTotal > 0 ? summaryTotal : (10 * 1024 * 1024 * 1024);
+    }
 
-    final capacity = used + remaining;
-    final fraction = capacity <= 0 ? 0.0 : (used / capacity).clamp(0.0, 1.0);
-    final diskIsTheLimit =
-        user.hasQuota && diskFree >= 0 && diskFree < quotaLeft!;
+    final double fraction = maxCapacity > 0
+        ? (used / maxCapacity).clamp(0.0, 1.0)
+        : 0.0;
+
+    final percentVal = maxCapacity > 0 ? (used / maxCapacity * 100) : 0.0;
+    final String percentText;
+    if (percentVal > 0 && percentVal < 1.0) {
+      percentText = '${percentVal.toStringAsFixed(1)}%';
+    } else {
+      percentText = '${percentVal.round()}%';
+    }
+
+    // Determine warning only when actually running out of space or over quota
+    final String? warningText;
+    final Color barColor;
+    if (used >= maxCapacity) {
+      warningText = l10n.errorQuotaTitle;
+      barColor = const Color(0xFFE53935);
+    } else if (fraction >= 0.90) {
+      warningText = 'Sắp hết dung lượng ($percentText)';
+      barColor = LdColors.accentWarning;
+    } else if (diskFree >= 0 && diskFree < 512 * 1024 * 1024) {
+      // Physical disk genuinely critically low (< 512 MB)
+      warningText = l10n.sidebarStorageDiskLimited;
+      barColor = LdColors.accentWarning;
+    } else {
+      warningText = null;
+      barColor = LdColors.accentPrimary;
+    }
 
     final labels = Theme.of(context).textTheme.labelSmall;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        LdProgressBar(value: fraction, height: 6),
-        const SizedBox(height: 8),
-        Row(
+    final usedBase = l10n.sidebarStorageUsed(LdFormat.bytes(context, used));
+    final usedText = usedBase;
+    final freeBytes = (maxCapacity - used).clamp(0, maxCapacity);
+    final freeText = l10n.sidebarStorageFree(LdFormat.bytes(context, freeBytes));
+
+    return LdTappable(
+      onTap: () => context.go(Routes.storage),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Flexible(
-              child: Text(
-                l10n.sidebarStorageUsed(LdFormat.bytes(context, used)),
-                style: labels,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+            LdProgressBar(
+              value: fraction,
+              height: 6,
+              color: barColor,
+              background: context.isDark
+                  ? const Color(0xFF2A2D35)
+                  : const Color(0xFFE2E8F0),
             ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                l10n.sidebarStorageFree(LdFormat.bytes(context, remaining)),
-                style: labels?.copyWith(
-                  color: context.surfaces.foregroundMuted,
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: <Widget>[
+                Flexible(
+                  child: Text(
+                    usedText,
+                    style: labels?.copyWith(fontWeight: FontWeight.w600),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                textAlign: TextAlign.end,
-                maxLines: 1,
+                const SizedBox(width: 8),
+                Text(
+                  freeText,
+                  style: labels?.copyWith(
+                    color: context.surfaces.foregroundSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.end,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+            if (warningText != null) ...<Widget>[
+              const SizedBox(height: 4),
+              Text(
+                warningText,
+                style: labels?.copyWith(
+                  color: (used >= maxCapacity)
+                      ? const Color(0xFFE53935)
+                      : LdColors.accentWarning,
+                  fontWeight: FontWeight.w500,
+                ),
+                maxLines: 2,
+                softWrap: true,
                 overflow: TextOverflow.ellipsis,
               ),
-            ),
+            ],
           ],
         ),
-        // worth saying, because otherwise the free figure looks like it
-        // contradicts the quota the account was given
-        if (diskIsTheLimit) ...<Widget>[
-          const SizedBox(height: 4),
-          Text(
-            l10n.sidebarStorageDiskLimited,
-            style: labels?.copyWith(color: LdColors.accentWarning),
-            maxLines: 2,
-          ),
-        ],
-      ],
+      ),
     );
   }
 }

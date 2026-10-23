@@ -1,0 +1,16 @@
+services:
+  localdrive:
+    image: localdrive:latest
+    container_name: localdrive
+    restart: unless-stopped
+    ports:
+      - "5437:5437"
+      - "9683:9683"
+    environment:
+      - LOCALDRIVE_PORT=9683
+      - LOCALDRIVE_WEB_PORT=5437
+      - LOCALDRIVE_DATA_DIR=/var/lib/localdrive/data
+      - LOCALDRIVE_DATABASE_PATH=/var/lib/localdrive/localdrive.db
+    volumes:
+      - ./data:/var/lib/localdrive/data
+      - ./db:/var/lib/localdrive

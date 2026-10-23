@@ -39,7 +39,6 @@ class DraggableNode extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     if (!desktopBehaviour(context)) return child;
 
-    final registered = MarqueeItem(id: node.id, child: child);
     final draggable = node.role.canMove
         ? Draggable<NodeDrag>(
             data: NodeDrag(_moving(ref)),
@@ -47,17 +46,22 @@ class DraggableNode extends ConsumerWidget {
             feedback: _Badge(count: _moving(ref).length, name: node.name),
             // the tile stays put and dims, rather than leaving a hole in the
             // grid that everything after it slides into mid drag
-            childWhenDragging: Opacity(opacity: 0.35, child: registered),
-            child: registered,
+            childWhenDragging: Opacity(opacity: 0.35, child: child),
+            child: child,
           )
-        : registered;
+        : child;
 
-    if (!node.isFolder) return draggable;
-    // a folder is a target twice over: for nodes dragged inside the app, and
-    // for files dragged in from the desktop
-    return FolderDropTarget(
+    final content = node.isFolder
+        ? FolderDropTarget(
+            id: node.id,
+            child: _FolderTarget(node: node, child: draggable),
+          )
+        : draggable;
+
+    return MarqueeItem(
+      key: ValueKey<String>('marquee_${node.id}'),
       id: node.id,
-      child: _FolderTarget(node: node, child: draggable),
+      child: content,
     );
   }
 

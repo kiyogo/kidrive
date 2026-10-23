@@ -11,7 +11,11 @@ export function bytes(n: number): string {
     value /= unit;
     i++;
   }
-  return `${value >= 10 ? Math.round(value) : value.toFixed(1)} ${suffixes[i]}`;
+  let numStr = value >= 10 ? Math.round(value).toString() : value.toFixed(1);
+  if (numStr.endsWith(".0")) {
+    numStr = numStr.slice(0, -2);
+  }
+  return `${numStr} ${suffixes[i]}`;
 }
 
 /**

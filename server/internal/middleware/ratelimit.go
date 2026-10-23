@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -99,6 +100,13 @@ func ByUser(r *http.Request) string {
 func RateLimit(limiter *Limiter, key KeyFunc) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Video streaming, media Range requests, downloads and thumbnails should NEVER be rate limited.
+			// When seeking in a video, the player rapidly fires HTTP Range requests.
+			// Rate limiting them returns HTTP 429 and breaks video scrubbing/seeking.
+			if r.Header.Get("Range") != "" || strings.HasSuffix(r.URL.Path, "/download") || strings.HasSuffix(r.URL.Path, "/preview") || strings.HasSuffix(r.URL.Path, "/thumbnail") {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if !limiter.Allow(key(r)) {
 				w.Header().Set("Retry-After", "1")
 				w.Header().Set("Content-Type", "application/json")

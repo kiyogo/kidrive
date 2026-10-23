@@ -59,9 +59,15 @@ abstract final class LdContextMenu {
     required List<LdMenuAction> actions,
     String? subtitle,
     Offset? anchor,
+    bool isContextMenu = false,
   }) {
     if (LdDeviceScope.of(context).isDesktop && anchor != null) {
-      return _showFloating(context, actions: actions, anchor: anchor);
+      return _showFloating(
+        context,
+        actions: actions,
+        anchor: anchor,
+        isContextMenu: isContextMenu,
+      );
     }
     return LdBottomSheet.show<String>(
       context,
@@ -85,20 +91,46 @@ abstract final class LdContextMenu {
     BuildContext context, {
     required List<LdMenuAction> actions,
     required Offset anchor,
+    bool isContextMenu = false,
   }) {
-    final overlay =
-        Overlay.of(context).context.findRenderObject()! as RenderBox;
-    final size = overlay.size;
+    final rootOverlay =
+        Overlay.maybeOf(context, rootOverlay: true) ?? Overlay.of(context);
+    final renderBox = rootOverlay.context.findRenderObject() as RenderBox?;
+    final size = renderBox?.size ?? MediaQuery.sizeOf(context);
 
     // keep the panel on screen and aligned naturally to the anchor
     const panelWidth = 240.0;
     final estimatedHeight = actions.length * 46.0 + 12;
-    final left = (anchor.dx > size.width / 2 || anchor.dx + panelWidth > size.width)
-        ? (anchor.dx - panelWidth).clamp(8.0, size.width - panelWidth - 8)
-        : anchor.dx.clamp(8.0, size.width - panelWidth - 8);
-    final top = (anchor.dy + estimatedHeight > size.height)
-        ? (anchor.dy - estimatedHeight).clamp(8.0, size.height - estimatedHeight - 8)
-        : anchor.dy.clamp(8.0, size.height - estimatedHeight - 8);
+
+    final maxLeft = (size.width - panelWidth - 8.0).clamp(8.0, double.infinity);
+    final maxTop = (size.height - estimatedHeight - 8.0).clamp(8.0, double.infinity);
+
+    final double left;
+    final double top;
+
+    if (isContextMenu) {
+      // Right-click context menus: anchor is the cursor coordinate.
+      // Open with top-left at the cursor unless it overflows screen edges.
+      if (anchor.dx + panelWidth > size.width - 8.0) {
+        left = (anchor.dx - panelWidth).clamp(8.0, maxLeft);
+      } else {
+        left = anchor.dx.clamp(8.0, maxLeft);
+      }
+
+      if (anchor.dy + estimatedHeight > size.height - 8.0) {
+        top = (anchor.dy - estimatedHeight).clamp(8.0, maxTop);
+      } else {
+        top = anchor.dy.clamp(8.0, maxTop);
+      }
+    } else {
+      // Button dropdown menus (from anchorOf):
+      left = (anchor.dx > size.width / 2 || anchor.dx + panelWidth > size.width - 8.0)
+          ? (anchor.dx - panelWidth).clamp(8.0, maxLeft)
+          : anchor.dx.clamp(8.0, maxLeft);
+      top = (anchor.dy + estimatedHeight > size.height - 8.0)
+          ? (anchor.dy - estimatedHeight).clamp(8.0, maxTop)
+          : anchor.dy.clamp(8.0, maxTop);
+    }
 
     return showGeneralDialog<String>(
       context: context,
@@ -107,9 +139,18 @@ abstract final class LdContextMenu {
       barrierLabel: 'menu',
       transitionDuration: Duration.zero,
       pageBuilder: (context, _, _) => const SizedBox.shrink(),
-      transitionBuilder: (context, _, _, _) {
+      transitionBuilder: (dialogContext, _, _, _) {
         return Stack(
           children: <Widget>[
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => Navigator.of(dialogContext).pop(),
+                onSecondaryTap: () => Navigator.of(dialogContext).pop(),
+                onSecondaryTapDown: (_) => Navigator.of(dialogContext).pop(),
+                child: const ColoredBox(color: Colors.transparent),
+              ),
+            ),
             Positioned(
               left: left.toDouble(),
               top: top.toDouble(),
@@ -121,9 +162,9 @@ abstract final class LdContextMenu {
                   // surface in the app. The stroke is what separates it
                   // from what is behind it, not a shadow
                   decoration: BoxDecoration(
-                    color: context.surfaces.backgroundElevated,
+                    color: dialogContext.surfaces.backgroundElevated,
                     borderRadius: LdRadii.tileRadius,
-                    border: Border.all(color: context.surfaces.strokeOutline),
+                    border: Border.all(color: dialogContext.surfaces.strokeOutline),
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   // a long menu near the bottom of a short window would
@@ -139,7 +180,7 @@ abstract final class LdContextMenu {
                             action: action,
                             dense: true,
                             onTap: () =>
-                                Navigator.of(context).pop(action.id),
+                                Navigator.of(dialogContext).pop(action.id),
                           ),
                       ],
                     ),

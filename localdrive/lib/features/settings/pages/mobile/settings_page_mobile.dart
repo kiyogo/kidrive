@@ -2,6 +2,8 @@ import '../../../../imports.dart';
 import '../../../auth/controller/session_controller.dart';
 import '../../settings_section.dart';
 import '../../widgets/account_card.dart';
+import '../../widgets/account_dialogs.dart';
+import '../../widgets/kiyo_drive_settings.dart';
 
 /// Settings, on a phone: one section at a time, pushed and popped, with a back
 /// control in the header rather than a list beside the content.
@@ -66,6 +68,16 @@ class _Overview extends ConsumerWidget {
           title: l10n.settingsAccount,
           children: <Widget>[
             LdSettingRow(
+              label: 'Đổi tên hiển thị',
+              glyph: LdGlyph.person,
+              onTap: () => showEditNameSheet(context, ref),
+            ),
+            LdSettingRow(
+              label: l10n.newPassword,
+              glyph: LdGlyph.lock,
+              onTap: () => showChangePasswordSheet(context, ref),
+            ),
+            LdSettingRow(
               label: SettingsSection.appearance.title(l10n),
               glyph: SettingsSection.appearance.glyph,
               description: switch (themeMode) {
@@ -122,9 +134,6 @@ class _Overview extends ConsumerWidget {
               },
               onTap: () => context.go(Routes.storage),
             ),
-            // deliberately beside the server storage row: two different
-            // numbers, and seeing them together makes the difference
-            // between them obvious
             if (SettingsSection.downloads.isAvailable(isAdmin: isAdmin))
               _SectionRow(SettingsSection.downloads),
             LdSettingRow(
@@ -138,12 +147,10 @@ class _Overview extends ConsumerWidget {
           LdSettingGroup(
             title: l10n.settingsServer,
             children: <Widget>[
-              _SectionRow(SettingsSection.networkShares),
-              _SectionRow(SettingsSection.disks),
-              _SectionRow(SettingsSection.users),
               _SectionRow(SettingsSection.server),
             ],
           ),
+        const KiyoDriveSettingsGroup(),
         LdSettingGroup(
           title: l10n.settingsAbout,
           children: <Widget>[
@@ -158,6 +165,13 @@ class _Overview extends ConsumerWidget {
               glyph: LdGlyph.logout,
               destructive: true,
               onTap: () => ref.read(sessionProvider.notifier).signOut(),
+            ),
+            LdSettingRow(
+              label: 'Đăng xuất & Về màn hình bắt đầu',
+              description: 'Ngắt kết nối máy chủ và về màn hình chào mừng',
+              glyph: LdGlyph.server,
+              destructive: true,
+              onTap: () => ref.read(sessionProvider.notifier).switchNode(),
             ),
           ],
         ),

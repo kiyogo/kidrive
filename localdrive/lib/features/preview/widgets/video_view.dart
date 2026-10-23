@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -386,6 +387,11 @@ class _ChromeState extends ConsumerState<_Chrome> {
             widget.onToggleFullscreen();
             return KeyEventResult.handled;
           }
+          if (event.logicalKey == LogicalKeyboardKey.escape &&
+              widget.isFullscreen) {
+            widget.onToggleFullscreen();
+            return KeyEventResult.handled;
+          }
           if (event.logicalKey == LogicalKeyboardKey.space) {
             _togglePlay();
             return KeyEventResult.handled;
@@ -472,6 +478,7 @@ class _ChromeState extends ConsumerState<_Chrome> {
                   ignoring: !_visible,
                   child: _TopScrim(
                     node: widget.node!,
+                    isFullscreen: widget.isFullscreen,
                     onBack: widget.onBack ??
                         () => Navigator.of(context).maybePop(),
                     onMore: (ctx, anchor) => _openMenu(ctx, anchor),
@@ -513,17 +520,20 @@ class _ChromeState extends ConsumerState<_Chrome> {
 class _TopScrim extends ConsumerWidget {
   const _TopScrim({
     required this.node,
+    required this.isFullscreen,
     required this.onBack,
     required this.onMore,
   });
 
   final NodeModel node;
+  final bool isFullscreen;
   final VoidCallback onBack;
   final void Function(BuildContext context, Offset anchor) onMore;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = L10n.of(context);
+    final showWindowButtons = LdWindowBar.isVisible && !isFullscreen;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -536,58 +546,81 @@ class _TopScrim extends ConsumerWidget {
           ],
         ),
       ),
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: <Widget>[
-              _MediaButton(
-                glyph: LdGlyph.chevronLeft,
-                tooltip: l10n.actionBack,
-                onPressed: onBack,
+      child: Stack(
+        children: <Widget>[
+          if (showWindowButtons)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 140,
+              height: 36,
+              child: MoveWindow(),
+            ),
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                8,
+                showWindowButtons ? 148 : 16,
+                8,
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Text(
-                      node.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
+              child: Row(
+                children: <Widget>[
+                  _MediaButton(
+                    glyph: LdGlyph.chevronLeft,
+                    tooltip: l10n.actionBack,
+                    onPressed: onBack,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Text(
+                          node.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                        Text(
+                          LdFormat.bytes(context, node.sizeBytes),
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: Colors.white70,
+                              ),
+                        ),
+                      ],
                     ),
-                    Text(
-                      LdFormat.bytes(context, node.sizeBytes),
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: Colors.white70,
-                          ),
+                  ),
+                  _MediaButton(
+                    glyph: LdGlyph.download,
+                    tooltip: l10n.download,
+                    onPressed: () =>
+                        downloadNodes(context, ref, <NodeModel>[node]),
+                  ),
+                  const SizedBox(width: 4),
+                  Builder(
+                    builder: (context) => _MediaButton(
+                      glyph: LdGlyph.more,
+                      tooltip: l10n.moreActions,
+                      onPressed: () => onMore(context, anchorOf(context)),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              _MediaButton(
-                glyph: LdGlyph.download,
-                tooltip: l10n.download,
-                onPressed: () =>
-                    downloadNodes(context, ref, <NodeModel>[node]),
-              ),
-              const SizedBox(width: 4),
-              Builder(
-                builder: (context) => _MediaButton(
-                  glyph: LdGlyph.more,
-                  tooltip: l10n.moreActions,
-                  onPressed: () => onMore(context, anchorOf(context)),
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
+          if (showWindowButtons)
+            const Positioned(
+              top: 0,
+              right: 0,
+              child: LdWindowButtons(isDark: true),
+            ),
+        ],
       ),
     );
   }
@@ -623,6 +656,8 @@ class _BarState extends State<_Bar>
   bool _isPlaying = false;
   bool _isBackgrounded = false;
   bool _isScrubbing = false;
+  bool _isSeeking = false;
+  Duration? _pendingSeek;
   StreamSubscription<Duration>? _sub;
   StreamSubscription<bool>? _playingSub;
 
@@ -637,6 +672,14 @@ class _BarState extends State<_Bar>
 
     _sub = widget.player.stream.position.listen((pos) {
       if (_isBackgrounded || _isScrubbing) return;
+      if (_isSeeking) {
+        if (_pendingSeek != null &&
+            (pos - _pendingSeek!).abs() > const Duration(seconds: 1)) {
+          return;
+        }
+        _isSeeking = false;
+        _pendingSeek = null;
+      }
       _lastSyncPosMs = pos.inMilliseconds;
       _lastSyncTimeMs = DateTime.now().millisecondsSinceEpoch;
       if (!_isPlaying || widget.player.state.duration == Duration.zero) {
@@ -762,10 +805,15 @@ class _BarState extends State<_Bar>
                 if (mounted) setState(() => _position = to);
               },
               onSeek: (to) {
+                _pendingSeek = to;
+                _isSeeking = true;
                 _lastSyncPosMs = to.inMilliseconds;
                 _lastSyncTimeMs = DateTime.now().millisecondsSinceEpoch;
                 if (mounted) setState(() => _position = to);
-                unawaited(widget.player.seek(to));
+                unawaited(widget.player.seek(to).then((_) {
+                  _pendingSeek = null;
+                  _isSeeking = false;
+                }));
               },
               onEnd: () {
                 _isScrubbing = false;

@@ -22,6 +22,7 @@ import { bytes } from "@/lib/format";
 import type { NodeModel } from "@/lib/models";
 import { useUploader } from "@/lib/uploads";
 import { ShareSheet } from "@/components/share/ShareSheet";
+import { useInfiniteList } from "@/lib/useInfiniteList";
 
 type SortKey = "created" | "updated" | "name" | "size";
 
@@ -34,8 +35,6 @@ type SortKey = "created" | "updated" | "name" | "size";
 export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeModel[]) => void }) {
   const t = useL10n();
   const { isDesktop, isTablet } = useDeviceClass();
-  const [nodes, setNodes] = useState<NodeModel[] | null>(null);
-  const [error, setError] = useState("");
   const [columns, setColumns] = useState(3);
   const [sortBy, setSortBy] = useState<SortKey>("created");
   const [sortDesc, setSortDesc] = useState(true);
@@ -83,25 +82,54 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
     }
   };
 
-  const load = useCallback(async () => {
-    try {
-      const data = await api.get<{ nodes: NodeModel[] }>(Api.nodes, {
-        filter: "video",
-        sort: sortBy,
-        order: sortDesc ? "desc" : "asc",
-        limit: 500,
-      });
-      setNodes(data?.nodes ?? []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t.errorUnexpectedBody);
-    }
-  }, [sortBy, sortDesc, t.errorUnexpectedBody]);
+  const {
+    items: rawNodes,
+    setItems: setNodes,
+    loading,
+    loadingMore,
+    hasMore,
+    error,
+    reload: load,
+    Sentinel,
+  } = useInfiniteList<NodeModel>({
+    pageSize: 40,
+    getItemKey: (node) => node.id,
+    deps: [sortBy, sortDesc],
+    fetchPage: async ({ offset, limit, signal }) => {
+      const data = await api.get<{ nodes: NodeModel[]; has_more?: boolean; next_offset?: number }>(
+        Api.nodes,
+        {
+          filter: "video",
+          sort: sortBy,
+          order: sortDesc ? "desc" : "asc",
+          limit,
+          offset,
+        },
+        { signal }
+      );
+      const vNodes = data?.nodes ?? [];
+      return {
+        items: vNodes,
+        hasMore: Boolean(data?.has_more ?? (vNodes.length >= limit)),
+        nextOffset: data?.next_offset ?? offset + vNodes.length,
+      };
+    },
+  });
 
+  const nodes = loading ? null : rawNodes;
   const upload = useUploader("", () => void load());
 
-  // Fetch video nodes with current sort
   useEffect(() => {
-    void load();
+    let timer: NodeJS.Timeout | null = null;
+    const reload = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void load(), 150);
+    };
+    window.addEventListener("ld_nodes_changed", reload);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("ld_nodes_changed", reload);
+    };
   }, [load]);
 
   const toggleSelect = (id: string) => {
@@ -298,11 +326,12 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
       ) : nodes.length === 0 ? (
         <EmptyState glyph="video" title={t.videosEmptyTitle} message={t.videosEmptyBody} />
       ) : (
+        <>
         <div
           style={{
             display: "flex",
-            gap: 13,
-            padding: "13px 13px 100px 13px",
+            gap: isDesktop ? 13 : 10,
+            padding: isDesktop ? "13px 13px 100px 13px" : "10px 10px 120px 10px",
             boxSizing: "border-box",
             width: "100%",
           }}
@@ -362,6 +391,8 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
             </div>
           ))}
         </div>
+        <Sentinel />
+        </>
       )}
 
       <input

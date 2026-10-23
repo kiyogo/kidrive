@@ -184,7 +184,7 @@ func HumanTime(unix int64) string {
 	if unix <= 0 {
 		return ""
 	}
-	return time.Unix(unix, 0).UTC().Format("2 January 2006")
+	return time.Unix(unix, 0).UTC().Format("02/01/2006")
 }
 
 // glyphFor picks the outline drawn on a tile. A small set on purpose: the app

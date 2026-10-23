@@ -47,6 +47,12 @@ function b64(value: string): string {
   bytes.forEach((b) => (binary += String.fromCharCode(b)));
   return btoa(binary);
 }
+export interface EnqueueUploadItem {
+  file: File;
+  parentId: string;
+  nodeId?: string;
+  displayName?: string;
+}
 
 class Transfers {
   private items: Transfer[] = [];
@@ -77,39 +83,83 @@ class Transfers {
   /** Queues files and uploads them one after another, so a folder of photos
    *  does not open fifty sockets at once. */
   async enqueue(
-    files: File[],
-    parentId: string,
+    itemsOrFiles: EnqueueUploadItem[] | File[],
+    parentIdOrOnDone?: string | (() => void),
     onDone?: () => void,
     /** node id per file, for the ones replacing something already there. An
      *  upload that names the node it replaces becomes a new version of it;
      *  without this the server stores a second file beside the first. */
     replacing?: Map<File, string>,
   ) {
-    const queued = files.map((file) => {
+    if (!itemsOrFiles.length) return;
+
+    let itemsToQueue: {
+      file: File;
+      parentId: string;
+      nodeId: string;
+      displayName: string;
+    }[] = [];
+    let completionCallback = onDone;
+
+    if ("file" in itemsOrFiles[0]) {
+      // It's EnqueueUploadItem[]
+      completionCallback = typeof parentIdOrOnDone === "function" ? parentIdOrOnDone : onDone;
+      itemsToQueue = (itemsOrFiles as EnqueueUploadItem[]).map((item) => ({
+        file: item.file,
+        parentId: item.parentId,
+        nodeId: item.nodeId ?? "",
+        displayName: item.displayName || item.file.name,
+      }));
+    } else {
+      // It's File[]
+      const pId = (typeof parentIdOrOnDone === "string" ? parentIdOrOnDone : "") ?? "";
+      itemsToQueue = (itemsOrFiles as File[]).map((file) => ({
+        file,
+        parentId: pId,
+        nodeId: replacing?.get(file) ?? "",
+        displayName: file.name,
+      }));
+    }
+
+    const queued = itemsToQueue.map(({ file, parentId, nodeId, displayName }) => {
       const item: Transfer = {
         id: `t${this.nextId++}`,
-        name: file.name,
+        name: displayName,
         size: file.size,
         sent: 0,
         state: "queued",
       };
       this.items = [...this.items, item];
-      return { item, file };
+      return { item, file, parentId, nodeId };
     });
     this.emit();
 
-    for (const { item, file } of queued) {
+    for (const { item, file, parentId, nodeId } of queued) {
       try {
-        await this.one(item.id, file, parentId, replacing?.get(file) ?? "");
+        await this.one(item.id, file, parentId, nodeId);
         this.patch(item.id, { state: "done", sent: file.size });
       } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : say().transferFailed;
         this.patch(item.id, {
           state: "failed",
-          error: e instanceof Error ? e.message : say().transferFailed,
+          error: errorMsg,
         });
+        if (
+          errorMsg.includes("Dung lượng lưu trữ đã đầy") ||
+          (e as any)?.status === 507 ||
+          (e as any)?.code === "ERR_QUOTA"
+        ) {
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(
+              new CustomEvent("ld-toast", {
+                detail: { message: "Dung lượng lưu trữ đã đầy, không thể tải tệp lên", tone: "error" },
+              }),
+            );
+          }
+        }
       }
     }
-    onDone?.();
+    completionCallback?.();
   }
 
   private async one(id: string, file: File, parentId: string, nodeId = "") {
@@ -135,6 +185,15 @@ class Transfers {
       },
     });
     if (!created.ok && created.status !== 201) {
+      if (created.status === 507) {
+        throw new Error("Dung lượng lưu trữ đã đầy, không thể tải tệp lên");
+      }
+      try {
+        const errJson = await created.json();
+        if (errJson?.error?.code === "ERR_QUOTA" || errJson?.error === "quota_exceeded") {
+          throw new Error("Dung lượng lưu trữ đã đầy, không thể tải tệp lên");
+        }
+      } catch (_) {}
       throw new Error(say().errorUnexpectedBody);
     }
     const location = created.headers.get("Location");
@@ -156,7 +215,12 @@ class Transfers {
         },
         body: slice,
       });
-      if (!res.ok) throw new Error(say().transferFailed);
+      if (!res.ok) {
+        if (res.status === 507) {
+          throw new Error("Dung lượng lưu trữ đã đầy, không thể tải tệp lên");
+        }
+        throw new Error(say().transferFailed);
+      }
       const next = Number(res.headers.get("Upload-Offset") ?? end);
       offset = Number.isFinite(next) && next > offset ? next : end;
       this.patch(id, { sent: offset });

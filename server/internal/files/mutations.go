@@ -5,7 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/MultiX0/LocalDrive/server/internal/audit"
 	"github.com/MultiX0/LocalDrive/server/internal/db"
@@ -92,6 +96,7 @@ func (s *Service) CreateFolder(ctx context.Context, p CreateFolderParams) (model
 	if err != nil {
 		return models.Node{}, err
 	}
+	s.syncFolderCreatedToVirtualDrive(ctx, created)
 	s.emit(ctx, ws.EventNodeCreated, created)
 	return created, nil
 }
@@ -141,6 +146,7 @@ func (s *Service) Rename(ctx context.Context, p RenameParams) (models.Node, erro
 	if err != nil {
 		return models.Node{}, err
 	}
+	s.syncNodeRenamedToVirtualDrive(ctx, updated, oldName)
 	s.refreshMirror(ctx, updated, oldName)
 	s.emit(ctx, ws.EventNodeUpdated, updated)
 	return updated, nil
@@ -219,7 +225,7 @@ func (s *Service) Move(ctx context.Context, p MoveParams) (models.Node, error) {
 	if err != nil {
 		return models.Node{}, err
 	}
-	s.rebuildOwnerMirror(ctx, updated.LibraryID, updated.OwnerID)
+	s.syncNodeMovedToVirtualDrive(ctx, updated)
 	s.emit(ctx, ws.EventNodeMoved, updated)
 	return updated, nil
 }
@@ -328,6 +334,7 @@ func (s *Service) Trash(ctx context.Context, userID, nodeID, ip string) (models.
 	if err != nil {
 		return models.Node{}, err
 	}
+	s.syncNodeRemovedFromVirtualDrive(ctx, trashed)
 	s.removeFromMirror(ctx, trashed)
 	s.hub.Publish(ws.NewEvent(ws.EventNodeDeleted, db.NowMillis(), nodePayload(trashed)), audience...)
 	return trashed, nil
@@ -392,7 +399,7 @@ func (s *Service) Restore(ctx context.Context, userID, nodeID, ip string) (model
 	if err != nil {
 		return models.Node{}, err
 	}
-	s.rebuildOwnerMirror(ctx, restored.LibraryID, restored.OwnerID)
+	s.syncNodeRestoredToVirtualDrive(ctx, restored)
 	s.emit(ctx, ws.EventNodeRestored, restored)
 	return restored, nil
 }
@@ -738,7 +745,7 @@ func (s *Service) CommitUpload(ctx context.Context, p CommitUploadParams) (model
 	if replaced != "" && replaced != p.Checksum {
 		s.maybeRelease(ctx, libraryID, replaced, result.ID)
 	}
-	s.addToMirror(ctx, result)
+	s.AddToMirror(ctx, result)
 
 	// The thumbnail and checksum jobs are deliberately not started here. The
 	// caller adopts the uploaded bytes into storage after this returns, so a
@@ -877,7 +884,7 @@ func (s *Service) RestoreVersion(ctx context.Context, userID, nodeID, versionID,
 	if err != nil {
 		return models.Node{}, err
 	}
-	s.addToMirror(ctx, result)
+	s.AddToMirror(ctx, result)
 	s.scheduleThumbnail(result)
 	s.emit(ctx, ws.EventNodeUpdated, result)
 	s.publishQuota(ctx, ownerID)
@@ -1062,7 +1069,8 @@ func nodePayload(n models.Node) map[string]any {
 
 // mirror maintenance, all best effort and off the request path
 
-func (s *Service) addToMirror(ctx context.Context, node models.Node) {
+// AddToMirror submits a job to link the node in the browse mirror and Windows virtual drive.
+func (s *Service) AddToMirror(ctx context.Context, node models.Node) {
 	if s.mirror == nil || s.mirror.Disabled() || node.Type != models.NodeFile {
 		return
 	}
@@ -1142,8 +1150,58 @@ func (s *Service) rebuildOwnerMirror(ctx context.Context, libraryID, ownerID str
 			return err
 		}
 		s.mirror.Rebuild(root, ownerName, entries)
+
+		// Đồng bộ danh mục thư mục vào ổ ảo Windows
+		if runtime.GOOS == "windows" {
+			if userProfile := os.Getenv("USERPROFILE"); userProfile != "" {
+				vDrive := filepath.Join(userProfile, "Local Drive")
+				frows, err := s.database.Read().QueryContext(ctx, `
+					SELECT id FROM nodes
+					WHERE owner_id = ? AND library_id = ? AND type = 'folder'
+					  AND deleted_at IS NULL AND trashed_at IS NULL`,
+					ownerID, libraryID)
+				if err == nil {
+					for frows.Next() {
+						var fid string
+						if err := frows.Scan(&fid); err == nil {
+							rel, _ := relPathOf(ctx, s.database.Read(), fid)
+							_ = os.MkdirAll(filepath.Join(append([]string{vDrive}, rel...)...), 0o755)
+						}
+					}
+					frows.Close()
+				}
+
+				// Ghi tệp trạng thái dung lượng & cập nhật nhãn ổ đĩa
+				var qBytes, qUsed int64
+				_ = s.database.Read().QueryRowContext(ctx, `SELECT quota_bytes, quota_bytes_used FROM users WHERE id = ?`, ownerID).Scan(&qBytes, &qUsed)
+				updateVirtualDriveInfo(vDrive, ownerName, qBytes, qUsed)
+			}
+		}
+
 		return nil
 	}})
+}
+
+func updateVirtualDriveInfo(vDrive, username string, quota, used int64) {
+	_ = os.MkdirAll(vDrive, 0o755)
+	cleanupDriveLRegistry()
+}
+
+// SyncAllToVirtualDrive ensures the mirror and Windows Virtual Drive have all files and folders.
+func (s *Service) SyncAllToVirtualDrive(ctx context.Context) {
+	rows, err := s.database.Read().QueryContext(ctx, `
+		SELECT DISTINCT library_id, owner_id FROM nodes
+		WHERE deleted_at IS NULL AND trashed_at IS NULL`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var libID, ownerID string
+		if err := rows.Scan(&libID, &ownerID); err == nil {
+			s.rebuildOwnerMirror(ctx, libID, ownerID)
+		}
+	}
 }
 
 func (s *Service) mirrorLocation(ctx context.Context, node models.Node) (owner string, rel []string, err error) {
@@ -1174,4 +1232,120 @@ var folderColors = map[string]struct{}{
 func validColor(c string) bool {
 	_, ok := folderColors[c]
 	return ok
+}
+
+// SyncFileToVirtualDrive synchronizes an uploaded/modified file directly into the Windows Virtual Drive (L:)
+func (s *Service) SyncFileToVirtualDrive(ctx context.Context, node models.Node) {
+	if runtime.GOOS != "windows" || node.Type != models.NodeFile {
+		return
+	}
+	userProfile := os.Getenv("USERPROFILE")
+	if userProfile == "" {
+		return
+	}
+	vDrive := filepath.Join(userProfile, "Local Drive")
+	rel, err := relPathOf(ctx, s.database.Read(), node.ID)
+	if err != nil || len(rel) == 0 {
+		return
+	}
+	targetPath := filepath.Join(append([]string{vDrive}, rel...)...)
+	root, err := s.libs.Root(node.LibraryID)
+	if err != nil {
+		return
+	}
+	targetObj, err := s.store.ObjectPath(root, node.ChecksumSHA256)
+	if err != nil {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(targetPath), 0o755)
+
+	for i := 0; i < 6; i++ {
+		if _, statErr := os.Stat(targetObj); statErr == nil {
+			_ = storage.LinkOrCopy(targetObj, targetPath)
+			notifyShell()
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func (s *Service) syncFolderCreatedToVirtualDrive(ctx context.Context, node models.Node) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	userProfile := os.Getenv("USERPROFILE")
+	if userProfile == "" {
+		return
+	}
+	vDrive := filepath.Join(userProfile, "Local Drive")
+	rel, err := relPathOf(ctx, s.database.Read(), node.ID)
+	if err != nil || len(rel) == 0 {
+		return
+	}
+	targetDir := filepath.Join(append([]string{vDrive}, rel...)...)
+	_ = os.MkdirAll(targetDir, 0o755)
+	notifyShell()
+}
+
+func (s *Service) syncNodeRemovedFromVirtualDrive(ctx context.Context, node models.Node) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	userProfile := os.Getenv("USERPROFILE")
+	if userProfile == "" {
+		return
+	}
+	vDrive := filepath.Join(userProfile, "Local Drive")
+	rel, err := relPathOf(ctx, s.database.Read(), node.ID)
+	if err != nil || len(rel) == 0 {
+		return
+	}
+	targetPath := filepath.Join(append([]string{vDrive}, rel...)...)
+	_ = os.RemoveAll(targetPath)
+	notifyShell()
+}
+
+func (s *Service) syncNodeRenamedToVirtualDrive(ctx context.Context, updated models.Node, oldName string) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	userProfile := os.Getenv("USERPROFILE")
+	if userProfile == "" {
+		return
+	}
+	vDrive := filepath.Join(userProfile, "Local Drive")
+	rel, err := relPathOf(ctx, s.database.Read(), updated.ID)
+	if err != nil || len(rel) == 0 {
+		return
+	}
+	newPath := filepath.Join(append([]string{vDrive}, rel...)...)
+	oldRel := make([]string, len(rel))
+	copy(oldRel, rel)
+	oldRel[len(oldRel)-1] = oldName
+	oldPath := filepath.Join(append([]string{vDrive}, oldRel...)...)
+
+	if _, err := os.Stat(oldPath); err == nil {
+		_ = os.Rename(oldPath, newPath)
+	}
+	notifyShell()
+}
+
+func (s *Service) syncNodeMovedToVirtualDrive(ctx context.Context, updated models.Node) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	s.rebuildOwnerMirror(ctx, updated.LibraryID, updated.OwnerID)
+	notifyShell()
+}
+
+func (s *Service) syncNodeRestoredToVirtualDrive(ctx context.Context, restored models.Node) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	if restored.Type == models.NodeFolder {
+		s.syncFolderCreatedToVirtualDrive(ctx, restored)
+	} else {
+		s.rebuildOwnerMirror(ctx, restored.LibraryID, restored.OwnerID)
+	}
+	notifyShell()
 }

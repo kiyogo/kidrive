@@ -751,10 +751,13 @@ class TransferController extends Notifier<List<TransferModel>> {
   void _fail(String id, FailureReason reason, String message) {
     final transfer = _byId(id);
     if (transfer == null) return;
+    final displayMsg = reason == FailureReason.quota
+        ? 'Dung lượng lưu trữ đã đầy, không thể tải tệp lên'
+        : message;
     _replace(transfer.copyWith(
       status: TransferStatus.failed,
       failureReason: reason,
-      failureMessage: message,
+      failureMessage: displayMsg,
     ));
   }
 }

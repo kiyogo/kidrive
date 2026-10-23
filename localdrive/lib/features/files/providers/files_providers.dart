@@ -112,6 +112,7 @@ final folderProvider =
     ref.keepAlive();
 
     final cache = ref.watch(nodeCacheProvider);
+
     try {
       final nodes = await ref.watch(filesDbProvider).list(
             parentId: query.parentId,
@@ -259,12 +260,20 @@ class SelectionController extends Notifier<Set<String>> {
     state = <String>{...ordered.sublist(lower, upper + 1)};
   }
 
+  Set<String> _marqueeBase = const <String>{};
+
+  /// Preserves the selection at the start of a marquee drag across widget rebuilds.
+  void startMarquee() {
+    _marqueeBase = state;
+  }
+
   /// Replaces the selection with whatever a marquee drag covered.
   ///
   /// [additive] keeps what was already selected, which is what holding ctrl
   /// while dragging a box means everywhere else.
   void setMarquee(Set<String> ids, {required bool additive, Set<String>? base}) {
-    state = additive ? <String>{...?base, ...ids} : ids;
+    final effectiveBase = base ?? _marqueeBase;
+    state = additive ? <String>{...effectiveBase, ...ids} : ids;
   }
 }
 

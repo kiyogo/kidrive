@@ -78,12 +78,18 @@ class VideosPageDesktop extends HookConsumerWidget {
           onChanged: (value) => columns.value = value,
         ),
         const SizedBox(width: 16),
-        LdButton.secondary(
-          label: videoSortLabel(l10n, sort.by),
-          glyph: sort.descending ? LdGlyph.arrowDown : LdGlyph.arrowUp,
-          compact: true,
-          expand: false,
-          onPressed: () => showVideosSortSheet(context, ref),
+        Builder(
+          builder: (btnContext) => LdButton.secondary(
+            label: videoSortLabel(l10n, sort.by),
+            glyph: sort.descending ? LdGlyph.arrowDown : LdGlyph.arrowUp,
+            compact: true,
+            expand: false,
+            onPressed: () => showVideosSortSheet(
+              btnContext,
+              ref,
+              anchor: anchorOf(btnContext),
+            ),
+          ),
         ),
       ],
       body: LdAsync<List<NodeModel>>(

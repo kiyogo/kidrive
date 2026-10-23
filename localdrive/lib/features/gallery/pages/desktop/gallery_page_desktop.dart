@@ -83,12 +83,18 @@ class GalleryPageDesktop extends HookConsumerWidget {
           onChanged: (value) => columns.value = value,
         ),
         const SizedBox(width: 16),
-        LdButton.secondary(
-          label: _sortLabel(l10n, sort.by),
-          glyph: sort.descending ? LdGlyph.arrowDown : LdGlyph.arrowUp,
-          compact: true,
-          expand: false,
-          onPressed: () => showGallerySortSheet(context, ref),
+        Builder(
+          builder: (btnContext) => LdButton.secondary(
+            label: _sortLabel(l10n, sort.by),
+            glyph: sort.descending ? LdGlyph.arrowDown : LdGlyph.arrowUp,
+            compact: true,
+            expand: false,
+            onPressed: () => showGallerySortSheet(
+              btnContext,
+              ref,
+              anchor: anchorOf(btnContext),
+            ),
+          ),
         ),
       ],
       body: LdAsync<List<NodeModel>>(

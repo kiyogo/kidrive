@@ -35,7 +35,6 @@ abstract final class Routes {
   static const String settings = '/settings';
   static const String settingsAccount = '$settings/account';
   static const String settingsDevices = '$settings/devices';
-  static const String settingsUsers = '$settings/users';
   static const String settingsServer = '$settings/server';
   static const String settingsLanguage = '$settings/language';
   static const String settingsAppearance = '$settings/appearance';

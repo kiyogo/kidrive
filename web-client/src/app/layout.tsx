@@ -59,9 +59,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           dangerouslySetInnerHTML={{
             __html: `(function(){
               try {
-                var t = localStorage.getItem('ld.theme') || 'system';
+                var d = JSON.parse(localStorage.getItem('ld.system_dashboard') || '{}');
+                if (d.siteTitle) document.title = d.siteTitle;
+                var t = localStorage.getItem('ld.theme') || d.theme || 'system';
                 document.documentElement.setAttribute('data-theme', t);
-                var l = localStorage.getItem('ld.locale') || 'vi';
+                var l = localStorage.getItem('ld.locale') || (d.language === 'auto_geoip' ? ((navigator.language||'').toLowerCase().indexOf('vi') === 0 ? 'vi' : 'en') : d.language) || 'vi';
                 document.documentElement.lang = l;
                 document.documentElement.dir = l === 'ar' ? 'rtl' : 'ltr';
               } catch(e) {}

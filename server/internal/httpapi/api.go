@@ -86,7 +86,7 @@ func New(d Deps) (*API, error) {
 		hub: d.Hub, pool: d.Pool, uploads: d.Uploads, mounts: d.MountHelper,
 		discovery: d.Discovery, thumbs: d.Thumbnails,
 		apiLimiter: mw.NewLimiter(30, 90),
-		authLimit:  mw.NewLimiter(0.5, 10),
+		authLimit:  mw.NewLimiter(5, 30),
 		uploadSem:  mw.NewSemaphore(d.Config.MaxUploadConcurrency),
 		startedAt:  time.Now(),
 	}
@@ -149,17 +149,23 @@ func (a *API) Router() http.Handler {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// unauthenticated
+		// public non-sensitive endpoints: status, client downloads, invite checks
 		r.Group(func(r chi.Router) {
-			r.Use(mw.RateLimit(a.authLimit, mw.ByIP))
+			r.Use(mw.RateLimit(a.apiLimiter, mw.ByIP))
 			r.Get("/status", a.handleStatus)
 			r.Get("/client/update", a.handleClientUpdate)
 			r.Get("/client/download", a.handleClientDownload)
 			r.Head("/client/download", a.handleClientDownload)
+			r.Get("/invites/{code}/check", a.handleCheckInvite)
+		})
+
+		// authentication endpoints with brute force rate limiting
+		r.Group(func(r chi.Router) {
+			r.Use(mw.RateLimit(a.authLimit, mw.ByIP))
 			r.Post("/setup", a.handleSetup)
 			r.Post("/auth/register", a.handleRegister)
 			r.Post("/auth/login", a.handleLogin)
 			r.Post("/auth/refresh", a.handleRefresh)
-			r.Get("/invites/{code}/check", a.handleCheckInvite)
 		})
 
 		// a device waiting for approval may poll its own status and nothing else
@@ -214,6 +220,7 @@ func (a *API) Router() http.Handler {
 				r.Get("/trash", a.handleListTrash)
 				r.Get("/activity", a.handleActivity)
 
+				r.Get("/storage/account", a.handleAccountStorageBreakdown)
 				r.Get("/libraries", a.handleListLibraries)
 				r.Post("/libraries", a.handleRegisterLibrary)
 				r.Patch("/libraries/{id}", a.handleRenameLibrary)
@@ -228,10 +235,29 @@ func (a *API) Router() http.Handler {
 
 				r.Get("/server/settings", a.handleGetSettings)
 				r.Patch("/server/settings", a.handleUpdateSettings)
+				r.Get("/datasets", a.handleListDatasets)
+				r.Get("/datasets/items", a.handleListDatasetItems)
+				r.Post("/datasets/folder", a.handleCreateDatasetFolder)
+				r.Delete("/datasets/items", a.handleDeleteDatasetItem)
+				r.Post("/datasets/upload", a.handleUploadDatasetFile)
+				r.Get("/datasets/download", a.handleDownloadDatasetFile)
+				r.Get("/datasets/{name}/items", a.handleListDatasetItems)
+				r.Post("/datasets/{name}/folder", a.handleCreateDatasetFolder)
+				r.Delete("/datasets/{name}/items", a.handleDeleteDatasetItem)
+				r.Post("/datasets/{name}/upload", a.handleUploadDatasetFile)
+				r.Get("/datasets/{name}/download", a.handleDownloadDatasetFile)
+				r.Get("/shares", a.handleListNetworkShares)
+				r.Get("/shares/tree", a.handleShareFolderTree)
+				r.Get("/pools", a.handleListPools)
+				r.Get("/pools/discover", a.handleDiscoverImportablePool)
+				r.Post("/pools/import", a.handleImportPool)
 
 				r.Route("/admin", func(r chi.Router) {
 					r.Use(a.requireAdmin)
 					r.Get("/users", a.handleAdminListUsers)
+					r.Post("/users", a.handleAdminCreateUser)
+					r.Patch("/users/{id}", a.handleAdminUpdateUser)
+					r.Delete("/users/{id}", a.handleAdminDeleteUser)
 					r.Post("/users/{id}/reset-password", a.handleResetPassword)
 					r.Patch("/users/{id}/role", a.handleSetRole)
 					r.Patch("/users/{id}/quota", a.handleSetQuota)
@@ -243,6 +269,26 @@ func (a *API) Router() http.Handler {
 					r.Post("/drives/{id}/mount", a.handleMountDrive)
 					r.Post("/drives/{id}/format", a.handleFormatDrive)
 					r.Post("/drives/pool", a.handlePoolDrives)
+					r.Post("/drives/{id}/smart", a.handleDriveSmart)
+
+					r.Get("/pools", a.handleListPools)
+					r.Get("/pools/discover", a.handleDiscoverImportablePool)
+					r.Post("/pools/import", a.handleImportPool)
+					r.Post("/pools", a.handleCreatePool)
+					r.Patch("/pools/{id}", a.handleUpdatePool)
+					r.Delete("/pools/{id}", a.handleDeletePool)
+
+					r.Get("/datasets", a.handleListDatasets)
+					r.Post("/datasets", a.handleCreateDataset)
+					r.Patch("/datasets/{id}", a.handleUpdateDataset)
+					r.Delete("/datasets/{id}", a.handleDeleteDataset)
+
+					r.Get("/shares", a.handleListNetworkShares)
+					r.Get("/shares/tree", a.handleShareFolderTree)
+					r.Post("/shares", a.handleCreateNetworkShare)
+					r.Patch("/shares/{id}", a.handleUpdateNetworkShare)
+					r.Delete("/shares/{id}", a.handleDeleteNetworkShare)
+
 					r.Get("/devices/pending", a.handleAdminPendingDevices)
 					r.Post("/devices/{id}/approve", a.handleApproveDevice)
 					r.Post("/devices/{id}/deny", a.handleDenyDevice)
@@ -263,7 +309,6 @@ func (a *API) Router() http.Handler {
 		// header and these are the only routes an img tag ever points at
 		r.Group(func(r chi.Router) {
 			r.Use(a.requireStreamToken)
-			r.Use(mw.RateLimit(a.apiLimiter, mw.ByUser))
 			r.Use(a.requirePasswordChanged)
 
 			r.Get("/nodes/{id}/preview", a.handleFolderPreview)

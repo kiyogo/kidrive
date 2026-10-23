@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import '../../../../imports.dart';
 import '../../../upload/controller/transfer_controller.dart';
 import '../../../upload/widgets/duplicate_sheet.dart';
+import '../../../auth/controller/session_controller.dart';
 import '../../../storage/providers/storage_providers.dart';
 import '../../controller/files_controller.dart';
 import '../../models/node_model.dart';
@@ -220,6 +221,14 @@ Future<void> pickAndUpload(
   String parentId,
 ) async {
   final l10n = L10n.of(context);
+  final user = ref.read(currentUserProvider);
+
+  if (user != null && user.hasQuota && user.quotaBytesUsed >= user.quotaBytes) {
+    if (context.mounted) {
+      LdToast.error(context, 'Dung lượng lưu trữ đã đầy, không thể tải tệp lên');
+    }
+    return;
+  }
 
   // withData on the web only: a browser has no path to give, so the picker has
   // to read the contents up front. Asking for data on desktop or mobile would
@@ -230,6 +239,16 @@ Future<void> pickAndUpload(
   );
   if (picked == null || picked.files.isEmpty) return;
   if (!context.mounted) return;
+
+  final totalNewBytes = picked.files.fold<int>(0, (sum, f) => sum + f.size);
+  if (user != null &&
+      user.hasQuota &&
+      (user.quotaBytesUsed + totalNewBytes > user.quotaBytes)) {
+    if (context.mounted) {
+      LdToast.error(context, 'Dung lượng lưu trữ đã đầy, không thể tải tệp lên');
+    }
+    return;
+  }
 
   final transfers = ref.read(transferControllerProvider.notifier);
 

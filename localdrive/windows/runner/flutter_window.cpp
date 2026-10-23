@@ -65,6 +65,14 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;
+    case WM_CONTEXTMENU:
+      // Flutter UI handles context menus; return 0 to silence Windows system beep
+      return 0;
+    case WM_SYSCOMMAND:
+      if (wparam == SC_KEYMENU) {
+        return 0;
+      }
+      break;
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);

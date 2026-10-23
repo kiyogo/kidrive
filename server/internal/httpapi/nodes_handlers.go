@@ -18,12 +18,20 @@ import (
 
 func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	userID, _ := caller(r)
+	limit := intQuery(r, "limit", 50)
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	offset := intQuery(r, "offset", 0)
+	if offset < 0 {
+		offset = 0
+	}
 	opts := files.ListOptions{
 		ParentID: strings.TrimSpace(r.URL.Query().Get("parent_id")),
 		Filter:   strings.TrimSpace(r.URL.Query().Get("filter")),
 		Query:    strings.TrimSpace(r.URL.Query().Get("query")),
-		Limit:    intQuery(r, "limit", 200),
-		Offset:   intQuery(r, "offset", 0),
+		Limit:    limit,
+		Offset:   offset,
 		SortBy:   strings.TrimSpace(r.URL.Query().Get("sort")),
 		SortDesc: strings.EqualFold(r.URL.Query().Get("order"), "desc"),
 	}
@@ -32,10 +40,13 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	hasMore := len(list) == limit
 	writeJSON(w, http.StatusOK, map[string]any{
-		"nodes":  nodeViews(list, userID),
-		"limit":  opts.Limit,
-		"offset": opts.Offset,
+		"nodes":       nodeViews(list, userID),
+		"limit":       opts.Limit,
+		"offset":      opts.Offset,
+		"has_more":    hasMore,
+		"next_offset": offset + len(list),
 	})
 }
 
@@ -333,7 +344,9 @@ func (a *API) handleRestoreVersion(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleListTrash(w http.ResponseWriter, r *http.Request) {
 	userID, _ := caller(r)
-	list, err := a.files.ListTrash(r.Context(), userID, intQuery(r, "limit", 200), intQuery(r, "offset", 0))
+	limit := intQuery(r, "limit", 50)
+	offset := intQuery(r, "offset", 0)
+	list, err := a.files.ListTrash(r.Context(), userID, limit, offset)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -342,18 +355,24 @@ func (a *API) handleListTrash(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"nodes":          nodeViews(list, userID),
 		"retention_days": cfg.TrashRetentionDays,
+		"limit":          limit,
+		"offset":         offset,
+		"has_more":       len(list) == limit,
+		"next_offset":    offset + len(list),
 	})
 }
 
 func (a *API) handleActivity(w http.ResponseWriter, r *http.Request) {
 	user, _ := mw.UserFrom(r.Context())
 	adminAll := user.IsAdmin() && boolQuery(r, "all")
+	limit := intQuery(r, "limit", 50)
+	before := int64Query(r, "before", 0)
 	list, err := a.audit.List(r.Context(), audit.ListOptions{
 		UserID:   user.ID,
 		NodeID:   strings.TrimSpace(r.URL.Query().Get("node_id")),
 		Action:   strings.TrimSpace(r.URL.Query().Get("action")),
-		Limit:    intQuery(r, "limit", 50),
-		Before:   int64Query(r, "before", 0),
+		Limit:    limit,
+		Before:   before,
 		AdminAll: adminAll,
 	})
 	if err != nil {
@@ -361,6 +380,7 @@ func (a *API) handleActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]map[string]any, 0, len(list))
+	var nextCursor int64
 	for _, entry := range list {
 		out = append(out, map[string]any{
 			"id":         entry.ID,
@@ -370,6 +390,13 @@ func (a *API) handleActivity(w http.ResponseWriter, r *http.Request) {
 			"metadata":   entry.Metadata,
 			"created_at": entry.CreatedAt,
 		})
+		nextCursor = entry.CreatedAt
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"activity": out})
+	hasMore := len(list) == limit
+	writeJSON(w, http.StatusOK, map[string]any{
+		"activity":    out,
+		"limit":       limit,
+		"has_more":    hasMore,
+		"next_cursor": nextCursor,
+	})
 }

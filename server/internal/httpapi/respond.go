@@ -59,7 +59,7 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusForbidden, "forbidden", "you do not have permission to do that")
 
 	case errors.Is(err, files.ErrQuota):
-		writeError(w, http.StatusInsufficientStorage, "quota_exceeded", err.Error())
+		writeError(w, http.StatusInsufficientStorage, "quota_exceeded", "Dung lượng lưu trữ đã đầy, không thể tải tệp lên")
 
 	case errors.Is(err, files.ErrInvalidName), errors.Is(err, files.ErrNotAFolder),
 		errors.Is(err, files.ErrNotAFile), errors.Is(err, files.ErrCycle),

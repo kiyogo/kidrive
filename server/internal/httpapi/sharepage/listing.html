@@ -1,6 +1,4 @@
 {{define "listing.html"}}
-{{- /* Swapped in on its own, so opening a subfolder replaces this box
-       rather than reloading the page. */ -}}
 <div class="trail">
   {{range $i, $c := .Trail}}
     {{if $i}}<span class="sep">/</span>{{end}}
@@ -20,7 +18,7 @@
       <span class="ico">{{template "glyph" icon .}}</span>
       <span class="txt">
         <span class="t">{{.Name}}</span>
-        <span class="s">Folder</span>
+        <span class="s">Thư mục</span>
       </span>
     </button>
     {{- else}}
@@ -28,11 +26,11 @@
       <span class="ico">{{template "glyph" icon .}}</span>
       <span class="txt">
         <span class="t">{{.Name}}</span>
-        <span class="s">{{bytes .Size}}{{if when .Modified}} · {{when .Modified}}{{end}}</span>
+        <span class="s">{{bytes .Size}}{{if when .Modified}} &nbsp; {{when .Modified}}{{end}}</span>
       </span>
     </span>
     {{- if $.AllowDownload}}
-    <a class="dl" title="Download {{.Name}}"
+    <a class="dl" title="Tải xuống {{.Name}}"
        href="/s/{{$.Token}}/download?node_id={{.ID}}{{if $.Password}}&password={{$.Password}}{{end}}" download>
       <svg viewBox="0 0 24 24"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
     </a>
@@ -41,7 +39,7 @@
   </div>
   {{- end}}
 {{- else}}
-  <div class="empty">This folder is empty.</div>
+  <div class="empty">Thư mục này trống.</div>
 {{- end}}
 </div>
 {{end}}

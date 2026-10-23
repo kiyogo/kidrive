@@ -2,12 +2,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/services/core_providers.dart';
 import '../db/storage_db.dart';
+import '../models/account_storage_model.dart';
 import '../models/library_model.dart';
 
+export '../models/account_storage_model.dart';
 export '../models/library_model.dart';
 
 final storageDbProvider = Provider<StorageDb>((ref) {
   return StorageDb(ref.watch(apiClientProvider));
+});
+
+final accountStorageProvider = FutureProvider<AccountStorageModel>((ref) {
+  return ref.watch(storageDbProvider).accountStorage();
 });
 
 /// Every library with its live disk numbers. Kept alive because the new

@@ -13,6 +13,7 @@ import '../desktop/marquee_selection.dart';
 import 'node_actions.dart';
 import 'node_tile.dart';
 import 'rename_sheet.dart';
+import 'files_toolbar.dart';
 
 /// The listing itself, shared by every breakpoint. The page wrappers decide
 /// the chrome around it; this decides nothing about layout beyond the column
@@ -69,25 +70,29 @@ class FilesBrowser extends ConsumerWidget {
         ),
         isEmpty: (nodes) => nodes.isEmpty,
         empty: () => desktopBehaviour(context)
-            ? Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerDown: (event) {
-                  if (event.buttons == kSecondaryMouseButton) {
-                    _showCanvasMenu(
-                      context,
-                      ref,
-                      query,
-                      const <NodeModel>[],
-                      event.position,
-                    );
-                  }
-                },
-                child: LdEmptyState(
-                  title: emptyTitle,
-                  message: emptyBody,
-                  glyph: emptyGlyph,
-                  actionLabel: emptyActionLabel,
-                  onAction: onEmptyAction,
+            ? SizedBox.expand(
+                child: Listener(
+                  behavior: HitTestBehavior.opaque,
+                  onPointerDown: (event) {
+                    if (event.buttons == kSecondaryMouseButton) {
+                      _showCanvasMenu(
+                        context,
+                        ref,
+                        query,
+                        const <NodeModel>[],
+                        event.position,
+                      );
+                    }
+                  },
+                  child: Center(
+                    child: LdEmptyState(
+                      title: emptyTitle,
+                      message: emptyBody,
+                      glyph: emptyGlyph,
+                      actionLabel: emptyActionLabel,
+                      onAction: onEmptyAction,
+                    ),
+                  ),
                 ),
               )
             : LdEmptyState(
@@ -98,7 +103,7 @@ class FilesBrowser extends ConsumerWidget {
                 onAction: onEmptyAction,
               ),
         data: (nodes) {
-          final listing = viewMode == ViewMode.grid
+          final rawListing = viewMode == ViewMode.grid
               ? _Grid(
                   nodes: nodes,
                   selection: selection,
@@ -112,26 +117,28 @@ class FilesBrowser extends ConsumerWidget {
                   topInset: topInset,
                 );
 
+          final listingWidget = rawListing;
+
           // a rubber band needs a pointer and empty space to start on, so it
           // is a desktop gesture only. A finger dragging on a phone is
           // scrolling, and always will be
-          if (!desktopBehaviour(context)) return listing;
+          if (!desktopBehaviour(context)) return listingWidget;
 
-          var before = const <String>{};
           // Ctrl+A and Delete, because a file manager that needs the mouse for
           // everything is a file manager nobody trusts with a hundred files.
           return _KeyboardSelection(
             nodes: nodes,
             child: MarqueeSelection(
-              onStart: () => before = ref.read(selectionProvider),
+              onStart: () =>
+                  ref.read(selectionProvider.notifier).startMarquee(),
               onChanged: (ids, additive) => ref
                   .read(selectionProvider.notifier)
-                  .setMarquee(ids, additive: additive, base: before),
+                  .setMarquee(ids, additive: additive),
               onEmptyTap: () =>
                   ref.read(selectionProvider.notifier).clear(),
               onEmptySecondaryTap: (pos) =>
                   _showCanvasMenu(context, ref, query, nodes, pos),
-              child: listing,
+              child: listingWidget,
             ),
           );
         },
@@ -180,9 +187,11 @@ class _Grid extends ConsumerWidget {
       itemBuilder: (context, index) {
         final node = nodes[index];
         return DraggableNode(
+          key: ValueKey<String>('drag_${node.id}'),
           node: node,
           nodes: nodes,
           child: NodeTile(
+            key: ValueKey<String>('tile_${node.id}'),
             node: node,
             offlineAvailable: ref.watch(isOfflineProvider(node.id)),
             selected: selection.contains(node.id),
@@ -241,9 +250,11 @@ class _List extends ConsumerWidget {
       itemBuilder: (context, index) {
         final node = nodes[index];
         return DraggableNode(
+          key: ValueKey<String>('drag_${node.id}'),
           node: node,
           nodes: nodes,
           child: NodeRow(
+            key: ValueKey<String>('row_${node.id}'),
             node: node,
             offlineAvailable: ref.watch(isOfflineProvider(node.id)),
             selected: selection.contains(node.id),
@@ -286,6 +297,8 @@ Future<void> _showCanvasMenu(
 ) async {
   final l10n = L10n.of(context);
   final isBrowse = query.filter == NodeFilter.none && query.query.isEmpty;
+  final viewMode = ref.read(viewModeProvider);
+  final isGrid = viewMode == ViewMode.grid;
 
   final actions = <LdMenuAction>[
     if (isBrowse) ...<LdMenuAction>[
@@ -301,6 +314,16 @@ Future<void> _showCanvasMenu(
       ),
     ],
     LdMenuAction(
+      id: 'view_mode',
+      label: isGrid ? l10n.viewList : l10n.viewGrid,
+      glyph: isGrid ? LdGlyph.list : LdGlyph.grid,
+    ),
+    LdMenuAction(
+      id: 'sort',
+      label: l10n.sortBy,
+      glyph: LdGlyph.sort,
+    ),
+    LdMenuAction(
       id: 'refresh',
       label: l10n.actionRefresh,
       glyph: LdGlyph.refresh,
@@ -308,7 +331,7 @@ Future<void> _showCanvasMenu(
     if (nodes.isNotEmpty)
       LdMenuAction(
         id: 'select_all',
-        label: l10n.actionSelect,
+        label: l10n.selectAll,
         glyph: LdGlyph.check,
       ),
   ];
@@ -317,6 +340,7 @@ Future<void> _showCanvasMenu(
     context,
     title: isBrowse ? l10n.myFiles : l10n.moreActions,
     anchor: position == Offset.zero ? null : position,
+    isContextMenu: true,
     actions: actions,
   );
   if (choice == null || !context.mounted) return;
@@ -326,6 +350,10 @@ Future<void> _showCanvasMenu(
       await showNewFolderSheet(context, ref, parentId: query.parentId);
     case 'upload':
       await pickAndUpload(context, ref, query.parentId);
+    case 'view_mode':
+      ref.read(viewModeProvider.notifier).toggle();
+    case 'sort':
+      await showSortMenu(context, ref, anchor: position);
     case 'refresh':
       ref.invalidate(folderProvider(query));
     case 'select_all':

@@ -23,6 +23,7 @@ import type { NodeModel } from "@/lib/models";
 import { transfers, type Transfer } from "@/lib/upload";
 import { useUploader } from "@/lib/uploads";
 import { ShareSheet } from "@/components/share/ShareSheet";
+import { useInfiniteList, useVirtualWindow } from "@/lib/useInfiniteList";
 
 /**
  * The image gallery: strictly photos/images only in one timeline.
@@ -31,8 +32,6 @@ import { ShareSheet } from "@/components/share/ShareSheet";
 export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeModel[]) => void }) {
   const t = useL10n();
   const { isDesktop } = useDeviceClass();
-  const [nodes, setNodes] = useState<NodeModel[] | null>(null);
-  const [error, setError] = useState("");
   const [columns, setColumns] = useState(5);
   const [sortBy, setSortBy] = useState<"taken" | "created" | "updated" | "name" | "size">("taken");
   const [sortDesc, setSortDesc] = useState(true);
@@ -51,24 +50,54 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
   const toast = useToast();
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await api.get<{ nodes: NodeModel[] }>(Api.nodes, {
-        filter: "image",
-        sort: sortBy,
-        order: sortDesc ? "desc" : "asc",
-      });
+  const {
+    items: rawNodes,
+    setItems: setNodes,
+    loading,
+    loadingMore,
+    hasMore,
+    error,
+    reload: load,
+    Sentinel,
+  } = useInfiniteList<NodeModel>({
+    pageSize: 50,
+    getItemKey: (node) => node.id,
+    deps: [sortBy, sortDesc],
+    fetchPage: async ({ offset, limit, signal }) => {
+      const data = await api.get<{ nodes: NodeModel[]; has_more?: boolean; next_offset?: number }>(
+        Api.nodes,
+        {
+          filter: "image",
+          sort: sortBy,
+          order: sortDesc ? "desc" : "asc",
+          limit,
+          offset,
+        },
+        { signal }
+      );
       const imagesOnly = (data?.nodes ?? []).filter((n) => n.mime_type?.startsWith("image/"));
-      setNodes(imagesOnly);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t.errorUnexpectedBody);
-    }
-  }, [t, sortBy, sortDesc]);
+      return {
+        items: imagesOnly,
+        hasMore: Boolean(data?.has_more ?? (data?.nodes?.length ? data.nodes.length >= limit : false)),
+        nextOffset: data?.next_offset ?? offset + (data?.nodes?.length ?? 0),
+      };
+    },
+  });
 
+  const nodes = loading ? null : rawNodes;
   const upload = useUploader("", () => void load());
 
   useEffect(() => {
-    void load();
+    let timer: NodeJS.Timeout | null = null;
+    const reload = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void load(), 150);
+    };
+    window.addEventListener("ld_nodes_changed", reload);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("ld_nodes_changed", reload);
+    };
   }, [load]);
 
   const count = nodes?.length ?? 0;
@@ -141,68 +170,15 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
       ) : nodes.length === 0 ? (
         <EmptyState glyph="gallery" title={t.galleryEmptyTitle} message={t.galleryEmptyBody} />
       ) : (
-        <div
-          style={{ padding: "16px 24px 120px" }}
-          onContextMenu={(e) => {
-            const target = e.target as HTMLElement;
-            if (target.closest("[data-gallery-tile]")) return;
-            if (target.closest("button, a, input")) return;
-            e.preventDefault();
-            setCanvasMenu({ x: e.clientX, y: e.clientY });
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: isDesktop ? `repeat(${columns}, 1fr)` : "repeat(auto-fill, minmax(170px, 1fr))",
-              gap: 14,
-            }}
-          >
-            {nodes.map((n) => {
-              const ratio =
-                n.image_width && n.image_height && n.image_height > 0
-                  ? Math.min(Math.max(n.image_width / n.image_height, 0.3), 3.0)
-                  : 1;
-
-              return (
-                <Tappable
-                  key={n.id}
-                  data-gallery-tile={n.id}
-                  onClick={() => onOpen(n, nodes)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setMenu({ x: e.clientX, y: e.clientY, node: n });
-                  }}
-                  radius={14}
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    aspectRatio: `${ratio}`,
-                    overflow: "hidden",
-                    border: "1px solid var(--stroke)",
-                    background: "var(--bg-elevated)",
-                    position: "relative",
-                  }}
-                >
-                  {n.has_thumbnail ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={api.media(Api.thumbnail(n.id))}
-                      alt={n.name}
-                      loading="lazy"
-                      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                    />
-                  ) : (
-                    <span style={{ display: "grid", placeItems: "center", height: "100%" }}>
-                      <Icon glyph="image" size={36} color="#4CC6C6" />
-                    </span>
-                  )}
-                </Tappable>
-              );
-            })}
-          </div>
-        </div>
+        <GalleryGridContent
+          nodes={nodes}
+          columns={columns}
+          isDesktop={isDesktop}
+          onOpen={onOpen}
+          setMenu={setMenu}
+          setCanvasMenu={setCanvasMenu}
+          Sentinel={Sentinel}
+        />
       )}
 
       <input
@@ -321,6 +297,98 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
           </div>
         </form>
       </Dialog>
+    </div>
+  );
+}
+
+function GalleryGridContent({
+  nodes,
+  columns,
+  isDesktop,
+  onOpen,
+  setMenu,
+  setCanvasMenu,
+  Sentinel,
+}: {
+  nodes: NodeModel[];
+  columns: number;
+  isDesktop: boolean;
+  onOpen: (n: NodeModel, list?: NodeModel[]) => void;
+  setMenu: (m: { x?: number; y?: number; node: NodeModel } | null) => void;
+  setCanvasMenu: (m: { x?: number; y?: number } | null) => void;
+  Sentinel: React.ComponentType;
+}) {
+  const { startIndex, endIndex, topSpacerHeight, bottomSpacerHeight, isVirtual } = useVirtualWindow({
+    itemCount: nodes.length,
+    itemHeight: isDesktop ? 60 : 40,
+  });
+  const visibleNodes = isVirtual ? nodes.slice(startIndex, endIndex) : nodes;
+
+  return (
+    <div
+      style={{ padding: isDesktop ? "16px 24px 120px" : "8px 8px 120px" }}
+      onContextMenu={(e) => {
+        const target = e.target as HTMLElement;
+        if (target.closest("[data-gallery-tile]")) return;
+        if (target.closest("button, a, input")) return;
+        e.preventDefault();
+        setCanvasMenu({ x: e.clientX, y: e.clientY });
+      }}
+    >
+      {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: isDesktop ? `repeat(${columns}, 1fr)` : "repeat(3, minmax(0, 1fr))",
+          gap: isDesktop ? 14 : 6,
+        }}
+      >
+        {visibleNodes.map((n) => {
+          const ratio =
+            n.image_width && n.image_height && n.image_height > 0
+              ? Math.min(Math.max(n.image_width / n.image_height, 0.3), 3.0)
+              : 1;
+
+          return (
+            <Tappable
+              key={n.id}
+              data-gallery-tile={n.id}
+              onClick={() => onOpen(n, nodes)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenu({ x: e.clientX, y: e.clientY, node: n });
+              }}
+              radius={isDesktop ? 14 : 8}
+              style={{
+                display: "block",
+                width: "100%",
+                aspectRatio: `${ratio}`,
+                overflow: "hidden",
+                border: "1px solid var(--stroke)",
+                background: "var(--bg-elevated)",
+                position: "relative",
+              }}
+            >
+              {n.has_thumbnail ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={api.media(Api.thumbnail(n.id))}
+                  alt={n.name}
+                  loading="lazy"
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                />
+              ) : (
+                <span style={{ display: "grid", placeItems: "center", height: "100%" }}>
+                  <Icon glyph="image" size={36} color="#4CC6C6" />
+                </span>
+              )}
+            </Tappable>
+          );
+        })}
+      </div>
+      {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
+      <Sentinel />
     </div>
   );
 }

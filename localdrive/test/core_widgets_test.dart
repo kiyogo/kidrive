@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:localdrive/core/constants/breakpoints.dart';
 import 'package:localdrive/core/enums/file_category.dart';
 import 'package:localdrive/core/theme/ld_theme.dart';
+import 'package:localdrive/core/services/desktop_shell_service.dart';
 import 'package:localdrive/core/widgets/ld_bottom_sheet.dart';
 import 'package:localdrive/core/widgets/ld_button.dart';
 import 'package:localdrive/core/widgets/ld_controls.dart';
@@ -39,6 +40,13 @@ Widget host(Widget child, {Locale locale = const Locale('en'), Size? size}) {
 
 void main() {
   group('LdResponsive', () {
+    setUp(() {
+      DesktopShellService.isDesktopOverride = false;
+    });
+    tearDown(() {
+      DesktopShellService.isDesktopOverride = null;
+    });
+
     Future<String> classAt(WidgetTester tester, double width) async {
       // the real window is what LdResponsive measures, so the test resizes it
       // rather than nesting a fixed box the parent would clamp

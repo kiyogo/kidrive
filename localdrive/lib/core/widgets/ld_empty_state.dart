@@ -39,23 +39,35 @@ class LdEmptyState extends StatelessWidget {
           vertical: compact ? 24 : 48,
         ),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 340),
+          constraints: const BoxConstraints(maxWidth: 800),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               _LayeredBadge(glyph: glyph, tint: accent, size: compact ? 64 : 88),
               SizedBox(height: compact ? 16 : 24),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium,
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleMedium,
+                  maxLines: 1,
+                  softWrap: false,
+                ),
               ),
               if (message != null) ...<Widget>[
                 const SizedBox(height: 8),
-                Text(
-                  message!,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium,
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    message!,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: context.surfaces.foregroundSecondary,
+                        ),
+                    maxLines: 1,
+                    softWrap: false,
+                  ),
                 ),
               ],
               if (actionLabel != null && onAction != null) ...<Widget>[

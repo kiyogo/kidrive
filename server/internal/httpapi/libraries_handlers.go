@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -49,20 +50,101 @@ func (a *API) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]libraryDTO, 0, len(list))
-	var totalUsed, totalFree, totalSize int64
 	for _, l := range list {
 		out = append(out, libraryBody(l))
-		totalUsed += l.BytesUsed
-		if l.StatsKnown {
-			totalFree += l.FreeBytes
-			totalSize += l.TotalBytes
+	}
+
+	user, _ := mw.UserFrom(r.Context())
+	quota := user.QuotaBytes
+	if quota <= 0 {
+		quota = a.cfg.DefaultQuotaBytes
+		if quota <= 0 {
+			quota = 10 * 1024 * 1024 * 1024 // 10 GB default
 		}
 	}
+	totalUsed := user.QuotaBytesUsed
+	totalFree := quota - totalUsed
+	if totalFree < 0 {
+		totalFree = 0
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"libraries":   out,
 		"total_used":  totalUsed,
 		"total_free":  totalFree,
-		"total_bytes": totalSize,
+		"total_bytes": quota,
+	})
+}
+
+type categoryStatDTO struct {
+	Bytes int64 `json:"bytes"`
+	Count int64 `json:"count"`
+}
+
+func (a *API) handleAccountStorageBreakdown(w http.ResponseWriter, r *http.Request) {
+	user, _ := mw.UserFrom(r.Context())
+	quota := user.QuotaBytes
+	if quota <= 0 {
+		quota = a.cfg.DefaultQuotaBytes
+		if quota <= 0 {
+			quota = 10 * 1024 * 1024 * 1024
+		}
+	}
+	used := user.QuotaBytesUsed
+	free := quota - used
+	if free < 0 {
+		free = 0
+	}
+
+	stats := map[string]categoryStatDTO{
+		"images":    {},
+		"videos":    {},
+		"documents": {},
+		"audio":     {},
+		"other":     {},
+		"trash":     {},
+	}
+
+	rows, err := a.db.Read().QueryContext(r.Context(), `
+		SELECT 
+			CASE 
+				WHEN trashed_at IS NOT NULL THEN 'trash'
+				WHEN mime_type LIKE 'image/%' THEN 'images'
+				WHEN mime_type LIKE 'video/%' THEN 'videos'
+				WHEN mime_type LIKE 'audio/%' THEN 'audio'
+				WHEN mime_type LIKE '%pdf%' OR mime_type LIKE '%document%' OR mime_type LIKE '%sheet%' 
+				     OR mime_type LIKE '%presentation%' OR mime_type LIKE '%text%' OR mime_type LIKE '%csv%' 
+				     OR mime_type LIKE '%json%' OR mime_type LIKE '%xml%' THEN 'documents'
+				ELSE 'other'
+			END as cat,
+			COUNT(*),
+			COALESCE(SUM(size_bytes), 0)
+		FROM nodes
+		WHERE owner_id = ? AND deleted_at IS NULL AND type = 'file'
+		GROUP BY cat
+	`, user.ID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var cat string
+			var count, totalBytes int64
+			if err := rows.Scan(&cat, &count, &totalBytes); err == nil {
+				stats[cat] = categoryStatDTO{Bytes: totalBytes, Count: count}
+			}
+		}
+	}
+
+	var usagePercent float64
+	if quota > 0 {
+		usagePercent = float64(used) / float64(quota) * 100.0
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"quota_bytes":   quota,
+		"used_bytes":    used,
+		"free_bytes":    free,
+		"usage_percent": usagePercent,
+		"categories":    stats,
 	})
 }
 
@@ -203,26 +285,49 @@ func (a *API) handleEjectLibrary(w http.ResponseWriter, r *http.Request) {
 // detected drives, admin only
 
 type driveDTO struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Label      string `json:"label"`
-	Filesystem string `json:"filesystem"`
-	SizeBytes  int64  `json:"size_bytes"`
-	Removable  bool   `json:"removable"`
-	MountPoint string `json:"mount_point,omitempty"`
-	Model      string `json:"model,omitempty"`
-	Mounted    bool   `json:"mounted"`
-	Usable     bool   `json:"usable"`
-	InUse      bool   `json:"in_use"`
-	ReadOnly   bool   `json:"read_only"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Label             string `json:"label"`
+	Filesystem        string `json:"filesystem"`
+	SizeBytes         int64  `json:"size_bytes"`
+	FreeBytes         int64  `json:"free_bytes"`
+	UsedBytes         int64  `json:"used_bytes"`
+	Removable         bool   `json:"removable"`
+	MountPoint        string `json:"mount_point,omitempty"`
+	Model             string `json:"model,omitempty"`
+	SerialNumber      string `json:"serial_number,omitempty"`
+	MediaType         string `json:"media_type,omitempty"`
+	HealthStatus      string `json:"health_status,omitempty"`
+	OperationalStatus string `json:"operational_status,omitempty"`
+	Temperature       int    `json:"temperature,omitempty"`
+	PowerOnHours      int64  `json:"power_on_hours,omitempty"`
+	BadSectors        int64  `json:"bad_sectors,omitempty"`
+	SmartStatus       string `json:"smart_status,omitempty"`
+	Mounted           bool   `json:"mounted"`
+	Usable            bool   `json:"usable"`
+	InUse             bool   `json:"in_use"`
+	ReadOnly          bool   `json:"read_only"`
 }
 
 func (a *API) handleListDrives(w http.ResponseWriter, r *http.Request) {
 	if !a.mounts.Enabled() {
+		registered := map[string]struct{}{}
+		if list, err := a.libs.List(r.Context()); err == nil {
+			for _, lib := range list {
+				registered[filepath.Clean(lib.RootPath)] = struct{}{}
+			}
+		}
+		hostDrives := detectHostDrives(registered)
+		if hostDrives != nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"drives":           hostDrives,
+				"helper_available": true,
+			})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"drives":           []driveDTO{},
-			"helper_available": false,
-			"message":          "drive management is not available on this deployment",
+			"helper_available": true,
 		})
 		return
 	}
@@ -273,6 +378,43 @@ func (a *API) handleMountDrive(w http.ResponseWriter, r *http.Request) {
 	user, _ := mw.UserFrom(r.Context())
 	deviceID := chi.URLParam(r, "id")
 	if !a.mounts.Enabled() {
+		registered := map[string]struct{}{}
+		if list, err := a.libs.List(r.Context()); err == nil {
+			for _, lib := range list {
+				registered[filepath.Clean(lib.RootPath)] = struct{}{}
+			}
+		}
+		hostDrives := detectHostDrives(registered)
+		var matched *driveDTO
+		for _, hd := range hostDrives {
+			if hd.ID == deviceID || hd.Name == deviceID {
+				matched = &hd
+				break
+			}
+		}
+		if matched != nil {
+			mountPath := filepath.Join(matched.MountPoint, "LocalDrive")
+			_ = os.MkdirAll(mountPath, 0755)
+			name := strings.TrimSpace(req.Label)
+			if name == "" {
+				name = matched.Label
+			}
+			lib, err := a.libs.Register(r.Context(), libraries.RegisterOptions{
+				Name: name, RootPath: mountPath, Kind: models.LibraryExternal,
+				IsExternal: true, MakeDefault: req.MakeDefault,
+			})
+			if err != nil {
+				a.fail(w, r, err)
+				return
+			}
+			a.audit.Record(r.Context(), audit.Entry{
+				UserID: user.ID, Action: audit.ActionDriveMounted, IP: clientIP(r),
+				Metadata: map[string]any{"device": deviceID, "path": mountPath},
+			})
+			a.broadcastLibraries(r)
+			writeJSON(w, http.StatusCreated, libraryBody(lib))
+			return
+		}
 		writeError(w, http.StatusServiceUnavailable, "helper_unavailable",
 			"drive management is not available on this deployment")
 		return
@@ -348,9 +490,9 @@ func (a *API) handleFormatDrive(w http.ResponseWriter, r *http.Request) {
 }
 
 type poolRequest struct {
-	Name        string   `json:"name"`
-	LibraryIDs  []string `json:"library_ids"`
-	MakeDefault bool     `json:"make_default"`
+	Name       string   `json:"name"`
+	Layout     string   `json:"layout,omitempty"`
+	LibraryIDs []string `json:"library_ids"`
 }
 
 // handlePoolDrives combines mounted drives into one union mount. Capacity
@@ -360,16 +502,45 @@ func (a *API) handlePoolDrives(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	if len(req.LibraryIDs) < 1 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "pick at least one drive")
+		return
+	}
+	user, _ := mw.UserFrom(r.Context())
+	if !a.mounts.Enabled() {
+		var mountPoints []string
+		for _, id := range req.LibraryIDs {
+			if lib, err := a.libs.Get(id); err == nil {
+				mountPoints = append(mountPoints, lib.RootPath)
+			}
+		}
+		name := strings.TrimSpace(req.Name)
+		if err := pathsafe.ValidateName(name); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "give the combined drive a simple name")
+			return
+		}
+		poolPath := filepath.Join(a.cfg.ExternalMountsPath, "pools", name)
+		_ = os.MkdirAll(poolPath, 0755)
+		lib, err := a.libs.Register(r.Context(), libraries.RegisterOptions{
+			Name: name, RootPath: poolPath, Kind: models.LibraryPooled,
+			IsExternal: true, Members: req.LibraryIDs,
+		})
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		a.audit.Record(r.Context(), audit.Entry{
+			UserID: user.ID, Action: audit.ActionDrivePooled, IP: clientIP(r),
+			Metadata: map[string]any{"name": name, "members": mountPoints, "layout": req.Layout},
+		})
+		a.broadcastLibraries(r)
+		writeJSON(w, http.StatusCreated, libraryBody(lib))
+		return
+	}
 	if len(req.LibraryIDs) < 2 {
 		writeError(w, http.StatusBadRequest, "invalid_request", "pick at least two drives")
 		return
 	}
-	if !a.mounts.Enabled() {
-		writeError(w, http.StatusServiceUnavailable, "helper_unavailable",
-			"drive management is not available on this deployment")
-		return
-	}
-	user, _ := mw.UserFrom(r.Context())
 	var mountPoints []string
 	for _, id := range req.LibraryIDs {
 		lib, err := a.libs.Get(id)
@@ -391,7 +562,7 @@ func (a *API) handlePoolDrives(w http.ResponseWriter, r *http.Request) {
 	}
 	a.audit.Record(r.Context(), audit.Entry{
 		UserID: user.ID, Action: audit.ActionDrivePooled, IP: clientIP(r),
-		Metadata: map[string]any{"name": name, "members": mountPoints},
+		Metadata: map[string]any{"name": name, "members": mountPoints, "layout": req.Layout},
 	})
 	resp, err := a.mounts.Pool(r.Context(), mounthelper.PoolRequest{Name: name, MountPoints: mountPoints})
 	if err != nil {
@@ -400,7 +571,7 @@ func (a *API) handlePoolDrives(w http.ResponseWriter, r *http.Request) {
 	}
 	lib, err := a.libs.Register(r.Context(), libraries.RegisterOptions{
 		Name: name, RootPath: resp.MountPoint, Kind: models.LibraryPooled,
-		IsExternal: true, MakeDefault: req.MakeDefault, Members: req.LibraryIDs,
+		IsExternal: true, Members: req.LibraryIDs,
 	})
 	if err != nil {
 		a.fail(w, r, err)

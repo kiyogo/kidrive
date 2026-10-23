@@ -59,6 +59,8 @@ export interface UserModel {
   must_change_password: boolean;
   totp_enabled: boolean;
   must_enable_totp: boolean;
+  dataset_permissions?: string;
+  disabled?: boolean;
   created_at: number;
 }
 
@@ -91,6 +93,21 @@ export interface LibraryModel {
   created_at?: number;
 }
 
+export interface DriveModel {
+  id: string;
+  name: string;
+  label?: string;
+  filesystem: string;
+  size_bytes: number;
+  removable?: boolean;
+  mount_point?: string;
+  model?: string;
+  mounted: boolean;
+  usable: boolean;
+  in_use: boolean;
+  read_only?: boolean;
+}
+
 /** A signed-in device, as the server's session list sends it. */
 export interface DeviceModel {
   id: string;
@@ -121,6 +138,7 @@ export interface LoginResult {
   access_token?: string;
   refresh_token?: string;
   pending?: boolean;
+  status?: string;
   session_id?: string;
   user?: UserModel;
 }

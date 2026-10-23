@@ -1,0 +1,309 @@
+"use client";
+
+import { api } from "./api";
+import { Api } from "./endpoints";
+import { isFolder, type NodeModel } from "./models";
+import { transfers, type EnqueueUploadItem } from "./upload";
+
+export interface DroppedFileItem {
+  file: File;
+  /** Relative directory path components from destination, e.g. ["my_folder", "sub1"] */
+  relativeDir: string[];
+}
+
+export interface FolderUploadPlan {
+  files: DroppedFileItem[];
+  /** Unique folder paths to create, shallowest first: e.g. [["my_folder"], ["my_folder", "sub1"]] */
+  folders: string[][];
+}
+
+/** Promisified readEntries with complete batch loop */
+async function readAllEntriesFromReader(reader: any): Promise<any[]> {
+  const all: any[] = [];
+  while (true) {
+    const batch: any[] = await new Promise((resolve, reject) => {
+      reader.readEntries(resolve, reject);
+    });
+    if (!batch || batch.length === 0) break;
+    all.push(...batch);
+  }
+  return all;
+}
+
+/** Promisified entry.file() */
+async function getFileFromEntry(fileEntry: any): Promise<File> {
+  return new Promise((resolve, reject) => {
+    fileEntry.file(resolve, reject);
+  });
+}
+
+/**
+ * Inspects a drag-and-drop DataTransfer and walks any dropped directories
+ * recursively using the standard webkitGetAsEntry API.
+ */
+export async function planDataTransfer(dt: DataTransfer): Promise<FolderUploadPlan> {
+  const files: DroppedFileItem[] = [];
+  const folders: string[][] = [];
+  const seenFolders = new Set<string>();
+
+  const items = dt.items;
+  let usedWebkitEntries = false;
+
+  if (items && items.length > 0 && typeof items[0].webkitGetAsEntry === "function") {
+    async function walk(entry: any, prefix: string[]) {
+      if (!entry) return;
+      if (entry.isFile) {
+        try {
+          const file = await getFileFromEntry(entry);
+          files.push({ file, relativeDir: prefix });
+        } catch (e) {
+          console.warn("Could not read dropped file entry:", entry.name, e);
+        }
+      } else if (entry.isDirectory) {
+        const here = [...prefix, entry.name];
+        const key = here.join("/");
+        if (!seenFolders.has(key)) {
+          seenFolders.add(key);
+          folders.push(here);
+        }
+        try {
+          const reader = entry.createReader();
+          const children = await readAllEntriesFromReader(reader);
+          for (const child of children) {
+            await walk(child, here);
+          }
+        } catch (e) {
+          console.warn("Could not read dropped directory entry:", entry.name, e);
+        }
+      }
+    }
+
+    try {
+      const walkPromises: Promise<void>[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        if (it.kind !== "file") continue;
+        const entry = it.webkitGetAsEntry();
+        if (entry) {
+          usedWebkitEntries = true;
+          walkPromises.push(walk(entry, []));
+        }
+      }
+      await Promise.all(walkPromises);
+    } catch {
+      usedWebkitEntries = false;
+    }
+  }
+
+  // Fallback to plain files if webkitGetAsEntry wasn't applicable or found nothing
+  if (!usedWebkitEntries || (files.length === 0 && folders.length === 0 && dt.files && dt.files.length > 0)) {
+    return planFromFiles(dt.files);
+  }
+
+  folders.sort((a, b) => a.length - b.length);
+  return { files, folders };
+}
+
+/**
+ * Plans uploads from a FileList (e.g. from <input type="file" webkitdirectory directory />
+ * or plain multi-file selection).
+ */
+export function planFromFiles(fileList: FileList | File[]): FolderUploadPlan {
+  const files: DroppedFileItem[] = [];
+  const folders: string[][] = [];
+  const seenFolders = new Set<string>();
+
+  const list = Array.from(fileList);
+  for (const file of list) {
+    const rawPath = ((file as any).webkitRelativePath as string | undefined) || "";
+    const normalized = rawPath.replace(/\\/g, "/");
+    if (normalized.includes("/")) {
+      const parts = normalized.split("/").filter((p) => p && p !== "." && p !== "..");
+      const relativeDir = parts.slice(0, parts.length - 1);
+
+      // Register all parent folder segments
+      for (let i = 1; i <= relativeDir.length; i++) {
+        const sub = relativeDir.slice(0, i);
+        const key = sub.join("/");
+        if (!seenFolders.has(key)) {
+          seenFolders.add(key);
+          folders.push(sub);
+        }
+      }
+      files.push({ file, relativeDir });
+    } else {
+      files.push({ file, relativeDir: [] });
+    }
+  }
+
+  folders.sort((a, b) => a.length - b.length);
+  return { files, folders };
+}
+
+/**
+ * Executes a folder upload plan by:
+ * 1. Creating all necessary directories in order (shallowest to deepest),
+ *    reusing existing directories if they already exist with the same name.
+ * 2. Uploading all files to their corresponding target parent directory.
+ */
+export async function executeFolderUpload({
+  plan,
+  destinationParentId,
+  onDone,
+  toast,
+}: {
+  plan: FolderUploadPlan;
+  destinationParentId: string;
+  onDone?: () => void;
+  toast?: (msg: string, type: "info" | "success" | "error") => void;
+}): Promise<void> {
+  if (plan.files.length === 0 && plan.folders.length === 0) return;
+
+  const isDataset = destinationParentId.startsWith("dataset:");
+
+  if (isDataset) {
+    const parts = destinationParentId.replace(/^dataset:/, "").split(":");
+    const dsName = parts[0];
+    const baseSubpath = parts.slice(1).join("/");
+
+    // 1. Create dataset directories
+    for (const folderPath of plan.folders) {
+      const parentParts = folderPath.slice(0, -1);
+      const parentSub = parentParts.length > 0
+        ? (baseSubpath ? `${baseSubpath}/${parentParts.join("/")}` : parentParts.join("/"))
+        : baseSubpath;
+      const folderName = folderPath[folderPath.length - 1];
+
+      try {
+        await api.post(Api.datasetCreateFolder, {
+          dataset: dsName,
+          subpath: parentSub,
+          name: folderName,
+        });
+      } catch (e) {
+        console.warn("Dataset folder creation skipped/failed:", folderName, e);
+      }
+    }
+
+    // 2. Upload files per subpath
+    const bySubpath = new Map<string, File[]>();
+    for (const item of plan.files) {
+      const rel = item.relativeDir.join("/");
+      const targetSub = rel
+        ? (baseSubpath ? `${baseSubpath}/${rel}` : rel)
+        : baseSubpath;
+      const arr = bySubpath.get(targetSub) || [];
+      arr.push(item.file);
+      bySubpath.set(targetSub, arr);
+    }
+
+    toast?.(`Đang tải lên ${plan.files.length} tệp trong thư mục...`, "info");
+
+    for (const [subpath, files] of bySubpath.entries()) {
+      const formData = new FormData();
+      for (const file of files) {
+        formData.append("file", file);
+      }
+      try {
+        const token = api.token;
+        const res = await fetch(api.absolute(Api.datasetUpload(dsName, subpath)), {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        });
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => ({}));
+          if (res.status === 507 || errJson.error === "quota_exceeded" || errJson.error === "ERR_QUOTA") {
+            throw new Error("Dung lượng lưu trữ đã đầy, không thể tải tệp lên");
+          }
+          throw new Error(errJson.error || "Lỗi tải lên máy chủ");
+        }
+      } catch (err: any) {
+        toast?.(err?.message || "Không thể tải lên một số tệp trong thư mục", "error");
+      }
+    }
+
+    toast?.(`Đã tải lên toàn bộ thư mục thành công!`, "success");
+    onDone?.();
+    return;
+  }
+
+  // Standard LocalDrive tree upload
+  toast?.(`Đang chuẩn bị cấu trúc thư mục...`, "info");
+
+  // Map of relative path string (e.g. "photos/2026") -> node ID on server
+  const made = new Map<string, string>();
+  made.set("", destinationParentId);
+
+  // Cache of existing nodes per parent ID to avoid duplicate creation
+  const siblingsCache = new Map<string, NodeModel[]>();
+
+  async function getSiblings(parentId: string): Promise<NodeModel[]> {
+    if (siblingsCache.has(parentId)) return siblingsCache.get(parentId)!;
+    try {
+      const data = await api.get<{ nodes: NodeModel[] }>(Api.nodes, { parent_id: parentId });
+      const list = data?.nodes ?? [];
+      siblingsCache.set(parentId, list);
+      return list;
+    } catch {
+      return [];
+    }
+  }
+
+  // Create or resolve directories shallowest first
+  for (const folderPath of plan.folders) {
+    const key = folderPath.join("/");
+    if (made.has(key)) continue;
+
+    const parentKey = folderPath.slice(0, -1).join("/");
+    const parentNodeId = made.get(parentKey) ?? destinationParentId;
+    const folderName = folderPath[folderPath.length - 1];
+
+    const siblings = await getSiblings(parentNodeId);
+    const existing = siblings.find(
+      (n) => isFolder(n) && n.name.toLowerCase() === folderName.toLowerCase(),
+    );
+
+    if (existing) {
+      made.set(key, existing.id);
+    } else {
+      try {
+        const created = await api.post<NodeModel>(Api.folder, {
+          name: folderName,
+          parent_id: parentNodeId,
+        });
+        made.set(key, created.id);
+        siblings.push(created);
+      } catch (err) {
+        console.warn("Folder creation error for", folderName, err);
+        made.set(key, parentNodeId);
+      }
+    }
+  }
+
+  // If there are no files to upload (empty folder dropped), we're done!
+  if (plan.files.length === 0) {
+    toast?.("Đã tạo thư mục thành công!", "success");
+    onDone?.();
+    return;
+  }
+
+  // Enqueue all files with their exact destination parent ID and clear display name
+  const uploadItems: EnqueueUploadItem[] = plan.files.map((item) => {
+    const folderKey = item.relativeDir.join("/");
+    const targetParent = made.get(folderKey) ?? destinationParentId;
+    const displayName = item.relativeDir.length > 0
+      ? `${item.relativeDir.join("/")}/${item.file.name}`
+      : item.file.name;
+    return {
+      file: item.file,
+      parentId: targetParent,
+      displayName,
+    };
+  });
+
+  toast?.(`Đang tải lên ${uploadItems.length} tệp...`, "info");
+  await transfers.enqueue(uploadItems, onDone);
+}

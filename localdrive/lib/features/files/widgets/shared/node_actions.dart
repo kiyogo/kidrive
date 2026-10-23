@@ -103,6 +103,7 @@ Future<void> showNodeActions(
             '${LdFormat.relative(context, node.updatedAt)}',
     actions: actions,
     anchor: anchor == Offset.zero ? null : anchor,
+    isContextMenu: true,
   );
   if (choice == null || !context.mounted) return;
 
@@ -377,6 +378,7 @@ Future<void> showBulkNodeActions(
     title: l10n.selectedCount(nodes.length),
     actions: actions,
     anchor: anchor == Offset.zero ? null : anchor,
+    isContextMenu: true,
   );
   if (choice == null || !context.mounted) return;
 

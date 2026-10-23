@@ -17,7 +17,7 @@ import 'dart:io';
 class BeaconProbe {
   /// Matches the server's BeaconPort: the same number as the http port, one
   /// being udp and the other tcp.
-  static const int port = 7443;
+  static const int port = 9683;
 
   static const String _probe = 'LOCALDRIVE-PROBE/1';
   static const String _replyMagic = 'LOCALDRIVE-HELLO/1';

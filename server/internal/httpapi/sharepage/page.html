@@ -1,25 +1,43 @@
 {{define "page.html"}}<!doctype html>
-<html lang="en">
+<html lang="vi">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
-<meta name="color-scheme" content="dark">
-<title>{{if .Gone}}Link unavailable{{else if .NeedsPassword}}Protected link{{else}}{{.Item.Name}}{{end}} · {{.ServerName}}</title>
+<meta name="color-scheme" content="dark light">
+<title>{{if .Gone}}Liên kết không khả dụng{{else if .NeedsPassword}}Liên kết được bảo vệ{{else}}{{.Item.Name}}{{end}} · {{.ServerName}}</title>
 <script src="/s/assets/htmx.js" defer></script>
+<script>
+(function() {
+  try {
+    var theme = localStorage.getItem('ld.theme');
+    if (theme === 'light' || (!theme && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches)) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else if (theme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  } catch(e){}
+})();
+</script>
 <style>
-/*
-  The app's own surfaces and accents. Flat fills, 1px borders, no shadows.
-
-  System fonts on purpose: a web font host would learn the address of everyone
-  who opens a share link.
-*/
 :root{
   --bg:#141414; --elevated:#202020; --sunken:#0E0E0E;
   --fg:#FFFFFF; --fg-2:#909090; --fg-3:#434343; --stroke:#3D3D3D;
   --accent:#4C8DFF; --warn:#EE7759;
   --r-card:16px; --r-pill:24px; --r-field:12px; --r-tile:14px;
   --ease:cubic-bezier(.215,.61,.355,1);
+}
+:root[data-theme="light"], [data-theme="light"] {
+  --bg:#F6F7F9; --elevated:#FFFFFF; --sunken:#ECEEF1;
+  --fg:#111111; --fg-2:#666666; --fg-3:#9E9E9E; --stroke:#E1E4E8;
+  --accent:#2563EB; --warn:#EE7759;
+}
+@media(prefers-color-scheme:light) {
+  :root:not([data-theme="dark"]) {
+    --bg:#F6F7F9; --elevated:#FFFFFF; --sunken:#ECEEF1;
+    --fg:#111111; --fg-2:#666666; --fg-3:#9E9E9E; --stroke:#E1E4E8;
+    --accent:#2563EB; --warn:#EE7759;
+  }
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -40,7 +58,7 @@ a:hover{text-decoration:underline}
 .top{display:flex;align-items:center;gap:10px;margin-bottom:28px}
 .mark{width:28px;height:28px;flex:none}
 .brand{font-weight:700;letter-spacing:-.01em}
-.brand span{color:var(--fg-2);font-weight:400}
+.brand span{color:var(--fg-2);font-weight:400;margin-left:6px}
 
 /* ---------- the card ---------- */
 .card{
@@ -66,11 +84,11 @@ a:hover{text-decoration:underline}
 .meta b{color:var(--fg);font-weight:600}
 
 .facts{
-  margin-top:20px;padding-top:18px;border-top:1px solid var(--stroke);
+  margin-top:18px;
   display:grid;gap:12px;
 }
 @media(min-width:560px){.facts{grid-template-columns:repeat(3,1fr)}}
-.fact-k{color:var(--fg-3);font-size:11px;text-transform:uppercase;letter-spacing:.9px;font-weight:600}
+.fact-k{color:var(--fg-3);font-size:12px;font-weight:600}
 .fact-v{margin-top:3px;font-size:14px;overflow-wrap:anywhere}
 
 /* ---------- buttons ---------- */
@@ -82,10 +100,8 @@ a:hover{text-decoration:underline}
   border:1px solid transparent;transition:background .28s var(--ease),border-color .28s var(--ease);
 }
 .btn svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.8}
-/* white on the accent, the same as the app's primary button. Dark text on
-   this blue is hard to read at button weight. */
 .btn-primary{background:var(--accent);color:#FFFFFF;border-color:var(--accent)}
-.btn-primary:hover{background:#6BA2FF;text-decoration:none}
+.btn-primary:hover{background:#3B82F6;text-decoration:none}
 .btn-quiet{background:transparent;color:var(--fg);border-color:var(--stroke)}
 .btn-quiet:hover{border-color:var(--fg-2);text-decoration:none}
 .btn[disabled]{opacity:.5;cursor:not-allowed}
@@ -144,12 +160,6 @@ a:hover{text-decoration:underline}
 .field:focus{border-color:var(--accent)}
 .err{color:var(--warn);font-size:13.5px;margin-top:10px}
 
-/* ---------- footer ---------- */
-.foot{border-top:1px solid var(--stroke);padding:22px 20px 30px}
-.foot-in{max-width:720px;margin:0 auto;display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between}
-.foot p{margin:0;color:var(--fg-2);font-size:13px;max-width:44ch}
-.foot b{color:var(--fg)}
-
 .htmx-request{opacity:.55;transition:opacity .28s var(--ease)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -160,7 +170,7 @@ a:hover{text-decoration:underline}
 
   <div class="top">
     {{template "mark"}}
-    <div class="brand">{{.ServerName}} <span>· shared with you</span></div>
+    <div class="brand">{{.ServerName}} <span id="brand-sub">Được chia sẻ với bạn</span></div>
   </div>
 
 {{if .Gone}}
@@ -169,9 +179,8 @@ a:hover{text-decoration:underline}
       <div class="ring">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5v.01"/></svg>
       </div>
-      <div class="name" style="font-size:18px">This link is not available</div>
-      <p class="meta">It may have expired, or been turned off by whoever shared it.
-      Ask them for a new one.</p>
+      <div class="name" style="font-size:18px">Liên kết không khả dụng</div>
+      <p class="meta">Liên kết có thể đã hết hạn hoặc bị người chia sẻ thu hồi.</p>
     </div>
   </div>
 
@@ -181,15 +190,15 @@ a:hover{text-decoration:underline}
       <div class="ring">
         <svg viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.5"/><path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7"/></svg>
       </div>
-      <div class="name" style="font-size:18px">This link needs a password</div>
-      <p class="meta">Whoever shared it can give you one.</p>
+      <div class="name" style="font-size:18px">Liên kết yêu cầu mật khẩu</div>
+      <p class="meta">Vui lòng nhập mật khẩu được cấp để truy cập tệp tin.</p>
     </div>
     <form method="post" action="/s/{{.Token}}" style="margin-top:18px">
       <input class="field" type="password" name="password" autocomplete="off"
-             autofocus placeholder="Password" aria-label="Password">
-      {{if .Wrong}}<div class="err">That password is not correct.</div>{{end}}
+             autofocus placeholder="Mật khẩu" aria-label="Mật khẩu">
+      {{if .Wrong}}<div class="err">Mật khẩu không chính xác.</div>{{end}}
       <div class="actions" style="margin-top:14px">
-        <button class="btn btn-primary" type="submit" style="width:100%">Open</button>
+        <button class="btn btn-primary" type="submit" style="width:100%">Mở</button>
       </div>
     </form>
   </div>
@@ -207,29 +216,27 @@ a:hover{text-decoration:underline}
       <div style="min-width:0">
         <div class="name">{{.Item.Name}}</div>
         <div class="meta">
-          {{if isFolder .Item.Kind}}Folder{{else}}{{bytes .Item.Size}}{{end}}
-          {{if .Owner}} · shared by <b>{{.Owner}}</b>{{end}}
+          <span>{{if isFolder .Item.Kind}}Thư mục{{else}}{{bytes .Item.Size}}{{end}}</span>
+          {{if .Owner}}&nbsp;&nbsp;Được chia sẻ bởi <b>{{.Owner}}</b>{{end}}
         </div>
       </div>
     </div>
 
     <div class="facts">
       <div>
-        <div class="fact-k">Shared by</div>
-        <div class="fact-v">{{if .Owner}}{{.Owner}}{{else}}Someone on {{.ServerName}}{{end}}</div>
+        <div class="fact-k">Người chia sẻ</div>
+        <div class="fact-v">{{if .Owner}}{{.Owner}}{{else}}{{.ServerName}}{{end}}</div>
       </div>
       <div>
-        <div class="fact-k">{{if isFolder .Item.Kind}}Contains{{else}}Size{{end}}</div>
-        <div class="fact-v">{{if isFolder .Item.Kind}}{{len .Children}} item{{if ne (len .Children) 1}}s{{end}}{{else}}{{bytes .Item.Size}}{{end}}</div>
+        <div class="fact-k">{{if isFolder .Item.Kind}}Số mục{{else}}Dung lượng{{end}}</div>
+        <div class="fact-v">{{if isFolder .Item.Kind}}{{len .Children}} mục{{else}}{{bytes .Item.Size}}{{end}}</div>
       </div>
       <div>
-        <div class="fact-k">Available</div>
-        <div class="fact-v">{{if .ExpiresAt}}until {{when .ExpiresAt}}{{else}}no end date{{end}}</div>
+        <div class="fact-k">Thời hạn</div>
+        <div class="fact-v">{{if .ExpiresAt}}Đến {{when .ExpiresAt}}{{else}}Không có hạn{{end}}</div>
       </div>
     </div>
 
-    {{/* Pictures, video and audio play in place. Everything else keeps its
-         card: a viewer that renders nothing is worse than none. */}}
     {{if .Preview}}
     <div class="preview">
       {{if eq .Preview "image"}}
@@ -248,14 +255,14 @@ a:hover{text-decoration:underline}
       {{if .AllowDownload}}
       <a class="btn btn-primary" href="/s/{{.Token}}/download{{if .Password}}?password={{.Password}}{{end}}" download>
         <svg viewBox="0 0 24 24"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
-        Download
+        Tải xuống
       </a>
       {{end}}
     </div>
     {{end}}
 
     {{if not .AllowDownload}}
-    <div class="note">This link is view only, so the file cannot be downloaded from it.</div>
+    <div class="note">Liên kết này chỉ cho phép xem trực tiếp, không hỗ trợ tải xuống.</div>
     {{end}}
   </div>
 
@@ -266,29 +273,30 @@ a:hover{text-decoration:underline}
 
 </div>
 
-<div class="foot">
-  <div class="foot-in">
-    <p><b>Local Drive</b> is a private alternative to Google Drive that runs on
-    hardware its owner controls. This file is on their machine, not in anyone's cloud.</p>
-    <a class="btn btn-quiet" href="{{.BrandURL}}" target="_blank" rel="noopener noreferrer">
-      Get the app
-      <svg viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg>
-    </a>
-  </div>
-</div>
-
 </body>
 </html>{{end}}
 
 {{define "mark"}}
-{{- /* Same geometry as docs/assets/mark.svg. Inline, so there is no second
-       request and nothing to go missing. */ -}}
 <svg class="mark" viewBox="0 0 64 64" fill="none" aria-hidden="true">
-  <path d="M10 12 L24 12 L29 18 L54 18 Q58 18 58 22 L58 46 Q58 50 54 50 L10 50 Q6 50 6 46 L6 16 Q6 12 10 12 Z" fill="#2A6FD6"/>
-  <path d="M14 21 L50 21 Q52 21 52 23 L52 44 L12 44 L12 23 Q12 21 14 21 Z" fill="#DCE3EE"/>
-  <path d="M10 26 L54 26 Q58 26 58 30 L58 46 Q58 50 54 50 L10 50 Q6 50 6 46 L6 30 Q6 26 10 26 Z" fill="#4C8DFF"/>
-  <path d="M25.5 41.5 A8 8 0 1 1 38.5 41.5" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round"/>
-  <circle cx="32" cy="38" r="3.2" fill="#FFFFFF"/>
+  <defs>
+    <linearGradient id="page-back-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1E40AF"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <linearGradient id="page-front-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="page-sheet-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#E2E8F0"/>
+    </linearGradient>
+  </defs>
+  <path d="M11 12 H24 C27 12 29 17 33 17 H53 C56 17 58 19 58 22 V46 C58 49 56 51 53 51 H11 C8 51 6 49 6 46 V17 C6 14 8 12 11 12 Z" fill="url(#page-back-grad)"/>
+  <path d="M15 19 H49 C51 19 52 20 52 22 V43 H12 V22 C12 20 13 19 15 19 Z" fill="url(#page-sheet-grad)"/>
+  <path d="M11 25 H53 C56 25 58 27 58 30 V46 C58 49 56 51 53 51 H11 C8 51 6 49 6 46 V30 C6 27 8 25 11 25 Z" fill="url(#page-front-grad)"/>
+  <path d="M11 25 H53 C56 25 58 27 58 30 V31 C58 28 56 26 53 26 H11 C8 26 6 28 6 31 V30 C6 27 8 25 11 25 Z" fill="#FFFFFF" fill-opacity="0.25"/>
+  <path d="M 25 46 C 21.7 46 19 43.3 19 40 C 19 37.4 21.2 35.2 24.2 34.5 C 24.5 30.5 28.2 28 32 28 C 35.8 28 39.5 30.5 39.8 34.5 C 42.8 35.2 45 37.4 45 40 C 45 43.3 42.3 46 39 46 Z" fill="#FFFFFF"/>
 </svg>
 {{end}}
 

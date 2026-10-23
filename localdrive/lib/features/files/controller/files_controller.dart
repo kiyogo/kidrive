@@ -163,7 +163,7 @@ class FilesController extends Notifier<void> {
   /// Called by the live event listener when the server says something changed,
   /// so an open folder updates without a refresh.
   void applyRemoteChange({String? parentId, String? nodeId}) {
-    ref.invalidate(folderProvider(FolderQuery(parentId: parentId ?? '')));
+    ref.invalidate(folderProvider);
     if (nodeId != null) ref.invalidate(nodeProvider(nodeId));
     if (parentId != null && parentId.isNotEmpty) {
       ref.invalidate(folderPreviewProvider(parentId));

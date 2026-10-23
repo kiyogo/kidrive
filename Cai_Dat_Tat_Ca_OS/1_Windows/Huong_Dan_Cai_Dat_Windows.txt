@@ -1,0 +1,22 @@
+======================================================================
+               HƯỚNG DẪN CÀI ĐẶT LOCAL DRIVE CHO WINDOWS
+======================================================================
+
+1. CÁCH CÀI ĐẶT:
+   - Nhấp đúp chuột vào file: LocalDrive-Setup.exe
+   - Chọn ngôn ngữ cài đặt (English, Tiếng Việt hoặc العربية).
+   - Bấm Next và Install. Trình cài đặt chuẩn Windows sẽ tự động:
+     + Cài đặt ứng dụng vào máy tính.
+     + Tạo shortcut ngoài màn hình Desktop và trong Start Menu.
+     + Thiết lập tự động khởi động cùng Windows (tuỳ chọn).
+     + Đồng bộ ngôn ngữ đã chọn vào ứng dụng.
+
+2. CÁCH SỬ DỤNG:
+   - Nhấp đúp vào biểu tượng "Local Drive" trên Desktop hoặc Start Menu để mở ứng dụng.
+   - Giao diện web cũng có thể truy cập tại: http://localhost:5437 (hoặc http://kinas:5437)
+   - Backend Server API hoạt động tại: http://localhost:9683
+
+3. GỠ CÀI ĐẶT:
+   - Vào Windows Settings > Apps > Installed apps (hoặc Control Panel > Programs and Features).
+   - Chọn "Local Drive" và bấm "Uninstall" để gỡ cài đặt sạch sẽ.
+======================================================================

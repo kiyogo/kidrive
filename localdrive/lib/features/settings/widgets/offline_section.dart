@@ -1,3 +1,6 @@
+import 'dart:io' show Platform, Process;
+
+import '../../../core/db/local_db.dart' show OfflineItem;
 import '../../../imports.dart';
 import '../../offline/controller/offline_controller.dart';
 import '../../offline/controller/web_offline_controller.dart';
@@ -28,7 +31,6 @@ class OfflineSection extends ConsumerWidget {
       return const _WebOfflineSection();
     }
 
-    final l10n = L10n.of(context);
     final usage = ref.watch(offlineUsageProvider);
 
     return ListView(
@@ -39,13 +41,6 @@ class OfflineSection extends ConsumerWidget {
         120,
       ),
       children: <Widget>[
-        Text(
-          l10n.offlineDownloadsBody,
-          style: Theme.of(context).textTheme.bodySmall!.copyWith(
-                color: context.surfaces.foregroundSecondary,
-              ),
-        ),
-        const SizedBox(height: 20),
         LdAsync<OfflineUsage>(
           value: usage,
           errorCopy: LdFormat.errorCopy(context),
@@ -77,13 +72,12 @@ class _Usage extends ConsumerWidget {
           title: l10n.offlineNothingKept,
           message: l10n.offlineMakeAvailable,
           glyph: LdGlyph.offlineReady,
+          actionLabel: l10n.myFiles,
+          onAction: () => context.go(Routes.files),
         ),
       );
     }
 
-    // Measured here rather than read off the breakpoint. This sits inside the
-    // settings detail pane, so what matters is the room this component has,
-    // not how wide the window is.
     return LayoutBuilder(
       builder: (context, constraints) => constraints.maxWidth >= 620
           ? _wide(context, ref, l10n)
@@ -91,12 +85,6 @@ class _Usage extends ConsumerWidget {
     );
   }
 
-  /// Two columns: what is stored on the left, what to do about it on the right.
-  ///
-  /// Stacked, the phone layout puts a full width card above a loose list above
-  /// six radio rows above a destructive button the width of the window. On a
-  /// desktop that reads as a form nobody laid out, and a full width delete
-  /// button looks like a banner rather than something to press.
   Widget _wide(BuildContext context, WidgetRef ref, L10n l10n) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -107,6 +95,8 @@ class _Usage extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               _summary(context, l10n),
+              const SizedBox(height: 20),
+              _itemsList(context, ref, l10n),
               if (usage.byFolder.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 20),
                 _breakdown(context, l10n),
@@ -122,15 +112,26 @@ class _Usage extends ConsumerWidget {
             children: <Widget>[
               _capGroup(context, ref, l10n),
               const SizedBox(height: 20),
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: LdButton.destructive(
-                  label: l10n.offlineClearAll,
-                  glyph: LdGlyph.trash,
-                  compact: true,
-                  expand: false,
-                  onPressed: () => _clear(context, ref, l10n),
-                ),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: <Widget>[
+                  if (!kIsWeb)
+                    LdButton.secondary(
+                      label: 'Mở thư mục ngoại tuyến',
+                      glyph: LdGlyph.folder,
+                      compact: true,
+                      expand: false,
+                      onPressed: () => _openFolder(ref),
+                    ),
+                  LdButton.destructive(
+                    label: l10n.offlineClearAll,
+                    glyph: LdGlyph.trash,
+                    compact: true,
+                    expand: false,
+                    onPressed: () => _clear(context, ref, l10n),
+                  ),
+                ],
               ),
             ],
           ),
@@ -144,6 +145,8 @@ class _Usage extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         _summary(context, l10n),
+        const SizedBox(height: 22),
+        _itemsList(context, ref, l10n),
         if (usage.byFolder.isNotEmpty) ...<Widget>[
           const SizedBox(height: 22),
           _breakdown(context, l10n),
@@ -151,10 +154,24 @@ class _Usage extends ConsumerWidget {
         const SizedBox(height: 22),
         _capGroup(context, ref, l10n),
         const SizedBox(height: 22),
-        LdButton.destructive(
-          label: l10n.offlineClearAll,
-          glyph: LdGlyph.trash,
-          onPressed: () => _clear(context, ref, l10n),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: <Widget>[
+            if (!kIsWeb)
+              LdButton.secondary(
+                label: 'Mở thư mục ngoại tuyến',
+                glyph: LdGlyph.folder,
+                compact: true,
+                onPressed: () => _openFolder(ref),
+              ),
+            LdButton.destructive(
+              label: l10n.offlineClearAll,
+              glyph: LdGlyph.trash,
+              compact: true,
+              onPressed: () => _clear(context, ref, l10n),
+            ),
+          ],
         ),
       ],
     );
@@ -261,6 +278,202 @@ class _Usage extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Widget _itemsList(BuildContext context, WidgetRef ref, L10n l10n) {
+    final index =
+        ref.watch(offlineIndexProvider).valueOrNull ?? <String, OfflineItem>{};
+    final items = index.values.toList()
+      ..sort((a, b) => b.markedAt.compareTo(a.markedAt));
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: context.surfaces.backgroundElevated,
+        borderRadius: LdRadii.cardRadius,
+        border: Border.all(color: context.surfaces.strokeOutline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: <Widget>[
+                Text(
+                  'Tệp tin đã lưu ngoại tuyến (${items.length})',
+                  style: Theme.of(context).textTheme.titleSmall!.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                if (!kIsWeb)
+                  LdTappable(
+                    onTap: () => _openFolder(ref),
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          LdIcon(
+                            LdGlyph.folder,
+                            size: 14,
+                            color: LdColors.accentPrimary,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Mở thư mục',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall!
+                                .copyWith(
+                                  color: LdColors.accentPrimary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Divider(
+            height: 1,
+            thickness: 1,
+            color: context.surfaces.strokeOutline,
+          ),
+          for (var i = 0; i < items.length; i++) ...<Widget>[
+            if (i > 0)
+              Divider(
+                height: 1,
+                thickness: 1,
+                indent: 16,
+                color: context.surfaces.strokeOutline,
+              ),
+            LdTappable(
+              onTap: () {
+                if (items[i].isFolder) {
+                  context.go(Routes.folder(items[i].nodeId));
+                } else {
+                  context.push(Routes.previewOf(items[i].nodeId));
+                }
+              },
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: <Widget>[
+                    LdIcon(
+                      items[i].isFolder ? LdGlyph.folder : LdGlyph.file,
+                      size: 20,
+                      color: items[i].isFolder
+                          ? LdColors.accentPrimary
+                          : context.surfaces.foregroundSecondary,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            items[i].name.isEmpty
+                                ? l10n.offlineChosenIndividually
+                                : items[i].name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium!
+                                .copyWith(
+                                  fontWeight: FontWeight.w500,
+                                ),
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: <Widget>[
+                              Text(
+                                LdFormat.bytes(context, items[i].sizeBytes),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelSmall!
+                                    .copyWith(
+                                      color:
+                                          context.surfaces.foregroundSecondary,
+                                    ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF4CAF50)
+                                      .withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'Sẵn sàng ngoại tuyến',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelSmall!
+                                      .copyWith(
+                                        color: const Color(0xFF4CAF50),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: LdIcon(
+                        LdGlyph.trash,
+                        size: 16,
+                        color: context.surfaces.foregroundSecondary,
+                      ),
+                      tooltip: l10n.offlineRemoveDownload,
+                      onPressed: () async {
+                        final files = ref.read(offlineFilesProvider);
+                        await files.remove(items[i].localPath);
+                        await ref
+                            .read(localDbProvider)
+                            .unmarkOffline(items[i].nodeId);
+                        ref.invalidate(offlineUsageProvider);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openFolder(WidgetRef ref) async {
+    try {
+      final files = ref.read(offlineFilesProvider);
+      final dir = await files.directory();
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      if (Platform.isWindows) {
+        await Process.run('explorer.exe', <String>[dir.path]);
+      } else if (Platform.isMacOS) {
+        await Process.run('open', <String>[dir.path]);
+      } else if (Platform.isLinux) {
+        await Process.run('xdg-open', <String>[dir.path]);
+      }
+    } catch (_) {}
   }
 
   Widget _capGroup(BuildContext context, WidgetRef ref, L10n l10n) {

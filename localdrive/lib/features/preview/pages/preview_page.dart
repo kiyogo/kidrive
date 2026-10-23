@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show compute;
 import 'package:photo_view/photo_view.dart';
-
 import '../../../imports.dart';
 import '../../files/models/node_model.dart';
 import '../../files/providers/files_providers.dart';

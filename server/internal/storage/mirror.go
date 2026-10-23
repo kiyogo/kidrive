@@ -4,7 +4,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
+	"time"
 
 	"github.com/MultiX0/LocalDrive/server/pkg/pathsafe"
 )
@@ -36,19 +38,36 @@ func NewMirror(store *Store, log *slog.Logger) *Mirror {
 	return &Mirror{store: store, log: log}
 }
 
-// Disabled reports whether the mirror gave up, which happens on a filesystem
-// that will not create symlinks. The rest of the server carries on unaffected.
-func (m *Mirror) Disabled() bool { return m.disabled.Load() }
+// Disabled always returns false now that we fallback to hardlinks and copy.
+func (m *Mirror) Disabled() bool { return false }
+
+// LinkOrCopy creates a symlink, hardlink, or fallback copy.
+func LinkOrCopy(target, linkPath string) error {
+	_ = os.Remove(linkPath)
+	if err := os.Symlink(target, linkPath); err == nil {
+		return nil
+	}
+	if err := os.Link(target, linkPath); err == nil {
+		return nil
+	}
+	return copyFile(target, linkPath)
+}
+
 
 // Link points one browse path at its object.
 func (m *Mirror) Link(root string, e MirrorEntry) {
-	if m.disabled.Load() {
-		return
-	}
 	target, err := m.store.ObjectPath(root, e.Checksum)
 	if err != nil {
 		return
 	}
+	// Wait up to 250ms for target object if adoption is completing
+	for i := 0; i < 5; i++ {
+		if _, statErr := os.Stat(target); statErr == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	linkPath, err := m.entryPath(root, e)
 	if err != nil {
 		return
@@ -57,31 +76,25 @@ func (m *Mirror) Link(root string, e MirrorEntry) {
 		m.log.Debug("browse mirror directory failed", "error", err)
 		return
 	}
-	if existing, err := os.Readlink(linkPath); err == nil {
-		if existing == target {
-			return
-		}
-		_ = os.Remove(linkPath)
-	} else if _, statErr := os.Lstat(linkPath); statErr == nil {
-		_ = os.Remove(linkPath)
-	}
-	if err := os.Symlink(target, linkPath); err != nil {
-		if os.IsPermission(err) || isUnsupportedLink(err) {
-			if m.disabled.CompareAndSwap(false, true) {
-				m.log.Warn("browse mirror disabled, this filesystem does not allow symlinks", "error", err)
-			}
-			return
-		}
+	if err := LinkOrCopy(target, linkPath); err != nil {
 		m.log.Debug("browse mirror link failed", "error", err)
+	}
+
+	// Đồng bộ trực tiếp vào ổ ảo Local Drive (L:) trên Windows (%USERPROFILE%\Local Drive)
+	if runtime.GOOS == "windows" {
+		if userProfile := os.Getenv("USERPROFILE"); userProfile != "" {
+			vDrive := filepath.Join(userProfile, "Local Drive")
+			segs := append(cleanSegments(e.RelPath), pathsafe.CleanName(e.Name))
+			dstPath := filepath.Join(append([]string{vDrive}, segs...)...)
+			_ = os.MkdirAll(filepath.Dir(dstPath), 0o755)
+			_ = LinkOrCopy(target, dstPath)
+		}
 	}
 }
 
 // Rebuild replaces one owner's whole browse subtree from scratch. Used by the
 // periodic integrity job rather than on the hot path.
 func (m *Mirror) Rebuild(root, owner string, entries []MirrorEntry) {
-	if m.disabled.Load() {
-		return
-	}
 	base, err := pathsafe.Join(root, BrowseDir, pathsafe.CleanName(owner))
 	if err != nil {
 		return
@@ -105,15 +118,7 @@ func (m *Mirror) Rebuild(root, owner string, entries []MirrorEntry) {
 		if err := os.MkdirAll(filepath.Dir(linkPath), 0o750); err != nil {
 			continue
 		}
-		if err := os.Symlink(target, linkPath); err != nil {
-			if os.IsPermission(err) || isUnsupportedLink(err) {
-				if m.disabled.CompareAndSwap(false, true) {
-					m.log.Warn("browse mirror disabled, this filesystem does not allow symlinks", "error", err)
-				}
-				_ = os.RemoveAll(staging)
-				return
-			}
-		}
+		_ = LinkOrCopy(target, linkPath)
 	}
 	old := base + ".old"
 	_ = os.RemoveAll(old)
@@ -129,6 +134,38 @@ func (m *Mirror) Rebuild(root, owner string, entries []MirrorEntry) {
 		return
 	}
 	_ = os.RemoveAll(old)
+
+	// Đồng bộ trực tiếp vào ổ ảo Local Drive (L:) trên Windows (%USERPROFILE%\Local Drive) nếu thư mục đã tồn tại
+	if runtime.GOOS == "windows" {
+		if userProfile := os.Getenv("USERPROFILE"); userProfile != "" {
+			vDrive := filepath.Join(userProfile, "Local Drive")
+			if fi, err := os.Stat(vDrive); err == nil && fi.IsDir() {
+				expected := make(map[string]bool)
+				for _, e := range entries {
+					target, err := m.store.ObjectPath(root, e.Checksum)
+					if err != nil {
+						continue
+					}
+					segs := append(cleanSegments(e.RelPath), pathsafe.CleanName(e.Name))
+					dstPath := filepath.Join(append([]string{vDrive}, segs...)...)
+					expected[dstPath] = true
+					_ = os.MkdirAll(filepath.Dir(dstPath), 0o755)
+					_ = LinkOrCopy(target, dstPath)
+				}
+
+				// Dọn sạch các tệp thừa không còn tồn tại trong ứng dụng
+				_ = filepath.Walk(vDrive, func(path string, info os.FileInfo, err error) error {
+					if err != nil || path == vDrive {
+						return nil
+					}
+					if !info.IsDir() && !expected[path] {
+						_ = os.Remove(path)
+					}
+					return nil
+				})
+			}
+		}
+	}
 }
 
 func (m *Mirror) entryPath(root string, e MirrorEntry) (string, error) {

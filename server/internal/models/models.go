@@ -88,6 +88,7 @@ type User struct {
 	TOTPSecret         string
 	TOTPEnabled        bool
 	DisabledAt         int64
+	DatasetPermissions string
 	CreatedAt          int64
 	UpdatedAt          int64
 }

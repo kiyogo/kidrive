@@ -73,6 +73,9 @@ func (d *DB) Migrate(ctx context.Context) error {
 		err = d.Write(ctx, func(ctx context.Context, tx *sql.Tx) error {
 			for _, stmt := range statements {
 				if _, err := tx.ExecContext(ctx, stmt); err != nil {
+					if strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+						continue
+					}
 					return fmt.Errorf("statement %q: %w", firstLine(stmt), err)
 				}
 			}

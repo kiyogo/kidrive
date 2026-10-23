@@ -19,7 +19,13 @@ class DesktopShellService with TrayListener {
 
   /// Whether this platform has a window and a tray at all.
   static bool get isDesktop =>
-      !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+      _isDesktopOverride ??
+      (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux));
+
+  static bool? _isDesktopOverride;
+
+  @visibleForTesting
+  static set isDesktopOverride(bool? value) => _isDesktopOverride = value;
 
   final void Function()? onShow;
   final Future<void> Function()? onQuit;

@@ -23,7 +23,9 @@ class LdProgressBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final track = background ?? LdColors.wash(LdColors.foregroundPrimary, 0.08);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final track = background ??
+        (isDark ? const Color(0xFF2A2D35) : const Color(0xFFE2E8F0));
     final fill = color ?? LdColors.accentPrimary;
 
     if (indeterminate) {

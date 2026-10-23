@@ -114,6 +114,9 @@ class L10nVi extends L10n {
   String get uploadFile => 'Tải tệp lên';
 
   @override
+  String get uploadFolder => 'Tải thư mục lên';
+
+  @override
   String get download => 'Tải xuống';
 
   @override
@@ -123,8 +126,7 @@ class L10nVi extends L10n {
   String get galleryEmptyTitle => 'Chưa có ảnh nào';
 
   @override
-  String get galleryEmptyBody =>
-      'Mọi hình ảnh bạn tải lên sẽ xuất hiện ở đây, mới nhất ở đầu.';
+  String get galleryEmptyBody => 'Mọi hình ảnh bạn tải lên sẽ xuất hiện ở đây.';
 
   @override
   String get videos => 'Video';
@@ -136,8 +138,7 @@ class L10nVi extends L10n {
   String get videosEmptyTitle => 'Chưa có video nào';
 
   @override
-  String get videosEmptyBody =>
-      'Mọi video bạn tải lên sẽ xuất hiện ở đây, mới nhất ở đầu.';
+  String get videosEmptyBody => 'Mọi video bạn tải lên sẽ xuất hiện ở đây.';
 
   @override
   String videosSummary(int count) {
@@ -416,7 +417,7 @@ class L10nVi extends L10n {
   String get passwordsDoNotMatch => 'Mật khẩu không khớp';
 
   @override
-  String get passwordTooShort => 'Vui lòng dùng ít nhất 10 ký tự';
+  String get passwordTooShort => 'Vui lòng dùng ít nhất 6 ký tự';
 
   @override
   String get signInTitle => 'Chào mừng trở lại';
@@ -605,6 +606,9 @@ class L10nVi extends L10n {
   String get actionSelect => 'Chọn';
 
   @override
+  String get selectAll => 'Chọn tất cả';
+
+  @override
   String selectedCount(int count) {
     return 'Đã chọn $count';
   }
@@ -760,7 +764,7 @@ class L10nVi extends L10n {
 
   @override
   String sidebarStorageFree(String free) {
-    return 'Còn trống $free';
+    return 'Còn $free';
   }
 
   @override
@@ -824,10 +828,26 @@ class L10nVi extends L10n {
   String get settingsServer => 'Máy chủ';
 
   @override
-  String get settingsNetworkShares => 'Chia sẻ tệp mạng nội bộ';
+  String get settingsDashboard => 'Bảng điều khiển';
 
   @override
-  String get settingsDiskManagement => 'Quản lý ổ cứng';
+  String get settingsSecurity => 'Bảo mật';
+
+  @override
+  String get settingsNetworkShares => 'Chia sẻ mạng LAN';
+
+  @override
+  String get settingsNetworkSharesSubtitle => 'Samba (SMB), WebDAV và NFS';
+
+  @override
+  String get settingsDiskManagement => 'Quản lý ổ đĩa & Pool';
+
+  @override
+  String get settingsDiskManagementSubtitle =>
+      'Ổ đĩa vật lý, S.M.A.R.T và Storage Pool';
+
+  @override
+  String get settingsDatasets => 'Dataset & Storage Pool';
 
   @override
   String get settingsUsers => 'Người dùng';
@@ -895,7 +915,7 @@ class L10nVi extends L10n {
   String get settingsSignOut => 'Đăng xuất';
 
   @override
-  String get settingsTwoFactor => 'Xác thực hai yếu tố (2FA)';
+  String get settingsTwoFactor => 'Xác thực hai yếu tố';
 
   @override
   String get settingsRequireApproval => 'Phê duyệt thiết bị mới';
@@ -1286,7 +1306,7 @@ class L10nVi extends L10n {
   }
 
   @override
-  String get twoFactorTitle => 'Xác thực hai yếu tố (2FA)';
+  String get twoFactorTitle => 'Xác thực hai yếu tố';
 
   @override
   String get twoFactorRequiredBody =>

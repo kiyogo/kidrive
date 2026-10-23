@@ -79,7 +79,7 @@ class ApiException implements Exception {
       'must_change_password' => ApiErrorKind.mustChangePassword,
       'forbidden' => ApiErrorKind.forbidden,
       'not_found' => ApiErrorKind.notFound,
-      'quota_exceeded' => ApiErrorKind.quota,
+      'quota_exceeded' || 'ERR_QUOTA' => ApiErrorKind.quota,
       'rate_limited' => ApiErrorKind.rateLimited,
       'library_offline' => ApiErrorKind.libraryOffline,
       'share_expired' => ApiErrorKind.shareExpired,

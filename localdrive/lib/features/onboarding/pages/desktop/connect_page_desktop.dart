@@ -1,3 +1,5 @@
+import 'package:bitsdojo_window/bitsdojo_window.dart';
+
 import '../../../../imports.dart';
 import '../../controller/connect_controller.dart';
 import '../../providers/discovery_providers.dart';
@@ -28,9 +30,11 @@ class ConnectPageDesktop extends HookConsumerWidget {
 
     return Scaffold(
       backgroundColor: context.surfaces.backgroundPrimary,
-      body: SafeArea(
-        child: Row(
-          children: <Widget>[
+      body: Stack(
+        children: <Widget>[
+          SafeArea(
+            child: Row(
+              children: <Widget>[
             // the scan, large, on its own
             Expanded(
               flex: 5,
@@ -128,6 +132,22 @@ class ConnectPageDesktop extends HookConsumerWidget {
           ],
         ),
       ),
-    );
+      if (LdWindowBar.isVisible)
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 180,
+          height: 48,
+          child: MoveWindow(),
+        ),
+      if (LdWindowBar.isVisible)
+        const Positioned(
+          top: 0,
+          right: 0,
+          child: LdWindowButtons(),
+        ),
+    ],
+  ),
+);
   }
 }

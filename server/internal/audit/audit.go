@@ -27,6 +27,7 @@ const (
 	ActionUserCreated       = "user.created"
 	ActionUserRoleChanged   = "user.role_changed"
 	ActionUserDisabled      = "user.disabled"
+	ActionUserDeleted       = "user.deleted"
 	ActionInviteCreated     = "invite.created"
 	ActionInviteRevoked     = "invite.revoked"
 	ActionInviteRedeemed    = "invite.redeemed"

@@ -96,7 +96,6 @@ void main() {
     test('routes live under settings and match the shared constants', () {
       expect(SettingsSection.about.route, Routes.settingsAbout);
       expect(SettingsSection.devices.route, Routes.settingsDevices);
-      expect(SettingsSection.users.route, Routes.settingsUsers);
       expect(SettingsSection.server.route, Routes.settingsServer);
       expect(SettingsSection.language.route, Routes.settingsLanguage);
       expect(SettingsSection.downloads.route, Routes.settingsDownloads);
@@ -105,12 +104,10 @@ void main() {
 
     test('admin only sections are hidden from an ordinary account', () {
       final ordinary = SettingsSection.visibleTo(isAdmin: false);
-      expect(ordinary, isNot(contains(SettingsSection.users)));
       expect(ordinary, isNot(contains(SettingsSection.server)));
       expect(ordinary, contains(SettingsSection.devices));
 
       final admin = SettingsSection.visibleTo(isAdmin: true);
-      expect(admin, contains(SettingsSection.users));
       expect(admin, contains(SettingsSection.server));
     });
   });

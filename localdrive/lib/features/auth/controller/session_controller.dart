@@ -282,9 +282,7 @@ class SessionController extends Notifier<SessionState> {
     state = SessionState(
       stage: user.mustChangePassword
           ? SessionStage.mustChangePassword
-          : (user.mustEnableTotp && user.username != 'admin')
-              ? SessionStage.mustEnableTotp
-              : SessionStage.ready,
+          : SessionStage.ready,
       user: user,
       nodeUrl: nodeUrl,
       serverStatus: status,
@@ -344,6 +342,14 @@ class SessionController extends Notifier<SessionState> {
     }
   }
 
+  /// Updates the account's display name.
+  Future<void> updateDisplayName(String displayName) async {
+    await _run(() async {
+      final updated = await _db.updateProfile(displayName);
+      state = state.copyWith(user: updated);
+    });
+  }
+
   /// Applies a live quota update from the websocket without a round trip.
   void applyQuota({required int quotaBytes, required int quotaBytesUsed}) {
     final user = state.user;
@@ -356,32 +362,49 @@ class SessionController extends Notifier<SessionState> {
     );
   }
 
-  Future<void> signOut() async {
+  Future<void> signOut({bool returnToWelcome = false}) async {
     _approvalPoll?.cancel();
     try {
       await _db.logout();
-    } on ApiException {
+    } catch (_) {
       // signing out locally matters more than the server acknowledging it
     }
-    ref.read(webSocketProvider).disconnect();
-    await _api.clearSession();
+    try {
+      ref.read(webSocketProvider).disconnect();
+    } catch (_) {}
+    try {
+      await _api.clearSession();
+    } catch (_) {}
 
     // everything device local goes too: the folder names this account browsed,
     // the files it kept offline, and anything still queued. The next person to
     // use this device has no business seeing any of it
-    await ref.read(offlineFilesProvider).clear();
-    await ref.read(localDbProvider).wipe();
+    try {
+      await ref.read(offlineFilesProvider).clear();
+    } catch (_) {}
+    try {
+      await ref.read(localDbProvider).wipe();
+    } catch (_) {}
 
     // wiping the database is not enough on its own. The listing providers keep
     // their last answer in memory, so without this the next server's home
     // screen opens showing the previous server's files, which then fail to open
-    refreshServerData(ref);
+    try {
+      refreshServerData(ref);
+    } catch (_) {}
 
-    state = SessionState(
-      stage: SessionStage.signedOut,
-      nodeUrl: state.nodeUrl,
-      serverStatus: state.serverStatus,
-    );
+    if (returnToWelcome) {
+      try {
+        await _store.clearNodeUrl();
+      } catch (_) {}
+      state = const SessionState(stage: SessionStage.noNode);
+    } else {
+      state = SessionState(
+        stage: SessionStage.signedOut,
+        nodeUrl: state.nodeUrl,
+        serverStatus: state.serverStatus,
+      );
+    }
   }
 
   /// How many times in a row a node has to miss before it is treated as gone.
@@ -441,9 +464,7 @@ class SessionController extends Notifier<SessionState> {
 
   /// Forgets the node entirely and returns to onboarding.
   Future<void> switchNode() async {
-    await signOut();
-    await _store.clearNodeUrl();
-    state = const SessionState(stage: SessionStage.noNode);
+    await signOut(returnToWelcome: true);
   }
 
   void _handleSessionLost() {

@@ -69,30 +69,26 @@ class ApiClient {
     if (kIsWeb) {
       final sameOrigin = await _originIsAServer();
       if (sameOrigin != null &&
-          (url == null || url.isEmpty || url.contains(':7555') || url != sameOrigin)) {
+          (url == null || url.isEmpty || url.contains(':7555') || url.contains(':8080') || url != sameOrigin)) {
         url = sameOrigin;
         await _store.writeNodeUrl(url);
       }
     }
-    if (url == null || url.isEmpty) {
-      // In a browser the app was served by a server, and asking someone to
-      // type the address of the machine they are already talking to is
-      // nonsense.
+    if (url == null || url.isEmpty || url.contains(':7555') || url.contains(':8080')) {
       final sameOrigin = await _originIsAServer();
       if (sameOrigin != null) {
         url = sameOrigin;
         await _store.writeNodeUrl(url);
-      } else if (kIsWeb) {
-        // Fallback probe for local development backend on port 7443
-        final localDevServer = await _probeServer('http://localhost:7443');
+      } else {
+        // Fallback probe for local backend on port 9683 (desktop and web dev)
+        final localDevServer = await _probeServer('http://localhost:9683') ??
+            await _probeServer('http://127.0.0.1:9683');
         if (localDevServer != null) {
           url = localDevServer;
           await _store.writeNodeUrl(url);
         } else {
           return false;
         }
-      } else {
-        return false;
       }
     }
     useNode(url);
@@ -135,7 +131,7 @@ class ApiClient {
   /// the app's own port and a scheme guessed from the address itself;
   /// anything explicit is left exactly as typed.
   static String normalizeNodeUrl(String raw) {
-    var value = raw.trim();
+    var value = raw.trim().replaceAll(RegExp(r'/+$'), '');
     if (value.isEmpty) return value;
 
     final hadScheme =
@@ -151,10 +147,9 @@ class ApiClient {
       return value;
     }
 
-    // typing a bare address means "my Local Drive server", so it gets the
-    // port Local Drive serves on. typing a full url means exactly that url,
-    // so its scheme's own default port is left alone.
-    if (!parsed.hasPort && !hadScheme) {
+    // If no port was explicitly specified and it didn't have a scheme,
+    // default to Local Drive's port (9683)
+    if (!hadScheme && !parsed.hasPort) {
       parsed = parsed.replace(port: defaultPort);
     }
 
@@ -194,7 +189,7 @@ class ApiClient {
   /// The one port a Local Drive server serves on, matching the backend's own
   /// default. Not 443, so it does not collide with whatever else is on the
   /// machine someone is hosting from.
-  static const int defaultPort = 7443;
+  static const int defaultPort = 9683;
 
   /// Builds an absolute URL for something an image or a video widget will
   /// fetch itself, such as a thumbnail.
@@ -219,8 +214,15 @@ class ApiClient {
   /// scheme (server has a domain configured) is left alone.
   String publicLink(String raw) {
     if (raw.isEmpty) return raw;
-    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
-    return absolute(raw);
+    String resolved = raw;
+    if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+      resolved = absolute(raw);
+    }
+    final uri = Uri.tryParse(resolved);
+    if (uri != null && uri.hasPort && uri.port == 9683) {
+      return uri.replace(port: 5437).toString();
+    }
+    return resolved;
   }
 
   Map<String, String> get authHeaders => <String, String>{

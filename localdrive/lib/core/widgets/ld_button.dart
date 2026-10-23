@@ -74,9 +74,12 @@ class LdButton extends StatelessWidget {
     final scheme = _resolve(context);
     final height = compact ? 38.0 : LdRadii.buttonHeight;
 
+    final foregroundColor =
+        _enabled ? scheme.foreground : context.surfaces.foregroundMuted;
+
     // resolved from the current theme at build time, never hardcoded
     final labelStyle = Theme.of(context).textTheme.labelLarge!.copyWith(
-          color: _enabled ? scheme.foreground : context.surfaces.foregroundMuted,
+          color: foregroundColor,
         );
 
     final content = Row(
@@ -84,13 +87,13 @@ class LdButton extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       children: <Widget>[
         if (busy) ...<Widget>[
-          LdSpinner(size: 18, color: scheme.foreground),
+          LdSpinner(size: 18, color: foregroundColor),
           const SizedBox(width: 10),
         ] else if (glyph != null) ...<Widget>[
           LdIcon(
             glyph!,
             size: 18,
-            color: _enabled ? scheme.foreground : context.surfaces.foregroundMuted,
+            color: foregroundColor,
           ),
           const SizedBox(width: 8),
         ],

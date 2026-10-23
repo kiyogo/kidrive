@@ -182,6 +182,27 @@ class _TileCaption extends StatelessWidget {
                     ),
               ),
             ),
+            if (node.role == AccessRole.viewer)
+              Container(
+                margin: const EdgeInsets.only(left: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.4), width: 0.8),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    LdIcon(LdGlyph.lock, size: 9, color: Color(0xFFD97706)),
+                    SizedBox(width: 3),
+                    Text(
+                      'Chỉ đọc',
+                      style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: Color(0xFFD97706)),
+                    ),
+                  ],
+                ),
+              ),
             if (node.starred)
               const Padding(
                 padding: EdgeInsets.only(left: 4),
@@ -325,6 +346,28 @@ class NodeRow extends ConsumerWidget {
                                 ),
                           ),
                         ),
+
+                        if (node.role == AccessRole.viewer)
+                          Container(
+                            margin: const EdgeInsets.only(left: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.4), width: 0.8),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                LdIcon(LdGlyph.lock, size: 10, color: Color(0xFFD97706)),
+                                SizedBox(width: 3),
+                                Text(
+                                  'Chỉ đọc',
+                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFFD97706)),
+                                ),
+                              ],
+                            ),
+                          ),
                         if (node.starred)
                           const Padding(
                             padding: EdgeInsets.only(left: 6),

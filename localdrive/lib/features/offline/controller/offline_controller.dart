@@ -200,18 +200,23 @@ class OfflineController extends Notifier<void> {
     required int sizeBytes,
   }) async {
     final row = await _db.offlineItem(nodeId);
-    if (row == null) return;
+    final cached = await _db.cachedNode(nodeId);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final name = (row != null && row.name.isNotEmpty)
+        ? row.name
+        : (cached?.name ?? '');
+
     await _db.markOffline(
       OfflineItemsCompanion.insert(
         nodeId: nodeId,
-        isFolder: Value(row.isFolder),
-        explicit: Value(row.explicit),
-        name: Value(row.name),
+        isFolder: Value(row?.isFolder ?? false),
+        explicit: Value(row?.explicit ?? true),
+        name: Value(name),
         localPath: Value(path),
         checksum: Value(checksum),
         sizeBytes: Value(sizeBytes),
-        markedAt: row.markedAt,
-        syncedAt: Value(DateTime.now().millisecondsSinceEpoch),
+        markedAt: row?.markedAt ?? now,
+        syncedAt: Value(now),
       ),
     );
   }

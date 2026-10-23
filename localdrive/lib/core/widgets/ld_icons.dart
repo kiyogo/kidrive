@@ -12,6 +12,7 @@ enum LdGlyph {
   plus,
   shared,
   settings,
+  tune,
   folder,
   file,
   upload,
@@ -207,6 +208,12 @@ class _LdGlyphPainter extends CustomPainter {
         canvas.drawLine(const Offset(12, 17.5), const Offset(12, 20), stroke);
         canvas.drawLine(const Offset(4, 12), const Offset(6.5, 12), stroke);
         canvas.drawLine(const Offset(17.5, 12), const Offset(20, 12), stroke);
+
+      case LdGlyph.tune:
+        canvas.drawLine(const Offset(3, 8), const Offset(21, 8), stroke);
+        canvas.drawLine(const Offset(3, 16), const Offset(21, 16), stroke);
+        canvas.drawLine(const Offset(8, 5), const Offset(8, 11), stroke);
+        canvas.drawLine(const Offset(16, 13), const Offset(16, 19), stroke);
 
       case LdGlyph.folder:
         canvas.drawPath(

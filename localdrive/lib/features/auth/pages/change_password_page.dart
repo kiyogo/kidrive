@@ -25,7 +25,7 @@ class ChangePasswordPage extends HookConsumerWidget {
         error.value = l10n.passwordsDoNotMatch;
         return;
       }
-      if (next.text.length < 10) {
+      if (next.text.length < 6) {
         error.value = l10n.passwordTooShort;
         return;
       }

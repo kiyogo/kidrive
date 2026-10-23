@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, type Glyph } from "@/components/Icon";
 import {
   Avatar,
   Button,
+  CanvasOverlayScrollbar,
   ConfirmDialog,
   EmptyState,
   LayeredBadge,
@@ -22,7 +23,7 @@ import {
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { bytes, dateTime, percent, relative } from "@/lib/format";
-import type { DeviceModel, LibraryModel, UserModel } from "@/lib/models";
+import type { DeviceModel, DriveModel, LibraryModel, UserModel } from "@/lib/models";
 import { useL10n, type Strings } from "@/lib/l10n";
 import { HIDE_TWO_FACTOR } from "@/lib/flags";
 import { useSession } from "@/lib/session";
@@ -30,6 +31,11 @@ import { TwoFactorSetup } from "@/components/auth/TwoFactorSetup";
 import { useTheme } from "@/lib/theme";
 import { NetworkSharesSection } from "./NetworkSharesSection";
 import { DisksSection } from "./DisksSection";
+import { DatasetsSection } from "./DatasetsSection";
+import { UsersSection } from "./UsersSection";
+import { DashboardSection } from "./DashboardSection";
+import { SecuritySection } from "./SecuritySection";
+import { useInfiniteList } from "@/lib/useInfiniteList";
 
 /*
   Settings, ported from features/settings. One list of sections, each opening
@@ -46,13 +52,17 @@ type SectionId =
   | "language"
   | "two-factor"
   | "downloads"
+  | "dashboard"
+  | "security"
+  | "shares"
   | "network-shares"
   | "disks"
+  | "datasets"
   | "users"
   | "server"
   | "about";
 
-/** Declared once, in the app's order. Users, server, network shares, and disks are admin only. */
+/** Declared once, in the app's order. Users, server, network shares, disks, and datasets are admin only. */
 const sections: { id: SectionId; key: keyof Strings; glyph: Glyph; adminOnly?: boolean }[] = [
   { id: "account", key: "settingsAccount", glyph: "person" },
   { id: "appearance", key: "settingsAppearance", glyph: "eye" },
@@ -60,8 +70,10 @@ const sections: { id: SectionId; key: keyof Strings; glyph: Glyph; adminOnly?: b
   { id: "language", key: "settingsLanguage", glyph: "language" },
   { id: "two-factor", key: "settingsTwoFactor", glyph: "lock" },
   { id: "downloads", key: "offlineDownloadsTitle", glyph: "offlineReady" },
-  { id: "network-shares", key: "settingsNetworkShares", glyph: "share", adminOnly: true },
-  { id: "disks", key: "settingsDiskManagement", glyph: "storage", adminOnly: true },
+  { id: "dashboard", key: "settingsDashboard", glyph: "grid", adminOnly: true },
+  { id: "security", key: "settingsSecurity", glyph: "lock", adminOnly: true },
+  { id: "shares", key: "settingsNetworkShares", glyph: "share", adminOnly: true },
+  { id: "datasets", key: "settingsDatasets", glyph: "folder", adminOnly: true },
   { id: "users", key: "settingsUsers", glyph: "people", adminOnly: true },
   { id: "server", key: "settingsServer", glyph: "server", adminOnly: true },
   { id: "about", key: "settingsAbout", glyph: "info" },
@@ -84,17 +96,51 @@ export function SettingsScreen({
   const [desktopSection, setDesktopSection] = useState<SectionId>(
     (initialSection as SectionId) || "account",
   );
+  const [navKey, setNavKey] = useState(0);
   const isAdmin = user?.role === "admin";
+
+  const mainRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (initialSection && initialSection !== "root") {
       setDesktopSection(initialSection as SectionId);
       setMobileSection(initialSection as SectionId);
+      setNavKey((k) => k + 1);
     }
   }, [initialSection]);
 
+  useEffect(() => {
+    if (mainRef.current) {
+      mainRef.current.scrollTop = 0;
+    }
+  }, [desktopSection]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handlePopState = () => {
+      const pathname = window.location.pathname;
+      if (pathname === "/settings" || pathname === "/settings/") {
+        setMobileSection("root");
+      } else {
+        const seg = pathname.replace(/^\/settings\/?/, "").split("/")[0];
+        if (seg && sections.some((s) => s.id === seg)) {
+          setMobileSection(seg as SectionId);
+          setDesktopSection(seg as SectionId);
+        }
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   const selectSection = (id: SectionId) => {
     setDesktopSection(id);
+    setMobileSection(id);
+    setNavKey((k) => k + 1);
+    if (typeof window !== "undefined") {
+      window.history.pushState(null, "", `/settings/${id}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }
     onSelectSection?.(id);
   };
 
@@ -104,7 +150,19 @@ export function SettingsScreen({
 
   if (!isDesktop) {
     if (mobileSection !== "root") {
-      return <Detail section={mobileSection} onBack={() => setMobileSection("root")} />;
+      return (
+        <Detail
+          key={`${mobileSection}-${navKey}`}
+          section={mobileSection}
+          onBack={() => {
+            setMobileSection("root");
+            if (typeof window !== "undefined") {
+              window.history.pushState(null, "", "/settings");
+              window.dispatchEvent(new PopStateEvent("popstate"));
+            }
+          }}
+        />
+      );
     }
 
     return (
@@ -156,7 +214,7 @@ export function SettingsScreen({
                 glyph={s.glyph}
                 label={t[s.key] as string}
                 value={value}
-                onClick={() => setMobileSection(s.id)}
+                onClick={() => selectSection(s.id)}
               />
             );
           })}
@@ -171,7 +229,7 @@ export function SettingsScreen({
 
   // Desktop view: LdDesktopScaffold with 64px header and LdMasterDetail
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflowX: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", maxHeight: "100%", minHeight: 0, width: "100%", overflow: "hidden" }}>
       <header
         style={{
           height: 64,
@@ -200,10 +258,10 @@ export function SettingsScreen({
       <div style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
         <aside
           style={{
-            width: 220,
-            flex: "0 0 220px",
-            minWidth: 220,
-            maxWidth: 220,
+            width: 240,
+            flex: "0 0 240px",
+            minWidth: 240,
+            maxWidth: 240,
             flexShrink: 0,
             padding: 13,
             borderRight: "1px solid var(--stroke)",
@@ -247,11 +305,19 @@ export function SettingsScreen({
           })}
         </aside>
 
-        <main style={{ flex: 1, minWidth: 0, overflowY: "auto", overflowX: "hidden", padding: 24 }}>
-          <div style={{ maxWidth: 640 }}>
-            <Detail section={desktopSection} embedded />
-          </div>
-        </main>
+        <div style={{ position: "relative", flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          <main ref={mainRef} style={{ flex: 1, minWidth: 0, overflowY: "auto", overflowX: "hidden", padding: 24 }}>
+            <div
+              style={{
+                width: "100%",
+                maxWidth: desktopSection === "shares" || desktopSection === "network-shares" || desktopSection === "disks" || desktopSection === "datasets" || desktopSection === "users" ? "100%" : 640,
+              }}
+            >
+              <Detail key={`${desktopSection}-${navKey}`} section={desktopSection} embedded />
+            </div>
+          </main>
+          <CanvasOverlayScrollbar targetRef={mainRef} />
+        </div>
       </div>
     </div>
   );
@@ -383,6 +449,7 @@ function Detail({
   onBack?: () => void;
   embedded?: boolean;
 }) {
+  const t = useL10n();
   switch (section) {
     case "account":
       return <AccountSection onBack={onBack} embedded={embedded} />;
@@ -394,16 +461,29 @@ function Detail({
       return <UsersSection onBack={onBack} embedded={embedded} />;
     case "server":
       return <ServerSection onBack={onBack} embedded={embedded} />;
+    case "shares":
     case "network-shares":
       return <NetworkSharesSection onBack={onBack} embedded={embedded} />;
-    case "disks":
-      return <DisksSection onBack={onBack} embedded={embedded} />;
+    case "datasets":
+      return <DatasetsSection onBack={onBack} embedded={embedded} />;
     case "language":
       return <LanguageSection onBack={onBack} embedded={embedded} />;
     case "downloads":
       return <DownloadsSection onBack={onBack} embedded={embedded} />;
     case "two-factor":
       return <TwoFactorSection onBack={onBack} embedded={embedded} />;
+    case "dashboard":
+      return (
+        <Page title={t.settingsDashboard} onBack={onBack} embedded={embedded}>
+          <DashboardSection onBack={onBack} embedded={embedded} />
+        </Page>
+      );
+    case "security":
+      return (
+        <Page title={t.settingsSecurity} onBack={onBack} embedded={embedded}>
+          <SecuritySection onBack={onBack} embedded={embedded} />
+        </Page>
+      );
     default:
       return <AboutSection onBack={onBack} embedded={embedded} />;
   }
@@ -433,6 +513,9 @@ function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
+  const [nameOpen, setNameOpen] = useState(false);
+  const [nameVal, setNameVal] = useState(user?.display_name || user?.username || "");
+  const [nameError, setNameError] = useState("");
 
   if (!user) return null;
 
@@ -441,7 +524,7 @@ function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
       setError(t.passwordsDoNotMatch);
       return;
     }
-    if (next.length < 10) {
+    if (next.length < 6) {
       setError(t.passwordTooShort);
       return;
     }
@@ -456,6 +539,22 @@ function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
       await refreshUser();
     } catch (e) {
       setError(e instanceof Error ? e.message : t.errorUnexpectedTitle);
+    }
+  };
+
+  const saveName = async () => {
+    if (!nameVal.trim()) {
+      setNameError("Vui lòng nhập tên hiển thị.");
+      return;
+    }
+    try {
+      await api.patch(Api.meProfile, { display_name: nameVal.trim() });
+      toast("Đã đổi tên hiển thị", "success");
+      setNameOpen(false);
+      setNameError("");
+      await refreshUser();
+    } catch (e) {
+      setNameError(e instanceof Error ? e.message : t.errorUnexpectedTitle);
     }
   };
 
@@ -476,7 +575,20 @@ function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
       >
         <Avatar name={user.display_name || user.username} seed={user.avatar_seed} size={48} />
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="t-title-sm" style={{ fontWeight: 600 }}>{user.display_name || user.username}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="t-title-sm" style={{ fontWeight: 600 }}>{user.display_name || user.username}</div>
+            <Tappable
+              onClick={() => {
+                setNameVal(user.display_name || user.username);
+                setNameOpen(true);
+              }}
+              radius={999}
+              style={{ padding: 4 }}
+              title="Đổi tên hiển thị"
+            >
+              <Icon glyph="edit" size={16} color="var(--accent)" />
+            </Tappable>
+          </div>
           <div className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 2 }}>
             {user.role === "admin" ? t.roleAdmin : t.roleMember}
           </div>
@@ -521,6 +633,15 @@ function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
 
       <SettingGroup title={t.settingsAccount}>
         <SettingRow
+          label="Đổi tên hiển thị"
+          glyph="user"
+          onTap={() => {
+            setNameVal(user.display_name || user.username);
+            setNameOpen(true);
+          }}
+        />
+        <SettingRow
+          showDivider
           label={t.newPassword}
           glyph="lock"
           onTap={() => setOpen(true)}
@@ -537,6 +658,27 @@ function AccountSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
         />
       </SettingGroup>
 
+      {/* Sheet đổi tên hiển thị */}
+      <Sheet open={nameOpen} onClose={() => setNameOpen(false)} title="Đổi tên hiển thị">
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <TextField
+            value={nameVal}
+            onChange={setNameVal}
+            label="Tên hiển thị mới"
+            glyph="user"
+            autoFocus
+            onEnter={() => void saveName()}
+          />
+          {nameError && (
+            <span className="t-body-sm" style={{ color: "var(--warning)" }}>
+              {nameError}
+            </span>
+          )}
+          <Button label={t.actionSave} onClick={() => void saveName()} />
+        </div>
+      </Sheet>
+
+      {/* Sheet đổi mật khẩu */}
       <Sheet open={open} onClose={() => setOpen(false)} title={t.newPassword}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <TextField
@@ -690,195 +832,6 @@ function DevicesSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
           </SettingGroup>
         </>
       )}
-    </Page>
-  );
-}
-
-function UsersSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
-  const t = useL10n();
-  const toast = useToast();
-  const [items, setItems] = useState<UserModel[] | null>(null);
-  const [inviting, setInviting] = useState(false);
-  const [inviteLabel, setInviteLabel] = useState("");
-  const [createdInvite, setCreatedInvite] = useState<{ code: string; link: string } | null>(null);
-  const [selectedUser, setSelectedUser] = useState<UserModel | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const data = await api.get<{ users: UserModel[] }>(Api.adminUsers);
-      setItems(data?.users ?? []);
-    } catch {
-      setItems([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const handleCreateInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteLabel.trim()) return;
-    try {
-      const res = await api.post<{ code: string; link: string }>(Api.invites, { label: inviteLabel.trim() });
-      setCreatedInvite(res);
-      setInviteLabel("");
-      void load();
-    } catch (err) {
-      toast(err instanceof Error ? err.message : t.errorUnexpectedTitle, "error");
-    }
-  };
-
-  const handleResetPassword = async (user: UserModel) => {
-    try {
-      await api.post(`${Api.adminUsers}/${user.id}/reset-password`, {});
-      toast(t.usersResetPassword, "success");
-      setSelectedUser(null);
-    } catch (err) {
-      toast(err instanceof Error ? err.message : t.errorUnexpectedTitle, "error");
-    }
-  };
-
-  const handleToggleRole = async (user: UserModel) => {
-    try {
-      const nextRole = user.role === "admin" ? "member" : "admin";
-      await api.patch(`${Api.adminUsers}/${user.id}`, { role: nextRole });
-      toast(nextRole === "admin" ? t.usersMakeAdmin : t.usersMakeMember, "success");
-      setSelectedUser(null);
-      void load();
-    } catch (err) {
-      toast(err instanceof Error ? err.message : t.errorUnexpectedTitle, "error");
-    }
-  };
-
-  return (
-    <Page title={t.settingsUsers} onBack={onBack} embedded={embedded}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-        <h2 className="t-title-sm" style={{ margin: 0, fontWeight: 600 }}>{t.settingsUsers}</h2>
-        <Button
-          label={t.usersInviteSomeone}
-          glyph="qr"
-          compact
-          expand={false}
-          onClick={() => {
-            setCreatedInvite(null);
-            setInviting(true);
-          }}
-        />
-      </div>
-
-      {items === null ? (
-        <ListSkeleton rows={4} />
-      ) : items.length === 0 ? (
-        <EmptyState glyph="people" title={t.emptyUsersTitle} message={t.emptyUsersBody} compact />
-      ) : (
-        <SettingGroup>
-          {items.map((u, i) => {
-            const desc = [
-              u.role === "admin" ? t.roleAdmin : t.roleMember,
-              u.quota_bytes > 0
-                ? t.storageUsedOf({ used: bytes(u.quota_bytes_used), total: bytes(u.quota_bytes) })
-                : t.sidebarStorageUsed({ used: bytes(u.quota_bytes_used) }),
-            ].join("  ·  ");
-
-            return (
-              <SettingRow
-                key={u.id}
-                showDivider={i > 0}
-                label={u.display_name || u.username}
-                description={desc}
-                trailing={<Avatar name={u.display_name || u.username} seed={u.avatar_seed} size={34} />}
-                onTap={() => setSelectedUser(u)}
-              />
-            );
-          })}
-        </SettingGroup>
-      )}
-
-      {/* Invite Sheet */}
-      <Sheet
-        open={inviting}
-        onClose={() => setInviting(false)}
-        title={createdInvite ? t.invite : t.usersInviteSomeone}
-        subtitle={createdInvite ? t.usersInviteCreated : undefined}
-      >
-        {createdInvite ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div
-              style={{
-                padding: "16px",
-                background: "var(--bg-primary)",
-                border: "1px solid var(--stroke)",
-                borderRadius: "var(--r-field)",
-                fontFamily: "var(--font-mono)",
-                fontSize: 18,
-                fontWeight: 600,
-                textAlign: "center",
-                letterSpacing: 2,
-              }}
-            >
-              {createdInvite.code}
-            </div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <Button
-                label={t.actionCopyCode}
-                variant="secondary"
-                compact
-                onClick={async () => {
-                  await navigator.clipboard.writeText(createdInvite.code);
-                  toast(t.actionCopied, "success");
-                }}
-              />
-              <Button
-                label={t.actionCopyLink}
-                compact
-                onClick={async () => {
-                  const link = window.location.origin + createdInvite.link;
-                  await navigator.clipboard.writeText(link);
-                  toast(t.actionCopied, "success");
-                }}
-              />
-            </div>
-            <Button label={t.actionDone} variant="secondary" onClick={() => setInviting(false)} />
-          </div>
-        ) : (
-          <form onSubmit={handleCreateInvite} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <TextField
-              value={inviteLabel}
-              onChange={setInviteLabel}
-              hint={t.usersInviteHint}
-              autoFocus
-            />
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-              <Button label={t.actionCancel} variant="secondary" compact onClick={() => setInviting(false)} />
-              <Button label={t.invite} compact type="submit" />
-            </div>
-          </form>
-        )}
-      </Sheet>
-
-      {/* User Manage Context Sheet */}
-      <Sheet
-        open={!!selectedUser}
-        onClose={() => setSelectedUser(null)}
-        title={selectedUser?.display_name || selectedUser?.username || ""}
-      >
-        {selectedUser && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <SettingRow
-              glyph="lock"
-              label={t.usersResetPassword}
-              onTap={() => handleResetPassword(selectedUser)}
-            />
-            <SettingRow
-              showDivider
-              glyph="person"
-              label={selectedUser.role === "admin" ? t.usersMakeMember : t.usersMakeAdmin}
-              onTap={() => handleToggleRole(selectedUser)}
-            />
-          </div>
-        )}
-      </Sheet>
     </Page>
   );
 }
@@ -1175,6 +1128,32 @@ function AboutSection({ onBack, embedded }: { onBack?: () => void; embedded?: bo
         <AboutRow showDivider label="Type" value="Self-hosted Private Cloud" />
       </SettingGroup>
 
+      <SettingGroup title="Ứng dụng cài đặt">
+        <AboutRow
+          label="Cài đặt trên Windows"
+          value="LocalDrive-Setup.exe"
+          onTap={() => window.open("/LocalDrive-Setup.exe", "_blank")}
+        />
+        <AboutRow
+          showDivider
+          label="Ứng dụng Android"
+          value="LocalDrive.apk"
+          onTap={() => window.open("/LocalDrive.apk", "_blank")}
+        />
+        <AboutRow
+          showDivider
+          label="Gói cài đặt Linux"
+          value="LocalDrive-linux-package.tar.gz"
+          onTap={() => window.open("/LocalDrive-linux-package.tar.gz", "_blank")}
+        />
+        <AboutRow
+          showDivider
+          label="Lệnh cài nhanh Linux"
+          value="install.sh"
+          onTap={() => window.open("/install.sh", "_blank")}
+        />
+      </SettingGroup>
+
       <SettingGroup title="Legal">
         <AboutRow label="Licence" value="MIT" />
         <AboutRow showDivider label="Open source licences" onTap={() => {}} />
@@ -1364,52 +1343,71 @@ function DownloadsSection({ onBack, embedded }: { onBack?: () => void; embedded?
 
 /* ---------------------------------------------------------------- storage */
 
+interface CategoryStat {
+  bytes: number;
+  count: number;
+}
+
+interface AccountStorageData {
+  quota_bytes: number;
+  used_bytes: number;
+  free_bytes: number;
+  usage_percent: number;
+  categories: {
+    images: CategoryStat;
+    videos: CategoryStat;
+    documents: CategoryStat;
+    audio: CategoryStat;
+    other: CategoryStat;
+    trash: CategoryStat;
+  };
+}
+
 export function StorageScreen() {
   const t = useL10n();
   const { user } = useSession();
-  const isAdmin = user?.role === "admin";
   const { isDesktop } = useDeviceClass();
-  const [data, setData] = useState<{
-    libraries: LibraryModel[];
-    total_used: number;
-    total_free: number;
-    total_bytes: number;
-  } | null>(null);
-  const [drives, setDrives] = useState<{ drives: unknown[]; helper_available: boolean } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<AccountStorageData | null>(null);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await api.get<{
-        libraries: LibraryModel[];
-        total_used?: number;
-        total_free?: number;
-        total_bytes?: number;
-      }>(Api.libraries);
-      setData({
-        libraries: res?.libraries ?? [],
-        total_used: res?.total_used ?? 0,
-        total_free: res?.total_free ?? 0,
-        total_bytes: res?.total_bytes ?? 0,
-      });
-    } catch {
-      setData({ libraries: [], total_used: 0, total_free: 0, total_bytes: 0 });
-    }
-
-    if (isAdmin) {
-      try {
-        const dRes = await api.get<{ drives: unknown[]; helper_available: boolean }>(Api.drives);
-        setDrives(dRes ?? { drives: [], helper_available: false });
-      } catch {
-        setDrives({ drives: [], helper_available: false });
+      const res = await api.get<AccountStorageData>(Api.storageAccount);
+      if (res && typeof res.quota_bytes === "number") {
+        setData(res);
+      } else {
+        throw new Error("Invalid response");
       }
+    } catch {
+      // Fallback from session user
+      const quota = user?.quota_bytes && user.quota_bytes > 0 ? user.quota_bytes : 10 * 1024 * 1024 * 1024;
+      const used = user?.quota_bytes_used ?? 0;
+      const free = Math.max(0, quota - used);
+      setData({
+        quota_bytes: quota,
+        used_bytes: used,
+        free_bytes: free,
+        usage_percent: quota > 0 ? (used / quota) * 100 : 0,
+        categories: {
+          images: { bytes: 0, count: 0 },
+          videos: { bytes: 0, count: 0 },
+          documents: { bytes: 0, count: 0 },
+          audio: { bytes: 0, count: 0 },
+          other: { bytes: 0, count: 0 },
+          trash: { bytes: 0, count: 0 },
+        },
+      });
+    } finally {
+      setLoading(false);
     }
-  }, [isAdmin]);
+  }, [user]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  if (!data) {
+  if (loading && !data) {
     return (
       <div style={{ padding: 24 }}>
         <ListSkeleton rows={3} />
@@ -1417,25 +1415,94 @@ export function StorageScreen() {
     );
   }
 
-  const used = isAdmin || !user ? data.total_used : user.quota_bytes_used;
-  const totalDisk = data.total_bytes;
-  const freeDisk = data.total_free;
-  const diskUsed = Math.max(0, totalDisk - freeDisk);
-  const otherDiskUsed = Math.max(0, diskUsed - used);
-  const totalPercent = totalDisk > 0 ? (diskUsed / totalDisk) * 100 : 0;
-  const localPercent = totalDisk > 0 ? (used / totalDisk) * 100 : 0;
-  const otherPercent = totalDisk > 0 ? (otherDiskUsed / totalDisk) * 100 : 0;
-  const isWarn = totalPercent >= 90;
-  const caption = isAdmin || !user ? t.storageTotal : t.storageYours;
+  const quota = data?.quota_bytes ?? (10 * 1024 * 1024 * 1024);
+  const used = data?.used_bytes ?? 0;
+  const free = data?.free_bytes ?? Math.max(0, quota - used);
+  const percentUsed = quota > 0 ? Math.min(100, Math.max(0, (used / quota) * 100)) : 0;
+  const isWarn = percentUsed >= 95;
+
+  const categories = data?.categories ?? {
+    images: { bytes: 0, count: 0 },
+    videos: { bytes: 0, count: 0 },
+    documents: { bytes: 0, count: 0 },
+    audio: { bytes: 0, count: 0 },
+    other: { bytes: 0, count: 0 },
+    trash: { bytes: 0, count: 0 },
+  };
+
+  const categoryItems: Array<{
+    id: string;
+    label: string;
+    glyph: Glyph;
+    bytes: number;
+    count: number;
+    color: string;
+    bg: string;
+  }> = [
+    {
+      id: "images",
+      label: "Hình ảnh",
+      glyph: "image",
+      bytes: categories.images?.bytes ?? 0,
+      count: categories.images?.count ?? 0,
+      color: "#3B82F6",
+      bg: "rgba(59, 130, 246, 0.12)",
+    },
+    {
+      id: "videos",
+      label: "Video",
+      glyph: "video",
+      bytes: categories.videos?.bytes ?? 0,
+      count: categories.videos?.count ?? 0,
+      color: "#8B5CF6",
+      bg: "rgba(139, 92, 246, 0.12)",
+    },
+    {
+      id: "documents",
+      label: "Tài liệu",
+      glyph: "file",
+      bytes: categories.documents?.bytes ?? 0,
+      count: categories.documents?.count ?? 0,
+      color: "#F59E0B",
+      bg: "rgba(245, 158, 11, 0.12)",
+    },
+    {
+      id: "audio",
+      label: "Âm thanh",
+      glyph: "audio",
+      bytes: categories.audio?.bytes ?? 0,
+      count: categories.audio?.count ?? 0,
+      color: "#10B981",
+      bg: "rgba(16, 185, 129, 0.12)",
+    },
+    {
+      id: "other",
+      label: "Tệp khác",
+      glyph: "folder",
+      bytes: categories.other?.bytes ?? 0,
+      count: categories.other?.count ?? 0,
+      color: "#64748B",
+      bg: "rgba(100, 116, 139, 0.12)",
+    },
+    {
+      id: "trash",
+      label: "Thùng rác",
+      glyph: "trash",
+      bytes: categories.trash?.bytes ?? 0,
+      count: categories.trash?.count ?? 0,
+      color: "#EF4444",
+      bg: "rgba(239, 68, 68, 0.12)",
+    },
+  ];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflowY: "auto", overflowX: "hidden" }}>
-      {/* 64px header matching DesktopScaffold */}
+      {/* Header */}
       {isDesktop ? (
         <header
           style={{
             height: 64,
-            padding: "0 16px",
+            padding: "0 24px",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -1444,209 +1511,185 @@ export function StorageScreen() {
             flex: "none",
           }}
         >
-          <h1 className="t-title-lg" style={{ margin: 0 }}>
-            {t.storage}
-          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Icon glyph="storage" size={22} color="var(--accent)" />
+            <h1 className="t-title-lg" style={{ margin: 0 }}>
+              {t.storage}
+            </h1>
+          </div>
           <Tappable onClick={() => void load()} radius={999} style={{ padding: 8 }} title={t.actionRefresh}>
             <Icon glyph="refresh" size={18} />
           </Tappable>
         </header>
       ) : null}
 
-      <div style={{ padding: isDesktop ? 13 : "max(12px, env(safe-area-inset-top)) 16px 24px", maxWidth: isDesktop ? undefined : 640 }}>
-        {/* StorageTotalCard */}
+      <div style={{ padding: isDesktop ? "24px 32px" : "16px", maxWidth: 960, width: "100%", margin: "0 auto" }}>
+        {/* Hero Account Storage Card */}
+        <div
+          style={{
+            padding: 24,
+            background: "var(--bg-elevated)",
+            borderRadius: "var(--r-card)",
+            border: "1px solid var(--stroke)",
+            marginBottom: 20,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.03)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.8,
+                  color: "var(--accent)",
+                  background: "rgba(76, 141, 255, 0.12)",
+                  padding: "4px 10px",
+                  borderRadius: 999,
+                }}
+              >
+                Bộ nhớ tài khoản
+              </span>
+            </div>
+            <span style={{ fontSize: 13, color: "var(--fg-secondary)", fontWeight: 500 }}>
+              Gói tiêu chuẩn {bytes(quota)}
+            </span>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 16 }}>
+            <span style={{ fontSize: 36, fontWeight: 700, lineHeight: 1.1, color: "var(--fg-primary)" }}>
+              {bytes(used)}
+            </span>
+            <span style={{ fontSize: 16, color: "var(--fg-secondary)", fontWeight: 500 }}>
+              / {bytes(quota)}
+            </span>
+          </div>
+
+          {/* Smooth modern progress bar */}
+          <div
+            style={{
+              height: 10,
+              borderRadius: 999,
+              background: "var(--bg-sunken)",
+              overflow: "hidden",
+              marginBottom: 12,
+              display: "flex",
+              width: "100%",
+            }}
+          >
+            <div
+              style={{
+                height: "100%",
+                width: `${percentUsed}%`,
+                minWidth: used > 0 ? 4 : 0,
+                background: isWarn ? "var(--warning)" : "var(--accent)",
+                borderRadius: 999,
+                transition: "width 0.4s ease",
+              }}
+            />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <span className="t-body-sm" style={{ color: "var(--fg-secondary)", fontWeight: 500 }}>
+              Đã dùng {bytes(used)}
+            </span>
+            <span className="t-body-sm" style={{ color: "var(--fg-secondary)", fontWeight: 500 }}>
+              Còn {bytes(free)}
+            </span>
+          </div>
+        </div>
+
+        {/* Category Breakdown Section */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ padding: "0 4px 12px", fontSize: 13, fontWeight: 600, color: "var(--fg-secondary)", letterSpacing: 0.2 }}>
+            Chi tiết lưu trữ theo loại tệp
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isDesktop ? "repeat(3, 1fr)" : "repeat(2, 1fr)",
+              gap: 12,
+            }}
+          >
+            {categoryItems.map((cat) => (
+              <div
+                key={cat.id}
+                style={{
+                  padding: "16px 18px",
+                  background: "var(--bg-elevated)",
+                  borderRadius: "var(--r-card)",
+                  border: "1px solid var(--stroke)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                }}
+              >
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 12,
+                    background: cat.bg,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <Icon glyph={cat.glyph} size={22} color={cat.color} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--fg-primary)", marginBottom: 2 }}>
+                    {cat.label}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--fg-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {bytes(cat.bytes)}, {cat.count} tệp
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Account Plan Details Card */}
         <div
           style={{
             padding: 20,
             background: "var(--bg-elevated)",
             borderRadius: "var(--r-card)",
             border: "1px solid var(--stroke)",
-            marginBottom: 13,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 14,
           }}
         >
-          <div className="t-label-sm" style={{ color: "var(--fg-secondary)", marginBottom: 10 }}>
-            {caption}
-          </div>
-          <div style={{ fontSize: 32, fontWeight: 700, lineHeight: "38px", color: "var(--fg-primary)", marginBottom: 16 }}>
-            {bytes(used)}
-          </div>
-          {/* LdUsageBar */}
-          <div
-            style={{
-              height: 8,
-              borderRadius: 999,
-              background: "var(--bg-sunken)",
-              overflow: "hidden",
-              marginBottom: 8,
-              display: "flex",
-            }}
-          >
-            {localPercent > 0 && (
-              <div
-                style={{
-                  height: "100%",
-                  width: `${localPercent}%`,
-                  minWidth: used > 0 ? 3 : 0,
-                  background: "var(--accent)",
-                }}
-                title={`Local Drive: ${bytes(used)}`}
-              />
-            )}
-            {otherPercent > 0 && (
-              <div
-                style={{
-                  height: "100%",
-                  width: `${otherPercent}%`,
-                  background: isWarn ? "var(--warning)" : "rgba(76, 141, 255, 0.4)",
-                }}
-                title={`Hệ thống & dữ liệu khác: ${bytes(otherDiskUsed)}`}
-              />
-            )}
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-            <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-              {t.storageUsedOf({ used: bytes(diskUsed), total: bytes(totalDisk) })}
-              {used > 0 && otherDiskUsed > 0 ? ` (Local Drive: ${bytes(used)})` : ""}
-            </span>
-            <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-              {t.libraryFreeSpace({ free: bytes(freeDisk) })}
-            </span>
-          </div>
-        </div>
-
-        {/* 2 columns on desktop: libraries on left (flex 3), detected drives on right (flex 2) */}
-        <div style={{ display: "flex", flexDirection: isDesktop ? "row" : "column", gap: isDesktop ? 24 : 14, alignItems: "flex-start" }}>
-          {/* Left: Library Cards */}
-          <div style={{ flex: isDesktop ? 3 : undefined, width: "100%", minWidth: 0 }}>
-            {data.libraries.map((l) => {
-              const isOnline = l.online ?? (l.status === undefined || l.status === "online");
-              const libTotal = (l.stats_known ?? true) ? (l.total_bytes ?? 0) : 0;
-              const libFree = (l.stats_known ?? true) ? (l.free_bytes ?? 0) : 0;
-              const libLocalUsed = isAdmin ? (l.bytes_used ?? 0) : 0;
-              const libDiskUsed = Math.max(0, libTotal - libFree);
-              const libOtherUsed = Math.max(0, libDiskUsed - libLocalUsed);
-              const libDiskPercent = libTotal > 0 ? (libDiskUsed / libTotal) * 100 : 0;
-              const libLocalPercent = libTotal > 0 ? (libLocalUsed / libTotal) * 100 : 0;
-              const libOtherPercent = libTotal > 0 ? (libOtherUsed / libTotal) * 100 : 0;
-              const libIsWarn = libDiskPercent >= 90;
-
-              return (
-                <div
-                  key={l.id}
-                  style={{
-                    padding: 18,
-                    background: "var(--bg-elevated)",
-                    borderRadius: "var(--r-card)",
-                    border: `1px solid ${isOnline ? "var(--stroke)" : "var(--warning)"}`,
-                    marginBottom: 14,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <Icon glyph="storage" size={20} color={isOnline ? "var(--fg-primary)" : "var(--warning)"} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="t-title-sm" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {l.name}
-                      </div>
-                      {!isOnline && (
-                        <div className="t-body-sm" style={{ color: "var(--warning)", marginTop: 2 }}>
-                          {t.storageOffline}
-                        </div>
-                      )}
-                    </div>
-                    {l.is_default && (
-                      <span
-                        style={{
-                          padding: "4px 9px",
-                          borderRadius: 9,
-                          background: "rgba(76, 141, 255, 0.12)",
-                          color: "var(--accent)",
-                          fontSize: 11,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {t.storageDefault}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* LdUsageBar inside library card */}
-                  <div style={{ marginTop: 16 }}>
-                    <div
-                      style={{
-                        height: 6,
-                        borderRadius: 999,
-                        background: "var(--bg-sunken)",
-                        overflow: "hidden",
-                        marginBottom: 8,
-                        display: "flex",
-                      }}
-                    >
-                      {libLocalPercent > 0 && (
-                        <div
-                          style={{
-                            height: "100%",
-                            width: `${libLocalPercent}%`,
-                            minWidth: libLocalUsed > 0 ? 3 : 0,
-                            background: "var(--accent)",
-                          }}
-                          title={`Local Drive: ${bytes(libLocalUsed)}`}
-                        />
-                      )}
-                      {libOtherPercent > 0 && (
-                        <div
-                          style={{
-                            height: "100%",
-                            width: `${libOtherPercent}%`,
-                            background: libIsWarn ? "var(--warning)" : "rgba(76, 141, 255, 0.4)",
-                          }}
-                          title={`Hệ thống & dữ liệu khác: ${bytes(libOtherUsed)}`}
-                        />
-                      )}
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                      <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-                        {bytes(libDiskUsed)} trên {bytes(libTotal)}
-                        {isAdmin && libLocalUsed > 0 && libOtherUsed > 0 ? ` (Local Drive: ${bytes(libLocalUsed)})` : ""}
-                      </span>
-                      <span className="t-body-sm" style={{ color: "var(--fg-secondary)" }}>
-                        {(l.stats_known ?? true) ? t.libraryFreeSpace({ free: bytes(libFree) }) : t.storageOffline}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Right: Detected Drives (matching Flutter DetectedDrives) */}
-          {isAdmin && isDesktop && (
-            <div style={{ flex: 2, width: "100%", minWidth: 0 }}>
-              <div style={{ padding: "4px 8px 12px", fontSize: 12, fontWeight: 600, color: "var(--fg-secondary)", letterSpacing: 0.3 }}>
-                {t.storageDetectedDrives}
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <Avatar name={user?.display_name || user?.username || "Admin"} seed={user?.avatar_seed} size={44} />
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "var(--fg-primary)" }}>
+                {user?.display_name || user?.username || "Tài khoản"}
               </div>
-              <div
-                style={{
-                  padding: "40px 20px",
-                  background: "transparent",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  textAlign: "center",
-                }}
-              >
-                <div style={{ marginBottom: 16 }}>
-                  <LayeredBadge glyph="storage" size={72} />
-                </div>
-                <div className="t-title-sm" style={{ fontWeight: 600, marginBottom: 8 }}>
-                  {t.storageDetectedDrives}
-                </div>
-                <div className="t-body-sm" style={{ color: "var(--fg-secondary)", maxWidth: 300, lineHeight: 1.5 }}>
-                  {t.storageHelperUnavailable}
-                </div>
+              <div style={{ fontSize: 12, color: "var(--fg-secondary)", marginTop: 2 }}>
+                @{user?.username || "admin"}, {user?.role === "admin" ? "Quản trị viên" : "Thành viên"}
               </div>
             </div>
-          )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "#10B981",
+              }}
+            />
+            <span style={{ fontSize: 13, color: "var(--fg-secondary)", fontWeight: 500 }}>
+              Đồng bộ hóa đám mây an toàn
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -1655,25 +1698,54 @@ export function StorageScreen() {
 
 /* --------------------------------------------------------------- activity */
 
+interface ActivityRow {
+  id: string;
+  action: string;
+  created_at: number;
+  username?: string;
+}
+
 export function ActivityScreen() {
   const t = useL10n();
-  const [items, setItems] = useState<{ id: string; action: string; created_at: number; username?: string }[] | null>(null);
-
-  useEffect(() => {
-    void (async () => {
+  const {
+    items,
+    loading,
+    Sentinel,
+  } = useInfiniteList<ActivityRow>({
+    pageSize: 30,
+    getItemKey: (a) => a.id,
+    fetchPage: async ({ offset, limit, signal }) => {
       try {
-        const data = await api.get<{ entries?: unknown[]; activity?: unknown[] }>(Api.activity);
-        const list = (data?.entries ?? data?.activity ?? []) as typeof items;
-        setItems(list ?? []);
+        const res = await api.get<{
+          activity?: ActivityRow[];
+          entries?: ActivityRow[];
+          has_more?: boolean;
+          next_cursor?: number;
+        }>(
+          Api.activity,
+          {
+            limit,
+            before: offset > 0 ? offset : undefined,
+            all: true,
+          },
+          { signal }
+        );
+        const list = (res?.activity ?? res?.entries ?? []) as ActivityRow[];
+        const lastItem = list.length > 0 ? list[list.length - 1] : null;
+        return {
+          items: list,
+          hasMore: Boolean(res?.has_more ?? (list.length >= limit)),
+          nextOffset: res?.next_cursor || (lastItem ? lastItem.created_at : 0),
+        };
       } catch {
-        setItems([]);
+        return { items: [], hasMore: false };
       }
-    })();
-  }, []);
+    },
+  });
 
   return (
     <Page title={t.activity}>
-      {items === null ? (
+      {loading && items.length === 0 ? (
         <ListSkeleton rows={6} />
       ) : items.length === 0 ? (
         <EmptyState glyph="activity" title={t.emptyActivityTitle} message={t.activity} />
@@ -1704,6 +1776,7 @@ export function ActivityScreen() {
               </span>
             </div>
           ))}
+          <Sentinel />
         </div>
       )}
     </Page>

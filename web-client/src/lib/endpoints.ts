@@ -66,12 +66,41 @@ export const Api = {
   uploads: `${prefix}/uploads`,
 
   // storage
+  storageAccount: `${prefix}/storage/account`,
   libraries: `${prefix}/libraries`,
   library: (id: string) => `${prefix}/libraries/${id}`,
   librarySetDefault: (id: string) => `${prefix}/libraries/${id}/set-default`,
   libraryEject: (id: string) => `${prefix}/libraries/${id}/eject`,
   drives: `${prefix}/admin/drives`,
   mountDrive: (id: string) => `${prefix}/admin/drives/${id}/mount`,
+  poolDrives: `${prefix}/admin/drives/pool`,
+  adminDriveSmart: (id: string) => `${prefix}/admin/drives/${id}/smart`,
+
+  // datasets
+  datasets: `${prefix}/datasets`,
+  datasetItems: (dataset: string, subpath?: string) =>
+    `${prefix}/datasets/items?dataset=${encodeURIComponent(dataset)}${subpath ? `&subpath=${encodeURIComponent(subpath)}` : ""}`,
+  datasetCreateFolder: `${prefix}/datasets/folder`,
+  datasetDeleteItem: (dataset: string, path: string) =>
+    `${prefix}/datasets/items?dataset=${encodeURIComponent(dataset)}&path=${encodeURIComponent(path)}`,
+  datasetUpload: (dataset: string, subpath?: string) =>
+    `${prefix}/datasets/upload?dataset=${encodeURIComponent(dataset)}${subpath ? `&subpath=${encodeURIComponent(subpath)}` : ""}`,
+  datasetDownload: (dataset: string, path: string) =>
+    `${prefix}/datasets/download?dataset=${encodeURIComponent(dataset)}&path=${encodeURIComponent(path)}`,
+  adminDatasets: `${prefix}/admin/datasets`,
+  adminDataset: (id: string) => `${prefix}/admin/datasets/${id}`,
+
+  // network shares
+  shares: `${prefix}/shares`,
+  adminShares: `${prefix}/admin/shares`,
+  adminShare: (id: string) => `${prefix}/admin/shares/${id}`,
+  adminSharesTree: `${prefix}/admin/shares/tree`,
+
+  // storage pools
+  adminPools: `${prefix}/admin/pools`,
+  adminPoolsDiscover: `${prefix}/admin/pools/discover`,
+  adminPoolsImport: `${prefix}/admin/pools/import`,
+  adminPool: (id: string) => `${prefix}/admin/pools/${id}`,
 
   // admin and activity
   settings: `${prefix}/server/settings`,
@@ -92,4 +121,4 @@ export const Api = {
 
 /** The one port a Local Drive server serves on. Not 443, so it does not
  *  collide with whatever else is on the machine someone is hosting from. */
-export const DEFAULT_PORT = 7443;
+export const DEFAULT_PORT = 9683;

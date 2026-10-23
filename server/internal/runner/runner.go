@@ -11,13 +11,11 @@ import (
 // Version is stamped at build time with -ldflags. One binary, one version.
 var Version = "dev"
 
-// DefaultPort is the one port Local Drive serves on.
-//
-// Not 443, and not 80. A self-hosted server usually shares a machine with
-// whatever else that machine already does, and 443 is the first thing anything
-// else will want. 7443 reads as "443, but ours", is outside the range a distro
-// hands out to system services, and does not collide with anything common.
-const DefaultPort = 7443
+// DefaultPort is the port Local Drive backend API serves on.
+const DefaultPort = 9683
+
+// DefaultWebPort is the port Local Drive web interface serves on.
+const DefaultWebPort = 5437
 
 // InternalPort is what the Go process listens on inside the Docker network,
 // behind the proxy. Nothing outside the compose network ever reaches it.

@@ -26,7 +26,7 @@ class SetupPageMobile extends HookConsumerWidget {
         error.value = l10n.passwordsDoNotMatch;
         return;
       }
-      if (password.text.length < 10) {
+      if (password.text.length < 6) {
         error.value = l10n.passwordTooShort;
         return;
       }

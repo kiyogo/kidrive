@@ -1,9 +1,11 @@
+import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:flutter/material.dart';
 
 import '../constants/ld_colors.dart';
 import '../theme/ld_theme.dart';
 import 'ld_icons.dart';
 import 'ld_tappable.dart';
+import 'ld_window_bar.dart';
 
 /// The one page shell. Scaffold is used structurally, but every visible part
 /// of it is the app's own, so nothing unstyled reaches the screen.
@@ -67,7 +69,9 @@ class LdScaffold extends StatelessWidget {
                 showBack: showBack,
                 onBack: onBack,
                 padded: padded,
-              ),
+              )
+            else if (LdWindowBar.isVisible)
+              const LdWindowBar(),
             ?banner,
             Expanded(child: body),
           ],
@@ -100,50 +104,85 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(padded ? 16 : 8, 8, padded ? 16 : 8, 8),
-      child: Row(
-        children: <Widget>[
-          if (showBack) ...<Widget>[
-            LdTappable(
-              onTap: onBack ?? () => Navigator.of(context).maybePop(),
-              borderRadius: BorderRadius.circular(22),
-              child: const Padding(
-                padding: EdgeInsets.all(8),
-                child: LdIcon(LdGlyph.chevronLeft, size: 22),
-              ),
-            ),
-            const SizedBox(width: 4),
-          ],
-          Expanded(
-            child: titleWidget ??
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    if (title != null)
-                      Text(
-                        title!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    if (subtitle != null) ...<Widget>[
-                      const SizedBox(height: 2),
-                      Text(
-                        subtitle!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ],
-                ),
+    final isDesktop = LdWindowBar.isVisible;
+
+    return Container(
+      height: isDesktop ? 64 : null,
+      decoration: BoxDecoration(
+        color: context.surfaces.backgroundPrimary,
+        border: Border(
+          bottom: BorderSide(
+            color: isDesktop ? context.surfaces.strokeOutline : Colors.transparent,
           ),
-          for (final action in actions) ...<Widget>[
-            const SizedBox(width: 8),
-            action,
-          ],
+        ),
+      ),
+      child: Stack(
+        children: <Widget>[
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              padded ? 16 : 8,
+              isDesktop ? 0 : 8,
+              isDesktop ? 142 : (padded ? 16 : 8),
+              isDesktop ? 0 : 8,
+            ),
+            child: Row(
+              children: <Widget>[
+                if (showBack) ...<Widget>[
+                  LdTappable(
+                    onTap: onBack ?? () => Navigator.of(context).maybePop(),
+                    borderRadius: BorderRadius.circular(22),
+                    child: const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: LdIcon(LdGlyph.chevronLeft, size: 22),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                Expanded(
+                  child: MoveWindow(
+                    child: Container(
+                      color: Colors.transparent,
+                      alignment: Alignment.centerLeft,
+                      child: titleWidget ??
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              if (title != null)
+                                Text(
+                                  title!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.titleLarge,
+                                ),
+                              if (subtitle != null) ...<Widget>[
+                                const SizedBox(height: 2),
+                                Text(
+                                  subtitle!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                              ],
+                            ],
+                          ),
+                    ),
+                  ),
+                ),
+                for (final action in actions) ...<Widget>[
+                  const SizedBox(width: 8),
+                  action,
+                ],
+              ],
+            ),
+          ),
+          if (isDesktop)
+            const Positioned(
+              top: 0,
+              right: 0,
+              child: LdWindowButtons(),
+            ),
         ],
       ),
     );

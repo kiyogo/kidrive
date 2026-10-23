@@ -1,5 +1,6 @@
 import '../../../imports.dart';
 import '../../auth/controller/session_controller.dart';
+import 'account_dialogs.dart';
 
 /// Who is signed in, and how much of their quota is gone.
 class AccountCard extends ConsumerWidget {
@@ -26,9 +27,29 @@ class AccountCard extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text(
-                  user.displayName,
-                  style: Theme.of(context).textTheme.titleSmall,
+                Row(
+                  children: <Widget>[
+                    Flexible(
+                      child: Text(
+                        user.displayName,
+                        style: Theme.of(context).textTheme.titleSmall,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    LdTappable(
+                      onTap: () => showEditNameSheet(context, ref),
+                      borderRadius: BorderRadius.circular(999),
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: LdIcon(
+                          LdGlyph.edit,
+                          size: 16,
+                          color: LdColors.accentPrimary,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(

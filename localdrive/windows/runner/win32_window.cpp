@@ -15,6 +15,22 @@ namespace {
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
 #endif
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
+#ifndef DWMWA_CAPTION_COLOR
+#define DWMWA_CAPTION_COLOR 35
+#endif
+#ifndef DWMWA_TEXT_COLOR
+#define DWMWA_TEXT_COLOR 36
+#endif
+#ifndef DWMWA_COLOR_NONE
+#define DWMWA_COLOR_NONE 0xFFFFFFFE
+#endif
+
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
 
@@ -88,7 +104,8 @@ WindowClassRegistrar* WindowClassRegistrar::instance_ = nullptr;
 
 const wchar_t* WindowClassRegistrar::GetWindowClass() {
   if (!class_registered_) {
-    WNDCLASS window_class{};
+    WNDCLASSEX window_class{};
+    window_class.cbSize = sizeof(WNDCLASSEX);
     window_class.hCursor = LoadCursor(nullptr, IDC_ARROW);
     window_class.lpszClassName = kWindowClassName;
     window_class.style = CS_HREDRAW | CS_VREDRAW;
@@ -96,11 +113,17 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
     window_class.cbWndExtra = 0;
     window_class.hInstance = GetModuleHandle(nullptr);
     window_class.hIcon =
-        LoadIcon(window_class.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
-    window_class.hbrBackground = 0;
+        static_cast<HICON>(LoadImage(window_class.hInstance, MAKEINTRESOURCE(IDI_APP_ICON),
+                                     IMAGE_ICON, GetSystemMetrics(SM_CXICON),
+                                     GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+    window_class.hIconSm =
+        static_cast<HICON>(LoadImage(window_class.hInstance, MAKEINTRESOURCE(IDI_APP_ICON),
+                                     IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                     GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+    window_class.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
     window_class.lpszMenuName = nullptr;
     window_class.lpfnWndProc = Win32Window::WndProc;
-    RegisterClass(&window_class);
+    RegisterClassEx(&window_class);
     class_registered_ = true;
   }
   return kWindowClassName;
@@ -142,6 +165,19 @@ bool Win32Window::Create(const std::wstring& title,
 
   if (!window) {
     return false;
+  }
+
+  HICON hIconBig = static_cast<HICON>(LoadImage(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_APP_ICON),
+                                                IMAGE_ICON, GetSystemMetrics(SM_CXICON),
+                                                GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+  HICON hIconSmall = static_cast<HICON>(LoadImage(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_APP_ICON),
+                                                  IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                                  GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+  if (hIconBig) {
+    SendMessage(window, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(hIconBig));
+  }
+  if (hIconSmall) {
+    SendMessage(window, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(hIconSmall));
   }
 
   UpdateTheme(window);
@@ -213,8 +249,14 @@ Win32Window::MessageHandler(HWND hwnd,
       }
       return 0;
 
+    case WM_ERASEBKGND:
+      return 1;
+
     case WM_DWMCOLORIZATIONCOLORCHANGED:
       UpdateTheme(hwnd);
+      return 0;
+
+    case WM_CONTEXTMENU:
       return 0;
   }
 
@@ -273,16 +315,33 @@ void Win32Window::OnDestroy() {
 }
 
 void Win32Window::UpdateTheme(HWND const window) {
-  DWORD light_mode;
+  DWORD light_mode = 1;
   DWORD light_mode_size = sizeof(light_mode);
   LSTATUS result = RegGetValue(HKEY_CURRENT_USER, kGetPreferredBrightnessRegKey,
                                kGetPreferredBrightnessRegValue,
                                RRF_RT_REG_DWORD, nullptr, &light_mode,
                                &light_mode_size);
 
-  if (result == ERROR_SUCCESS) {
-    BOOL enable_dark_mode = light_mode == 0;
-    DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
-                          &enable_dark_mode, sizeof(enable_dark_mode));
-  }
+  BOOL enable_dark_mode = (result == ERROR_SUCCESS && light_mode == 0);
+  DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                        &enable_dark_mode, sizeof(enable_dark_mode));
+
+  // Enable rounded corners on Windows 11 (bo goc nhieu cho cua so app)
+  DWORD corner_pref = 2; // DWMWCP_ROUND
+  DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE,
+                        &corner_pref, sizeof(corner_pref));
+
+  // Dong bo mau thanh tren 100% voi mau nen giao dien app tren Windows
+  COLORREF caption_color = enable_dark_mode ? RGB(18, 18, 18) : RGB(250, 250, 250);
+  DwmSetWindowAttribute(window, DWMWA_CAPTION_COLOR,
+                        &caption_color, sizeof(caption_color));
+
+  COLORREF text_color = enable_dark_mode ? RGB(241, 245, 249) : RGB(15, 23, 42);
+  DwmSetWindowAttribute(window, DWMWA_TEXT_COLOR,
+                        &text_color, sizeof(text_color));
+
+  // Xoa hoan toan khung vien cua so tren Windows 11 (DWMWA_COLOR_NONE tat vien hoan toan)
+  COLORREF border_color = DWMWA_COLOR_NONE;
+  DwmSetWindowAttribute(window, DWMWA_BORDER_COLOR,
+                        &border_color, sizeof(border_color));
 }

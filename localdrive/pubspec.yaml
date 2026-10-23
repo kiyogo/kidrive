@@ -45,6 +45,7 @@ dependencies:
   url_launcher: ^6.3.1
   open_filex: ^4.6.0
   flutter_local_notifications: ^18.0.1
+  ffi: ^2.1.3
 
   # desktop chrome: a borderless window with the app's own title bar, and a
   # tray icon so closing the window does not mean losing a running transfer

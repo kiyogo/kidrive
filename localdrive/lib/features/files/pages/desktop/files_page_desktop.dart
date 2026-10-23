@@ -95,13 +95,20 @@ class FilesPageDesktop extends HookConsumerWidget {
             onPressed: () =>
                 showNewFolderSheet(context, ref, parentId: folderId ?? ''),
           ),
-        LdButton(
-          label: l10n.upload,
-          glyph: LdGlyph.upload,
-          compact: true,
-          expand: false,
-          onPressed: () => pickAndUpload(context, ref, folderId ?? ''),
-        ),
+        if (MediaQuery.sizeOf(context).width < 900)
+          LdUtilityButton(
+            glyph: LdGlyph.upload,
+            tooltip: l10n.upload,
+            onPressed: () => pickAndUpload(context, ref, folderId ?? ''),
+          )
+        else
+          LdButton(
+            label: l10n.upload,
+            glyph: LdGlyph.upload,
+            compact: true,
+            expand: false,
+            onPressed: () => pickAndUpload(context, ref, folderId ?? ''),
+          ),
       ],
       // Nothing here is allowed to resize the listing.
       //

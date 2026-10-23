@@ -309,6 +309,12 @@ abstract class L10n {
   /// **'Upload a file'**
   String get uploadFile;
 
+  /// No description provided for @uploadFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload folder'**
+  String get uploadFolder;
+
   /// No description provided for @download.
   ///
   /// In en, this message translates to:
@@ -876,7 +882,7 @@ abstract class L10n {
   /// No description provided for @passwordTooShort.
   ///
   /// In en, this message translates to:
-  /// **'Use at least 10 characters'**
+  /// **'Use at least 6 characters'**
   String get passwordTooShort;
 
   /// No description provided for @signInTitle.
@@ -1220,6 +1226,12 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'Select'**
   String get actionSelect;
+
+  /// No description provided for @selectAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Select all'**
+  String get selectAll;
 
   /// No description provided for @selectedCount.
   ///
@@ -1587,17 +1599,47 @@ abstract class L10n {
   /// **'Server'**
   String get settingsServer;
 
+  /// No description provided for @settingsDashboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Dashboard'**
+  String get settingsDashboard;
+
+  /// No description provided for @settingsSecurity.
+  ///
+  /// In en, this message translates to:
+  /// **'Security'**
+  String get settingsSecurity;
+
   /// No description provided for @settingsNetworkShares.
   ///
   /// In en, this message translates to:
-  /// **'Network file sharing'**
+  /// **'Network File Sharing'**
   String get settingsNetworkShares;
+
+  /// No description provided for @settingsNetworkSharesSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Samba (SMB), WebDAV, and NFS network drive access'**
+  String get settingsNetworkSharesSubtitle;
 
   /// No description provided for @settingsDiskManagement.
   ///
   /// In en, this message translates to:
-  /// **'Disk management'**
+  /// **'Disk Management'**
   String get settingsDiskManagement;
+
+  /// No description provided for @settingsDiskManagementSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Physical drives, S.M.A.R.T monitoring, and spin-down'**
+  String get settingsDiskManagementSubtitle;
+
+  /// No description provided for @settingsDatasets.
+  ///
+  /// In en, this message translates to:
+  /// **'Datasets & Storage Pools'**
+  String get settingsDatasets;
 
   /// No description provided for @settingsUsers.
   ///

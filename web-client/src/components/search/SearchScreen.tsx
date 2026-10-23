@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
-import { EmptyState, Spinner, Tappable } from "@/components/ui";
+import { CanvasOverlayScrollbar, EmptyState, Spinner, Tappable } from "@/components/ui";
 import { categoryOfNode, FileTileIcon } from "@/components/files/FileTileIcon";
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { bytes, relative } from "@/lib/format";
 import { useL10n } from "@/lib/l10n";
 import { isFolder, type NodeModel } from "@/lib/models";
+import { useInfiniteList, useVirtualWindow } from "@/lib/useInfiniteList";
 
 /**
  * Omnisearch screen, ported from features/search/pages/search_page.dart.
@@ -28,9 +29,6 @@ export function SearchScreen({
   const t = useL10n();
   const [term, setTerm] = useState("");
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<NodeModel[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -47,41 +45,38 @@ export function SearchScreen({
     return () => clearTimeout(handle);
   }, [term]);
 
-  // Fetch search results from backend API
-  useEffect(() => {
-    if (!query) {
-      setResults(null);
-      setLoading(false);
-      return;
-    }
-
-    let active = true;
-    setLoading(true);
-    setError("");
-
-    void (async () => {
-      try {
-        const res = await api.get<{ nodes: NodeModel[] }>(Api.nodes, {
+  const {
+    items: rawResults,
+    loading,
+    loadingMore,
+    hasMore,
+    error,
+    Sentinel,
+  } = useInfiniteList<NodeModel>({
+    pageSize: 30,
+    getItemKey: (node) => node.id,
+    enabled: Boolean(query),
+    deps: [query],
+    fetchPage: async ({ offset, limit, signal }) => {
+      const res = await api.get<{ nodes: NodeModel[]; has_more?: boolean; next_offset?: number }>(
+        Api.nodes,
+        {
           query,
-        });
-        if (active) {
-          setResults(res.nodes ?? []);
-        }
-      } catch (err) {
-        if (active) {
-          setError(err instanceof Error ? err.message : t.errorUnexpectedBody);
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    })();
+          limit,
+          offset,
+        },
+        { signal }
+      );
+      const nodes = res?.nodes ?? [];
+      return {
+        items: nodes,
+        hasMore: Boolean(res?.has_more ?? (nodes.length >= limit)),
+        nextOffset: res?.next_offset ?? offset + nodes.length,
+      };
+    },
+  });
 
-    return () => {
-      active = false;
-    };
-  }, [query, t.errorUnexpectedBody]);
+  const results = query ? (loading ? null : rawResults) : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: "100dvh" }}>
@@ -143,7 +138,8 @@ export function SearchScreen({
       </div>
 
       {/* Main content body */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
+      <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 20px 120px 20px" }}>
         {!query ? (
           <EmptyState
             glyph="search"
@@ -165,63 +161,95 @@ export function SearchScreen({
             message={t.emptySearchBody}
           />
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 640, margin: "0 auto", width: "100%" }}>
-            {results?.map((node) => {
-              const folder = isFolder(node);
-              const category = categoryOfNode(node);
-
-              return (
-                <Tappable
-                  key={node.id}
-                  onClick={() => (folder ? onOpenFolder(node) : onPreview(node))}
-                  radius={14}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: "9px 10px",
-                    margin: "2px 0",
-                    background: "var(--bg-elevated)",
-                    border: "1px solid var(--stroke)",
-                    borderRadius: "var(--r-tile)",
-                    width: "100%",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 42,
-                      height: 42,
-                      borderRadius: "var(--r-card)",
-                      background: "var(--bg-sunken)",
-                      border: "1px solid var(--stroke)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flex: "none",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <FileTileIcon
-                      category={category}
-                      size={24}
-                      folderColor={node.color}
-                    />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="t-body-md" style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {node.name}
-                    </div>
-                    <div className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 2 }}>
-                      {folder ? "—" : bytes(node.size_bytes)}  ·  {relative(node.updated_at)}
-                    </div>
-                  </div>
-                  {node.starred && <Icon glyph="star-filled" size={16} color="#E8935C" />}
-                </Tappable>
-              );
-            })}
-          </div>
+          <SearchResultsList
+            results={results ?? []}
+            onOpenFolder={onOpenFolder}
+            onPreview={onPreview}
+            Sentinel={Sentinel}
+          />
         )}
+        </div>
+        <CanvasOverlayScrollbar />
       </div>
+    </div>
+  );
+}
+
+function SearchResultsList({
+  results,
+  onOpenFolder,
+  onPreview,
+  Sentinel,
+}: {
+  results: NodeModel[];
+  onOpenFolder: (node: NodeModel) => void;
+  onPreview: (node: NodeModel) => void;
+  Sentinel: React.ComponentType;
+}) {
+  const { startIndex, endIndex, topSpacerHeight, bottomSpacerHeight, isVirtual } = useVirtualWindow({
+    itemCount: results.length,
+    itemHeight: 64,
+  });
+  const visible = isVirtual ? results.slice(startIndex, endIndex) : results;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, maxWidth: 640, margin: "0 auto", width: "100%" }}>
+      {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
+      {visible.map((node) => {
+        const folder = isFolder(node);
+        const category = categoryOfNode(node);
+
+        return (
+          <Tappable
+            key={node.id}
+            onClick={() => (folder ? onOpenFolder(node) : onPreview(node))}
+            radius={14}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "9px 10px",
+              margin: "2px 0",
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--stroke)",
+              borderRadius: "var(--r-tile)",
+              width: "100%",
+            }}
+          >
+            <div
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: "var(--r-card)",
+                background: "var(--bg-sunken)",
+                border: "1px solid var(--stroke)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flex: "none",
+                overflow: "hidden",
+              }}
+            >
+              <FileTileIcon
+                category={category}
+                size={24}
+                folderColor={node.color}
+              />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="t-body-md" style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {node.name}
+              </div>
+              <div className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 2 }}>
+                {folder ? "—" : bytes(node.size_bytes)}  ·  {relative(node.updated_at)}
+              </div>
+            </div>
+            {node.starred && <Icon glyph="star-filled" size={16} color="#E8935C" />}
+          </Tappable>
+        );
+      })}
+      {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
+      <Sentinel />
     </div>
   );
 }

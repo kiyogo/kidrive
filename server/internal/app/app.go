@@ -323,6 +323,18 @@ func (a *App) registerScheduledJobs(
 	a.Scheduler.Every("storage integrity check", 24*time.Hour, 15*time.Minute, func(ctx context.Context) error {
 		return a.Files.VerifyIntegrity(ctx)
 	})
+
+	// Khởi chạy đồng bộ ổ đĩa ảo Windows (L:) và bộ theo dõi 2 chiều khi máy chủ khởi động
+	go func() {
+		time.Sleep(1 * time.Second)
+		a.Files.SyncAllToVirtualDrive(context.Background())
+		a.Files.StartVirtualDriveWatcher(context.Background())
+	}()
+
+	a.Scheduler.Every("virtual drive sync", 5*time.Minute, 10*time.Second, func(ctx context.Context) error {
+		a.Files.SyncAllToVirtualDrive(ctx)
+		return nil
+	})
 }
 
 // Close shuts everything down in the right order: stop taking new work, drain

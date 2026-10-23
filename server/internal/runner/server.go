@@ -18,6 +18,7 @@ import (
 	"github.com/MultiX0/LocalDrive/server/internal/app"
 	"github.com/MultiX0/LocalDrive/server/internal/config"
 	"github.com/MultiX0/LocalDrive/server/internal/httpapi"
+	"github.com/MultiX0/LocalDrive/server/internal/webui"
 )
 
 // RunServer serves the API. This is what the container runs, and it is also
@@ -41,6 +42,9 @@ func runServer(args []string) error {
 	if install, err := FindInstall(args); err == nil {
 		if err := install.LoadEnv(); err != nil {
 			return fmt.Errorf("read %s: %w", install.EnvPath, err)
+		}
+		if _, ok := os.LookupEnv("DATA_DIR"); !ok {
+			os.Setenv("DATA_DIR", install.DataDir)
 		}
 	}
 
@@ -135,6 +139,25 @@ func runServer(args []string) error {
 			if err := challenge.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Warn("no listener for the certificate challenge, renewal will fail",
 					"port", acmePort, "error", err)
+			}
+		}()
+	}
+
+	// Start embedded Web UI Server on cfg.WebAddr (port 5437)
+	if cfg.WebAddr != "" && cfg.WebAddr != cfg.Addr {
+		webSrv := &http.Server{
+			Addr:              cfg.WebAddr,
+			Handler:           webui.Handler(cfg.Addr),
+			ReadHeaderTimeout: 15 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			BaseContext:       func(net.Listener) context.Context { return context.Background() },
+			ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
+		}
+		running = append(running, webSrv)
+		go func() {
+			log.Info("web interface listening", "addr", cfg.WebAddr)
+			if err := webSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Warn("web server error", "addr", cfg.WebAddr, "error", err)
 			}
 		}()
 	}

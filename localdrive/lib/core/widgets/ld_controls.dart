@@ -289,6 +289,55 @@ class LdSettingRow extends StatelessWidget {
         ? LdColors.accentWarning
         : context.surfaces.foregroundPrimary;
 
+    final leadingAndText = Row(
+      children: <Widget>[
+        if (glyph != null) ...<Widget>[
+          LdIcon(glyph!, size: 19, color: color),
+          const SizedBox(width: 14),
+        ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                label,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyLarge!
+                    .copyWith(color: color),
+              ),
+              if (description != null) ...<Widget>[
+                const SizedBox(height: 3),
+                Text(
+                  description!,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+
+    if (trailing != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 14),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: LdTappable(
+                onTap: onTap,
+                borderRadius: LdRadii.tileRadius,
+                child: leadingAndText,
+              ),
+            ),
+            const SizedBox(width: 12),
+            trailing!,
+          ],
+        ),
+      );
+    }
+
     return LdTappable(
       onTap: onTap,
       borderRadius: LdRadii.tileRadius,
@@ -296,40 +345,15 @@ class LdSettingRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 14),
         child: Row(
           children: <Widget>[
-            if (glyph != null) ...<Widget>[
-              LdIcon(glyph!, size: 19, color: color),
-              const SizedBox(width: 14),
-            ],
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    label,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyLarge!
-                        .copyWith(color: color),
-                  ),
-                  if (description != null) ...<Widget>[
-                    const SizedBox(height: 3),
-                    Text(
-                      description!,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            if (trailing != null) ...<Widget>[
+            Expanded(child: leadingAndText),
+            if (onTap != null) ...<Widget>[
               const SizedBox(width: 12),
-              trailing!,
-            ] else if (onTap != null)
               LdIcon(
                 LdGlyph.chevronRight,
                 size: 18,
                 color: context.surfaces.foregroundSecondary,
               ),
+            ],
           ],
         ),
       ),
@@ -339,25 +363,25 @@ class LdSettingRow extends StatelessWidget {
 
 /// A titled group of settings rows.
 class LdSettingGroup extends StatelessWidget {
-  const LdSettingGroup({super.key, required this.title, required this.children});
+  const LdSettingGroup({super.key, this.title, required this.children});
 
-  final String title;
+  final String? title;
   final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
+    final hasTitle = title != null && title!.trim().isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-          child: Text(
-            title.isEmpty
-                ? title
-                : title[0].toUpperCase() + title.substring(1).toLowerCase(),
-            style: Theme.of(context).textTheme.labelSmall,
+        if (hasTitle)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+            child: Text(
+              title![0].toUpperCase() + title!.substring(1).toLowerCase(),
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
           ),
-        ),
         Container(
           // the 4 here plus a row's own 4 gives the same 8 between the card
           // edge and the first row as there is between any two rows

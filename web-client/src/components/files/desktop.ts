@@ -67,8 +67,8 @@ export function useMarquee({
       const target = e.target as HTMLElement;
       // a press on a tile is that tile's gesture
       if (target.closest(itemSelector)) return;
-      // and a press on a control is that control's
-      if (target.closest("button, a, input, select, textarea")) return;
+      // and a press on a control or panel/dialog/menu is that element's
+      if (target.closest("button, a, input, select, textarea, aside, .menu, [role='dialog'], [role='menu'], [role='region']")) return;
 
       from.current = { x: e.clientX, y: e.clientY };
       dragged.current = false;
@@ -106,6 +106,7 @@ export function useMarquee({
     };
 
     const up = () => {
+      const hadStart = from.current !== null;
       const wasDrag = dragged.current;
       const wasAdditive = additive.current;
       from.current = null;
@@ -114,7 +115,7 @@ export function useMarquee({
       window.getSelection()?.removeAllRanges();
       // a click on nothing means "never mind". Ctrl is excluded because
       // holding it is how somebody adds to a selection, not clears it.
-      if (!wasDrag && !wasAdditive) onEmptyClick();
+      if (hadStart && !wasDrag && !wasAdditive) onEmptyClick();
     };
 
     const onSelectStart = (e: Event) => {
@@ -216,8 +217,8 @@ export const NODE_DRAG_TYPE = "application/x-localdrive-nodes";
 
 export function useNodeDrag(
   onMove: (ids: string[], intoFolderId: string) => void,
-  /** files dragged in from the desktop, dropped onto a specific folder */
-  onDropFiles?: (files: FileList, intoFolderId: string) => void,
+  /** files and folders dragged in from the desktop, dropped onto a specific folder */
+  onDropFiles?: (dataTransfer: DataTransfer, intoFolderId: string) => void,
 ) {
   const [over, setOver] = useState<string>("");
 
@@ -253,14 +254,14 @@ export function useNodeDrag(
       onDrop: (e: React.DragEvent) => {
         const types = e.dataTransfer.types;
         const ours = types.includes(NODE_DRAG_TYPE);
-        const fromDesktop = types.includes("Files") && e.dataTransfer.files.length > 0;
+        const fromDesktop = types.includes("Files");
         if (!ours && !fromDesktop) return;
         e.preventDefault();
         e.stopPropagation();
         setOver("");
 
         if (fromDesktop && !ours) {
-          onDropFiles?.(e.dataTransfer.files, folderId);
+          onDropFiles?.(e.dataTransfer, folderId);
           return;
         }
         try {

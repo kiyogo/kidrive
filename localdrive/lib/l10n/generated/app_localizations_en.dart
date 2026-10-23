@@ -114,6 +114,9 @@ class L10nEn extends L10n {
   String get uploadFile => 'Upload a file';
 
   @override
+  String get uploadFolder => 'Upload folder';
+
+  @override
   String get download => 'Download';
 
   @override
@@ -422,7 +425,7 @@ class L10nEn extends L10n {
   String get passwordsDoNotMatch => 'Those passwords do not match';
 
   @override
-  String get passwordTooShort => 'Use at least 10 characters';
+  String get passwordTooShort => 'Use at least 6 characters';
 
   @override
   String get signInTitle => 'Welcome back';
@@ -605,6 +608,9 @@ class L10nEn extends L10n {
 
   @override
   String get actionSelect => 'Select';
+
+  @override
+  String get selectAll => 'Select all';
 
   @override
   String selectedCount(int count) {
@@ -821,10 +827,27 @@ class L10nEn extends L10n {
   String get settingsServer => 'Server';
 
   @override
-  String get settingsNetworkShares => 'Network file sharing';
+  String get settingsDashboard => 'Dashboard';
 
   @override
-  String get settingsDiskManagement => 'Disk management';
+  String get settingsSecurity => 'Security';
+
+  @override
+  String get settingsNetworkShares => 'Network File Sharing';
+
+  @override
+  String get settingsNetworkSharesSubtitle =>
+      'Samba (SMB), WebDAV, and NFS network drive access';
+
+  @override
+  String get settingsDiskManagement => 'Disk Management';
+
+  @override
+  String get settingsDiskManagementSubtitle =>
+      'Physical drives, S.M.A.R.T monitoring, and spin-down';
+
+  @override
+  String get settingsDatasets => 'Datasets & Storage Pools';
 
   @override
   String get settingsUsers => 'Users';

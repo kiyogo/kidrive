@@ -1,0 +1,22 @@
+================================================================================
+             HƯỚNG DẪN CÀI ĐẶT LOCAL DRIVE TRÊN ANDROID
+================================================================================
+
+1. CÀI ĐẶT ỨNG DỤNG:
+   - Chép tệp [LocalDrive.apk] vào điện thoại hoặc máy tính bảng Android.
+   - Hoặc tải trực tiếp từ máy chủ LocalDrive đang chạy trong mạng LAN qua link:
+     http://<IP_MÁY_CHỦ>:3000/LocalDrive.apk  (hoặc cổng 7443)
+   - Mở file APK trên điện thoại để cài đặt. Nếu Android hỏi quyền, hãy bật:
+     "Cho phép cài đặt ứng dụng không rõ nguồn gốc".
+
+2. KẾT NỐI VÀO MÁY CHỦ NAS CỦA BẠN:
+   - Mở ứng dụng LocalDrive vừa cài đặt.
+   - Nhập địa chỉ máy chủ NAS của bạn:
+     Ví dụ: http://192.168.1.100:7443
+   - Đăng nhập với tài khoản và mật khẩu bạn đã tạo trên Web.
+
+3. TÍNH NĂNG CỐT LÕI:
+   - Tự động đồng bộ và sao lưu album ảnh chụp (Camera Roll Backup) lên NAS.
+   - Xem ảnh, video chất lượng gốc không nén.
+   - Tải lên, tải xuống và chia sẻ tệp dữ liệu mọi lúc mọi nơi.
+================================================================================

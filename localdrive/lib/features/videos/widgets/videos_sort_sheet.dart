@@ -2,8 +2,34 @@ import '../../../imports.dart';
 import '../providers/videos_providers.dart';
 
 /// Shows the sort sheet for videos.
-Future<void> showVideosSortSheet(BuildContext context, WidgetRef ref) {
+Future<void> showVideosSortSheet(BuildContext context, WidgetRef ref, {Offset? anchor}) {
   final l10n = L10n.of(context);
+  final sort = ref.read(videosSortProvider);
+  if (isPointerPlatform || LdDeviceScope.of(context).isDesktop) {
+    return LdContextMenu.show(
+      context,
+      title: l10n.gallerySortTitle,
+      anchor: anchor,
+      actions: [
+        for (final option in VideosSort.values)
+          LdMenuAction(
+            id: option.name,
+            label: videoSortLabel(l10n, option),
+            glyph: sort.by == option
+                ? (sort.descending ? LdGlyph.arrowDown : LdGlyph.arrowUp)
+                : LdGlyph.check,
+          ),
+      ],
+    ).then((choice) {
+      if (choice == null) return;
+      for (final option in VideosSort.values) {
+        if (option.name == choice) {
+          ref.read(videosSortProvider.notifier).set(option);
+          break;
+        }
+      }
+    });
+  }
   return LdBottomSheet.show<void>(
     context,
     title: l10n.gallerySortTitle,

@@ -1,8 +1,4 @@
-import 'dart:math' as math;
-
 import 'package:flutter/widgets.dart';
-
-import '../constants/ld_colors.dart';
 
 /// The onboarding step the mark has reached. Each step brings one more layer
 /// to life, so the logo builds itself up as a progress narrative rather than
@@ -53,13 +49,15 @@ class LdLogo extends StatelessWidget {
   }
 }
 
-/// The mark's palette. The back panel is a darker companion of the accent, the
-/// sheet is a light neutral, and the front panel is the accent itself.
+/// The mark's palette.
 abstract final class LdMarkColors {
-  static const Color back = Color(0xFF2A6FD6);
-  static const Color sheet = Color(0xFFDCE3EE);
-  static const Color front = LdColors.accentPrimary;
-  static const Color mark = Color(0xFFFFFFFF);
+  static const Color backTop = Color(0xFF1E40AF);
+  static const Color backBottom = Color(0xFF1D4ED8);
+  static const Color sheetTop = Color(0xFFFFFFFF);
+  static const Color sheetBottom = Color(0xFFE2E8F0);
+  static const Color frontTop = Color(0xFF3B82F6);
+  static const Color frontBottom = Color(0xFF2563EB);
+  static const Color cloud = Color(0xFFFFFFFF);
 }
 
 class _LogoPainter extends CustomPainter {
@@ -70,103 +68,147 @@ class _LogoPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // authored on a 64 by 64 box, the same as mark.svg
+    // authored on a 64 by 64 box, matching mark.svg
     final unit = size.width / 64;
     canvas.save();
     canvas.scale(unit);
 
     final step = stage.index;
 
-    // logo-back: the folder back and its tab
-    canvas.drawPath(_backPanel(), Paint()..color = LdMarkColors.back);
+    // logo-back: the folder back and its modern rounded tab
+    final backShader = const LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [LdMarkColors.backTop, LdMarkColors.backBottom],
+    ).createShader(const Rect.fromLTWH(0, 12, 64, 39));
+    canvas.drawPath(_backPanel(), Paint()..shader = backShader);
 
     // logo-sheet: the contents, rising out of the opening once connected
     if (step >= LdLogoStage.connected.index) {
       final rising =
           step == LdLogoStage.connected.index ? progress : 1.0;
       canvas.save();
-      // it slides up from behind the front panel, so it reads as arriving
       canvas.translate(0, 6 * (1 - rising));
-      canvas.clipRect(const Rect.fromLTWH(0, 0, 64, 50));
+      canvas.clipRect(const Rect.fromLTWH(0, 0, 64, 51));
+      final sheetShader = const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [LdMarkColors.sheetTop, LdMarkColors.sheetBottom],
+      ).createShader(const Rect.fromLTWH(0, 19, 64, 24));
       canvas.drawPath(
         _sheet(),
-        Paint()..color = LdMarkColors.sheet.withValues(alpha: rising),
+        Paint()
+          ..shader = sheetShader
+          ..color = Color.fromRGBO(255, 255, 255, rising),
       );
       canvas.restore();
     }
 
-    // logo-front: the brightest shape, over everything
-    canvas.drawPath(_frontPanel(), Paint()..color = LdMarkColors.front);
+    // logo-front: vibrant azure front flap
+    final frontShader = const LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [LdMarkColors.frontTop, LdMarkColors.frontBottom],
+    ).createShader(const Rect.fromLTWH(0, 25, 64, 26));
+    canvas.drawPath(_frontPanel(), Paint()..shader = frontShader);
 
-    // logo-arc: the sync arc, drawn in a sweep at a time
-    if (step >= LdLogoStage.syncing.index) {
-      final drawn = step == LdLogoStage.syncing.index ? progress : 1.0;
-      canvas.drawArc(
-        Rect.fromCircle(center: const Offset(32, 38), radius: 8),
-        // starts at the lower left and sweeps almost all the way round,
-        // leaving the gap an arrow would enter through
-        math.pi * 0.72,
-        math.pi * 1.56 * drawn,
-        false,
-        Paint()
-          ..color = LdMarkColors.mark
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3
-          ..strokeCap = StrokeCap.round,
+    // subtle top edge highlight on front flap
+    canvas.drawPath(
+      _frontHighlight(),
+      Paint()..color = const Color(0x40FFFFFF),
+    );
+
+    // logo-cloud: the bold, crisp cloud silhouette
+    if (step >= LdLogoStage.connected.index) {
+      final alpha =
+          step == LdLogoStage.connected.index ? (0.75 * progress) : 1.0;
+      canvas.drawPath(
+        _cloud(),
+        Paint()..color = Color.fromRGBO(255, 255, 255, alpha),
       );
     }
 
-    // logo-node: the connection dot at the centre of the arc
-    if (step >= LdLogoStage.connected.index) {
-      final filled =
-          step == LdLogoStage.connected.index ? progress : 1.0;
+    // syncing indicator
+    if (step == LdLogoStage.syncing.index) {
       canvas.drawCircle(
-        const Offset(32, 38),
-        3.2 * filled,
-        Paint()..color = LdMarkColors.mark,
+        const Offset(44, 32),
+        3,
+        Paint()..color = const Color(0xFF60A5FA),
+      );
+      canvas.drawCircle(
+        const Offset(44, 32),
+        3,
+        Paint()
+          ..color = const Color(0xFFFFFFFF)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.2,
       );
     }
 
     canvas.restore();
   }
 
-  /// The folder back, with the raised tab on its left.
+  /// Modern rounded folder back with Apple-style smooth tab.
   static Path _backPanel() => Path()
-    ..moveTo(10, 12)
+    ..moveTo(11, 12)
     ..lineTo(24, 12)
-    ..lineTo(29, 18)
-    ..lineTo(54, 18)
-    ..quadraticBezierTo(58, 18, 58, 22)
+    ..cubicTo(27, 12, 29, 17, 33, 17)
+    ..lineTo(53, 17)
+    ..cubicTo(56, 17, 58, 19, 58, 22)
     ..lineTo(58, 46)
-    ..quadraticBezierTo(58, 50, 54, 50)
-    ..lineTo(10, 50)
-    ..quadraticBezierTo(6, 50, 6, 46)
-    ..lineTo(6, 16)
-    ..quadraticBezierTo(6, 12, 10, 12)
+    ..cubicTo(58, 49, 56, 51, 53, 51)
+    ..lineTo(11, 51)
+    ..cubicTo(8, 51, 6, 49, 6, 46)
+    ..lineTo(6, 17)
+    ..cubicTo(6, 14, 8, 12, 11, 12)
     ..close();
 
-  /// The sheet of contents peeking out of the opening.
+  /// Crisp light sheet peeking out of the folder opening.
   static Path _sheet() => Path()
-    ..moveTo(14, 21)
-    ..lineTo(50, 21)
-    ..quadraticBezierTo(52, 21, 52, 23)
-    ..lineTo(52, 44)
-    ..lineTo(12, 44)
-    ..lineTo(12, 23)
-    ..quadraticBezierTo(12, 21, 14, 21)
+    ..moveTo(15, 19)
+    ..lineTo(49, 19)
+    ..cubicTo(51, 19, 52, 20, 52, 22)
+    ..lineTo(52, 43)
+    ..lineTo(12, 43)
+    ..lineTo(12, 22)
+    ..cubicTo(12, 20, 13, 19, 15, 19)
     ..close();
 
-  /// The front panel.
+  /// Sleek front flap.
   static Path _frontPanel() => Path()
-    ..moveTo(10, 26)
-    ..lineTo(54, 26)
-    ..quadraticBezierTo(58, 26, 58, 30)
+    ..moveTo(11, 25)
+    ..lineTo(53, 25)
+    ..cubicTo(56, 25, 58, 27, 58, 30)
     ..lineTo(58, 46)
-    ..quadraticBezierTo(58, 50, 54, 50)
-    ..lineTo(10, 50)
-    ..quadraticBezierTo(6, 50, 6, 46)
+    ..cubicTo(58, 49, 56, 51, 53, 51)
+    ..lineTo(11, 51)
+    ..cubicTo(8, 51, 6, 49, 6, 46)
     ..lineTo(6, 30)
-    ..quadraticBezierTo(6, 26, 10, 26)
+    ..cubicTo(6, 27, 8, 25, 11, 25)
+    ..close();
+
+  /// Subtle top rim highlight.
+  static Path _frontHighlight() => Path()
+    ..moveTo(11, 25)
+    ..lineTo(53, 25)
+    ..cubicTo(56, 25, 58, 27, 58, 30)
+    ..lineTo(58, 31)
+    ..cubicTo(58, 28, 56, 26, 53, 26)
+    ..lineTo(11, 26)
+    ..cubicTo(8, 26, 6, 28, 6, 31)
+    ..lineTo(6, 30)
+    ..cubicTo(6, 27, 8, 25, 11, 25)
+    ..close();
+
+  /// Bold, crystal-clear white cloud silhouette.
+  static Path _cloud() => Path()
+    ..moveTo(25, 46)
+    ..cubicTo(21.7, 46, 19, 43.3, 19, 40)
+    ..cubicTo(19, 37.4, 21.2, 35.2, 24.2, 34.5)
+    ..cubicTo(24.5, 30.5, 28.2, 28, 32, 28)
+    ..cubicTo(35.8, 28, 39.5, 30.5, 39.8, 34.5)
+    ..cubicTo(42.8, 35.2, 45, 37.4, 45, 40)
+    ..cubicTo(45, 43.3, 42.3, 46, 39, 46)
     ..close();
 
   @override

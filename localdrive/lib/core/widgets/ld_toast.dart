@@ -27,6 +27,9 @@ class LdToast {
   static final Queue<_ToastRequest> _queue = Queue<_ToastRequest>();
   static OverlayEntry? _entry;
   static Timer? _timer;
+  static String? _lastMessage;
+  static DateTime? _lastTime;
+  static _ToastRequest? _currentRequest;
 
   /// Shows a toast, queued behind any that are already visible so two never
   /// overlap.
@@ -38,6 +41,21 @@ class LdToast {
     VoidCallback? onAction,
     Duration duration = LdMotion.toastVisible,
   }) {
+    final now = DateTime.now();
+    if (_lastMessage == message &&
+        _lastTime != null &&
+        now.difference(_lastTime!) < const Duration(milliseconds: 1000)) {
+      return;
+    }
+    if (_currentRequest?.message == message) {
+      return;
+    }
+    if (_queue.any((r) => r.message == message)) {
+      return;
+    }
+    _lastMessage = message;
+    _lastTime = now;
+
     final overlay = Overlay.maybeOf(context, rootOverlay: true);
     if (overlay == null) return;
 
@@ -61,9 +79,11 @@ class LdToast {
   static void _pump() {
     if (_queue.isEmpty) {
       _entry = null;
+      _currentRequest = null;
       return;
     }
     final request = _queue.removeFirst();
+    _currentRequest = request;
     final controllerKey = GlobalKey<_LdToastCardState>();
 
     final entry = OverlayEntry(
@@ -86,6 +106,7 @@ class LdToast {
     _timer?.cancel();
     _entry?.remove();
     _entry = null;
+    _currentRequest = null;
     _pump();
   }
 
@@ -95,6 +116,7 @@ class LdToast {
     _queue.clear();
     _entry?.remove();
     _entry = null;
+    _currentRequest = null;
   }
 }
 

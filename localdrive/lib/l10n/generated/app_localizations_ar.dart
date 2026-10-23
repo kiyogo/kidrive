@@ -114,6 +114,9 @@ class L10nAr extends L10n {
   String get uploadFile => 'رفع ملف';
 
   @override
+  String get uploadFolder => 'رفع مجلد';
+
+  @override
   String get download => 'تنزيل';
 
   @override
@@ -415,7 +418,7 @@ class L10nAr extends L10n {
   String get passwordsDoNotMatch => 'كلمتا المرور غير متطابقتين';
 
   @override
-  String get passwordTooShort => 'استخدم 10 أحرف على الأقل';
+  String get passwordTooShort => 'استخدم 6 أحرف على الأقل';
 
   @override
   String get signInTitle => 'أهلًا بعودتك';
@@ -594,6 +597,9 @@ class L10nAr extends L10n {
 
   @override
   String get actionSelect => 'تحديد';
+
+  @override
+  String get selectAll => 'تحديد الكل';
 
   @override
   String selectedCount(int count) {
@@ -813,10 +819,27 @@ class L10nAr extends L10n {
   String get settingsServer => 'الخادم';
 
   @override
-  String get settingsNetworkShares => 'مشاركة ملفات الشبكة';
+  String get settingsDashboard => 'لوحة التحكم';
+
+  @override
+  String get settingsSecurity => 'الأمان';
+
+  @override
+  String get settingsNetworkShares => 'مشاركة الملفات عبر الشبكة';
+
+  @override
+  String get settingsNetworkSharesSubtitle =>
+      'بروتوكولات Samba و WebDAV و NFS للوصول إلى محركات الشبكة';
 
   @override
   String get settingsDiskManagement => 'إدارة الأقراص';
+
+  @override
+  String get settingsDiskManagementSubtitle =>
+      'الأقراص الفعلية ومراقبة S.M.A.R.T وتوفير الطاقة';
+
+  @override
+  String get settingsDatasets => 'مجموعات البيانات ومجمعات التخزين';
 
   @override
   String get settingsUsers => 'المستخدمون';

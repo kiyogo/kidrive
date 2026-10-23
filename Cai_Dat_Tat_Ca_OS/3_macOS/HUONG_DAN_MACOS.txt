@@ -1,0 +1,45 @@
+================================================================================
+                HƯỚNG DẪN CÀI ĐẶT LOCAL DRIVE CHO MACOS
+================================================================================
+
+1. CHỌN BẢN PHÙ HỢP VỚI MÁY MAC CỦA BẠN:
+   - Nếu dùng Mac M1, M2, M3, M4 (Apple Silicon): Dùng [localdrive-darwin-arm64]
+   - Nếu dùng Mac Intel: Dùng [localdrive-darwin-amd64]
+
+2. CÁCH CÀI ĐẶT NHANH BẰNG TERMINAL:
+   Mở ứng dụng Terminal trên macOS và chạy các lệnh sau:
+
+   # Cấp quyền thực thi và đổi tên thành localdrive:
+   chmod +x localdrive-darwin-arm64
+   sudo cp localdrive-darwin-arm64 /usr/local/bin/localdrive
+
+   # Chạy máy chủ:
+   localdrive serve
+
+3. CÁCH ĐỂ MÁY CHỦ TỰ ĐỘNG CHẠY NGẦM KHI BẬT MÁY MAC (LAUNCHD):
+   Tạo tệp: ~/Library/LaunchAgents/com.localdrive.server.plist với nội dung:
+
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+   <plist version="1.0">
+   <dict>
+       <key>Label</key>
+       <string>com.localdrive.server</string>
+       <key>ProgramArguments</key>
+       <array>
+           <string>/usr/local/bin/localdrive</string>
+           <string>serve</string>
+       </array>
+       <key>RunAtLoad</key>
+       <true/>
+       <key>KeepAlive</key>
+       <true/>
+   </dict>
+   </plist>
+
+   Sau đó kích hoạt dịch vụ bằng lệnh:
+   launchctl load ~/Library/LaunchAgents/com.localdrive.server.plist
+
+4. TRUY CẬP:
+   Mở Safari hoặc Chrome trên Mac và truy cập: http://localhost:7443
+================================================================================

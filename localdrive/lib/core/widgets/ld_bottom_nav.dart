@@ -1,3 +1,4 @@
+import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:flutter/material.dart';
 
 import '../constants/ld_colors.dart';
@@ -5,6 +6,7 @@ import '../constants/ld_motion.dart';
 import '../constants/ld_radii.dart';
 import '../theme/ld_theme.dart';
 import 'ld_icons.dart';
+import 'ld_logo.dart';
 import 'ld_tappable.dart';
 
 /// One destination in the floating bar.
@@ -197,6 +199,7 @@ class LdSidebar extends StatelessWidget {
     this.onTertiarySelected,
     this.header,
     this.footer,
+    this.compact = false,
   });
 
   final List<LdNavItem> items;
@@ -205,11 +208,12 @@ class LdSidebar extends StatelessWidget {
   final ValueChanged<int>? onTertiarySelected;
   final Widget? header;
   final Widget? footer;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 248,
+      width: compact ? 68 : 248,
       decoration: BoxDecoration(
         color: context.surfaces.backgroundPrimary,
         border: Border(
@@ -219,18 +223,53 @@ class LdSidebar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          Container(
+            height: 64,
+            padding: EdgeInsets.symmetric(horizontal: compact ? 0 : 18),
+            alignment: Alignment.center,
+            child: MoveWindow(
+              child: Container(
+                color: Colors.transparent,
+                alignment: compact ? Alignment.center : Alignment.centerLeft,
+                child: compact
+                    ? const Center(
+                        child: LdLogo(size: 24, stage: LdLogoStage.complete),
+                      )
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          const LdLogo(size: 22, stage: LdLogoStage.complete),
+                          const SizedBox(width: 10),
+                          Flexible(
+                            child: Text(
+                              'Local Drive',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: context.surfaces.foregroundPrimary,
+                                    letterSpacing: -0.2,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          ),
           if (header != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+              padding: EdgeInsets.fromLTRB(compact ? 8 : 16, 4, compact ? 8 : 16, 16),
               child: header!,
             ),
           Expanded(
             child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 12),
               itemCount: items.length,
               itemBuilder: (context, index) => _SidebarRow(
                 item: items[index],
                 selected: index == currentIndex,
+                compact: compact,
                 onTap: () => onSelected(index),
                 onTertiaryTap: onTertiarySelected != null
                     ? () => onTertiarySelected!(index)
@@ -238,7 +277,7 @@ class LdSidebar extends StatelessWidget {
               ),
             ),
           ),
-          if (footer != null)
+          if (footer != null && !compact)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
               child: footer!,
@@ -255,12 +294,14 @@ class _SidebarRow extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.onTertiaryTap,
+    this.compact = false,
   });
 
   final LdNavItem item;
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback? onTertiaryTap;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -268,6 +309,52 @@ class _SidebarRow extends StatelessWidget {
     final iconColor = selected
         ? LdColors.accentPrimary
         : context.surfaces.foregroundSecondary;
+
+    if (compact) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Tooltip(
+          message: item.label,
+          child: LdTappable(
+            onTap: onTap,
+            onTertiaryTap: onTertiaryTap,
+            borderRadius: LdRadii.tileRadius,
+            pressedOpacity: 1.0,
+            child: AnimatedContainer(
+              duration: LdMotion.tapFade,
+              height: 42,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected
+                    ? LdColors.wash(LdColors.accentPrimary, 0.12)
+                    : Colors.transparent,
+                borderRadius: LdRadii.tileRadius,
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                clipBehavior: Clip.none,
+                children: <Widget>[
+                  LdIcon(item.glyph, size: 20, color: iconColor),
+                  if (item.badge > 0)
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(
+                          color: LdColors.accentPrimary,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
