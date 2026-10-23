@@ -2,7 +2,7 @@
 
 ---
 
-## 1. CÀI ĐẶT TRÊN LINUX BẰNG 1 LỆNH DUY NHẤT (TỰ ĐỘNG 100%)
+## 1. CÀI ĐẶT TRÊN LINUX BẰNG 1 LỆNH DUY NHẤT
 
 Nếu bạn đang kết nối SSH vào máy chủ Linux (Ubuntu, Debian, CentOS, Rocky Linux, AlmaLinux, Alpine, Raspberry Pi OS...):
 
@@ -25,12 +25,12 @@ sudo bash install.sh
 curl -fsSL http://<IP_MÁY_CHỦ>:5437/install.sh | sudo bash
 ```
 
-### Script `install.sh` sẽ tự động thực hiện mọi thứ:
-1. Tự động nhận diện kiến trúc CPU: **AMD64/x86_64** hoặc **ARM64** (Raspberry Pi, VPS ARM).
-2. Tự động cài đặt file nhị phân vào `/usr/local/bin/localdrive` và phân quyền thực thi.
-3. Tự động tạo thư mục dữ liệu chuẩn `/var/lib/localdrive/data`.
-4. Tự động đăng ký dịch vụ nền **Systemd (`localdrive.service`)** để server tự động bật khi khởi động lại máy và chạy ngầm vĩnh viễn.
-5. Tự động cấu hình mở cổng **5437 (Web UI), 9683 (Server API), 80, 443** trên tường lửa (UFW / Firewalld).
+### Trình cài đặt `install.sh` sẽ thực hiện:
+1. Nhận diện kiến trúc CPU: **x64** (Intel/AMD) hoặc **arm64** (Raspberry Pi, VPS ARM).
+2. Thiết lập tệp thực thi vào `/usr/local/bin/localdrive` và phân quyền.
+3. Tạo thư mục dữ liệu chuẩn `/var/lib/localdrive/data`.
+4. Đăng ký dịch vụ nền **Systemd (`localdrive.service`)** chạy liên tục cùng hệ điều hành.
+5. Cấu hình mở cổng **5437 (Web UI), 9683 (Server API), 80, 443** trên tường lửa (UFW / Firewalld).
 6. In ra đường dẫn truy cập Web (`http://<IP>:5437` hoặc `http://kinas:5437`) và API (`http://<IP>:9683`).
 
 ---
@@ -60,23 +60,22 @@ Sau khi cài đặt xong, bạn có thể điều khiển LocalDrive dễ dàng 
 
 ## 3. FILE ỨNG DỤNG ANDROID (APK)
 
-- Tệp cài đặt Android: **`LocalDrive.apk`**
-- **Đường dẫn cục bộ**: `e:\DATA\source\Nas\LocalDrive\LocalDrive.apk`
-- **Tải trực tiếp qua trình duyệt**:
-  ```
-  http://<IP_MÁY_CHỦ>:5437/LocalDrive.apk
-  ```
-- Sau khi tải về điện thoại hoặc máy tính bảng Android, chỉ cần bấm cài đặt và nhập địa chỉ máy chủ (vd: `http://192.168.1.100:9683` hoặc `kinas//`) để đồng bộ tệp và thư mục.
+- Tệp cài đặt Android: **`LocalDrive-android.apk`**
+- Sau khi tải về điện thoại hoặc máy tính bảng Android, chỉ cần cài đặt và nhập địa chỉ máy chủ (vd: `http://192.168.1.100:9683` hoặc `kinas//`) để kết nối.
 
 ---
 
-## 4. TỔNG HỢP CÁC TỆP ĐÓNG GÓI SẴN
+## 4. TỔNG HỢP CÁC TỆP ĐÓNG GÓI CHUẨN
 
 | Tệp tin | Nền tảng | Chức năng |
 | :--- | :--- | :--- |
-| `install.sh` | Linux | Script cài đặt 1 lệnh tự động 100% |
-| `localdrive-linux-amd64` | Linux x86_64 | Bản thực thi máy chủ cho VPS / PC Intel & AMD |
+| `install.sh` | Linux | Script cài đặt 1 lệnh chuẩn hóa |
+| `localdrive-linux-x64` | Linux x64 | Bản thực thi máy chủ cho VPS / PC Intel & AMD 64-bit |
 | `localdrive-linux-arm64` | Linux ARM64 | Bản thực thi cho Raspberry Pi / VPS ARM |
-| `localdrive.exe` | Windows 64-bit | Bản thực thi máy chủ cho Windows |
-| `LocalDrive.apk` | Android | Ứng dụng di động kết nối đám mây |
-| `web-client/` | Web Browser | Giao diện quản trị, tải thư mục, Bảng điều khiển, Bảo mật & SSL |
+| `localdrive-win-x64.exe` | Windows x64 | Bản thực thi máy chủ cho Windows 64-bit |
+| `LocalDrive-win-x64-Setup.exe` | Windows x64 | Bộ cài đặt ứng dụng máy tính và KiyoDrive Explorer |
+| `localdrive-macos-x64` | macOS x64 | Bản thực thi máy chủ cho máy Mac chip Intel |
+| `localdrive-macos-arm64` | macOS ARM64 | Bản thực thi máy chủ cho máy Mac chip Apple Silicon |
+| `LocalDrive-android.apk` | Android | Ứng dụng di động kết nối đám mây |
+| `localdrive-linux.tar.gz` | Linux All | Gói nén cài đặt Linux offline |
+| `SHA256SUMS.txt` | All | Bảng mã băm xác thực tính toàn vẹn của tệp |

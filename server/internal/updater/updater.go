@@ -80,15 +80,15 @@ type Release struct {
 func AssetName() string {
 	switch {
 	case runtime.GOOS == "windows":
-		return "localdrive.exe"
+		return "localdrive-win-x64.exe"
 	case runtime.GOOS == "linux" && runtime.GOARCH == "arm64":
 		return "localdrive-linux-arm64"
 	case runtime.GOOS == "linux":
-		return "localdrive-linux-amd64"
+		return "localdrive-linux-x64"
 	case runtime.GOOS == "darwin" && runtime.GOARCH == "arm64":
-		return "localdrive-darwin-arm64"
+		return "localdrive-macos-arm64"
 	case runtime.GOOS == "darwin":
-		return "localdrive-darwin-amd64"
+		return "localdrive-macos-x64"
 	default:
 		return ""
 	}
@@ -97,17 +97,21 @@ func AssetName() string {
 // matchesPlatform checks if an asset name matches current GOOS and GOARCH
 func matchesPlatform(name string) bool {
 	n := strings.ToLower(name)
+	// Loại trừ các tệp nén hoặc gói cài đặt client
+	if strings.HasSuffix(n, ".tar.gz") || strings.Contains(n, "setup") || strings.HasSuffix(n, ".apk") {
+		return false
+	}
 	switch {
 	case runtime.GOOS == "windows":
-		return n == "localdrive.exe" || n == "server.exe" || strings.Contains(n, "windows") && strings.HasSuffix(n, ".exe")
+		return strings.HasSuffix(n, ".exe") && (strings.Contains(n, "win") || strings.Contains(n, "windows") || n == "localdrive.exe" || n == "server.exe")
 	case runtime.GOOS == "linux" && runtime.GOARCH == "arm64":
-		return n == "localdrive-linux-arm64" || n == "server-arm64" || (strings.Contains(n, "linux") && strings.Contains(n, "arm64"))
+		return strings.Contains(n, "linux") && strings.Contains(n, "arm64")
 	case runtime.GOOS == "linux":
-		return n == "localdrive-linux-amd64" || n == "server" || (strings.Contains(n, "linux") && (strings.Contains(n, "amd64") || strings.Contains(n, "x86_64")))
+		return strings.Contains(n, "linux") && (strings.Contains(n, "x64") || strings.Contains(n, "amd64") || strings.Contains(n, "x86_64"))
 	case runtime.GOOS == "darwin" && runtime.GOARCH == "arm64":
-		return n == "localdrive-darwin-arm64" || (strings.Contains(n, "darwin") && strings.Contains(n, "arm64"))
+		return (strings.Contains(n, "macos") || strings.Contains(n, "darwin")) && strings.Contains(n, "arm64")
 	case runtime.GOOS == "darwin":
-		return n == "localdrive-darwin-amd64" || (strings.Contains(n, "darwin") && strings.Contains(n, "amd64"))
+		return (strings.Contains(n, "macos") || strings.Contains(n, "darwin")) && (strings.Contains(n, "x64") || strings.Contains(n, "amd64") || strings.Contains(n, "x86_64"))
 	default:
 		return false
 	}

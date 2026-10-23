@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  Local Drive - 1-Line Automated Linux Installer
-#  Hỗ trợ cài đặt tự động toàn diện cho Ubuntu, Debian, CentOS, AlmaLinux, Rocky, Alpine...
+#  Local Drive - 1-Line Linux Installer
+#  Hỗ trợ cài đặt toàn diện cho Ubuntu, Debian, CentOS, AlmaLinux, Rocky, Alpine...
 # ==============================================================================
 
 set -e
@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 
 echo -e "${CYAN}${BOLD}"
 echo "=================================================================="
-echo "          LOCAL DRIVE - BỘ CÀI ĐẶT TỰ ĐỘNG CHO LINUX              "
+echo "              LOCAL DRIVE - TRÌNH CÀI ĐẶT LINUX                   "
 echo "           Your Own Cloud NAS On Your Own Hardware                "
 echo "=================================================================="
 echo -e "${NC}"
@@ -36,13 +36,15 @@ fi
 ARCH_RAW=$(uname -m)
 case "$ARCH_RAW" in
   x86_64|amd64)
-    ARCH="amd64"
+    ARCH="x64"
+    ARCH_LEGACY="amd64"
     ;;
   aarch64|arm64)
     ARCH="arm64"
+    ARCH_LEGACY="arm64"
     ;;
   *)
-    echo -e "${RED}[LỖI] Kiến trúc CPU ($ARCH_RAW) chưa được hỗ trợ tự động!${NC}"
+    echo -e "${RED}[LỖI] Kiến trúc CPU ($ARCH_RAW) chưa được hỗ trợ!${NC}"
     exit 1
     ;;
 esac
@@ -62,16 +64,17 @@ echo -e "${BLUE}[2/5] Đang nạp tệp thực thi LocalDrive...${NC}"
 
 # Tìm binary có sẵn trong thư mục cục bộ trước
 FOUND_LOCAL=false
-if [ -f "$SCRIPT_DIR/localdrive-linux-${ARCH}" ]; then
-  cp -f "$SCRIPT_DIR/localdrive-linux-${ARCH}" "$BIN_TARGET"
-  FOUND_LOCAL=true
-elif [ -f "./localdrive-linux-${ARCH}" ]; then
-  cp -f "./localdrive-linux-${ARCH}" "$BIN_TARGET"
-  FOUND_LOCAL=true
-elif [ -f "$SCRIPT_DIR/localdrive" ]; then
-  cp -f "$SCRIPT_DIR/localdrive" "$BIN_TARGET"
-  FOUND_LOCAL=true
-fi
+for CANDIDATE in "localdrive-linux-${ARCH}" "localdrive-linux-${ARCH_LEGACY}" "localdrive"; do
+  if [ -f "$SCRIPT_DIR/$CANDIDATE" ]; then
+    cp -f "$SCRIPT_DIR/$CANDIDATE" "$BIN_TARGET"
+    FOUND_LOCAL=true
+    break
+  elif [ -f "./$CANDIDATE" ]; then
+    cp -f "./$CANDIDATE" "$BIN_TARGET"
+    FOUND_LOCAL=true
+    break
+  fi
+done
 
 # Nếu không có file local, tải trực tiếp từ GitHub Releases
 if [ "$FOUND_LOCAL" = false ]; then
@@ -79,7 +82,8 @@ if [ "$FOUND_LOCAL" = false ]; then
   URLS=(
     "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH}"
     "https://github.com/ngdaison/LocalDrive/releases/latest/download/localdrive-linux-${ARCH}"
-    "https://github.com/MultiX0/LocalDrive/releases/latest/download/localdrive-linux-${ARCH}"
+    "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH_LEGACY}"
+    "https://github.com/ngdaison/LocalDrive/releases/latest/download/localdrive-linux-${ARCH_LEGACY}"
   )
   for URL in "${URLS[@]}"; do
     echo -e "${BLUE}Thử tải từ: ${URL}...${NC}"
@@ -118,7 +122,7 @@ EOF
 fi
 
 # 5. Cài đặt Systemd Daemon Service
-echo -e "${BLUE}[4/5] Đăng ký Systemd Daemon Service tự khởi động...${NC}"
+echo -e "${BLUE}[4/5] Đăng ký Systemd Daemon Service cùng hệ thống...${NC}"
 
 cat << EOF > /etc/systemd/system/localdrive.service
 [Unit]
@@ -197,5 +201,5 @@ echo -e "  ${BOLD}Dữ liệu và tệp lưu trữ:${NC}"
 echo -e "  • Thư mục dữ liệu:       ${CYAN}/var/lib/localdrive/data${NC}"
 echo -e "  • Cơ sở dữ liệu:         ${CYAN}/var/lib/localdrive/localdrive.db${NC}"
 echo ""
-echo -e "${GREEN}Dịch vụ đã được kích hoạt chạy ngầm vĩnh viễn và tự bật khi khởi động lại máy!${NC}"
+echo -e "${GREEN}Dịch vụ đã được kích hoạt chạy nền liên tục cùng hệ điều hành!${NC}"
 echo "=================================================================="
