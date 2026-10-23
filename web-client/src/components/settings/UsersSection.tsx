@@ -40,15 +40,20 @@ function findNodeInTree(
   keyOrPath: string,
   depth = 0
 ): { node: FolderTreeNode; depth: number } | null {
+  const normSearch = keyOrPath.trim().replace(/^\/+/, "").toLowerCase();
   for (const n of tree) {
-    const itemKey = (n as any).key || n.name || n.path;
+    const itemKey = ((n as any).key || n.name || "").trim().replace(/^\/+/, "").toLowerCase();
+    const nodeName = (n.name || "").trim().toLowerCase();
+    const nodePath = (n.path || "").trim().replace(/^\/+/, "").toLowerCase();
+
     if (
-      itemKey === keyOrPath ||
-      n.path === keyOrPath ||
+      itemKey === normSearch ||
+      nodeName === normSearch ||
+      nodePath === normSearch ||
       n.id === keyOrPath ||
-      n.name === keyOrPath ||
-      (n as any).key === keyOrPath ||
-      (n.path && keyOrPath && (n.path.endsWith("/" + keyOrPath) || keyOrPath.endsWith("/" + n.name)))
+      itemKey.endsWith("/" + normSearch) ||
+      normSearch.endsWith("/" + itemKey) ||
+      nodePath.endsWith("/" + normSearch)
     ) {
       return { node: n, depth };
     }
@@ -76,7 +81,13 @@ function CategoryTreeItem({
   onToggleExpand: (id: string, e: React.MouseEvent) => void;
 }) {
   const itemKey = (node as any).key || node.name || node.path;
-  const isSelected = selectedDatasets.has(itemKey) || Boolean(node.path && selectedDatasets.has(node.path)) || Boolean(selectedDatasets.has(node.name));
+  const cleanKey = itemKey.replace(/^\/+/, "");
+  const isSelected =
+    selectedDatasets.has(itemKey) ||
+    selectedDatasets.has(cleanKey) ||
+    selectedDatasets.has("/" + cleanKey) ||
+    selectedDatasets.has(node.name) ||
+    Boolean(node.path && selectedDatasets.has(node.path.replace(/\/+/g, "/")));
   const hasChildren = !!node.children && node.children.length > 0;
   const isExpanded = expandedIds.has(node.id);
 
@@ -243,7 +254,7 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
         const rootNode: FolderTreeNode = {
           id: `pool-${poolName}`,
           name: poolName,
-          path: `/mnt/zfs-recovery/${poolName}`,
+          path: `/mnt/${poolName}`.replace(/\/+/g, "/"),
           isDrive: true,
           children: [],
         };
@@ -264,7 +275,7 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
           parent = {
             id: `pool-${poolName}`,
             name: poolName,
-            path: d.mount || `/mnt/zfs-recovery/${poolName}`,
+            path: (d.mount || `/mnt/${poolName}`).replace(/\/+/g, "/"),
             isDrive: true,
             children: [],
           };
@@ -274,7 +285,7 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
         }
 
         if (parts.length === 1) {
-          if (d.mount) parent.path = d.mount;
+          if (d.mount) parent.path = d.mount.replace(/\/+/g, "/");
           if (d.id) parent.id = `ds-${d.id}`;
           return;
         }
@@ -290,7 +301,7 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
             const node: FolderTreeNode = {
               id: isLeaf && d.id ? `ds-${d.id}` : `node-${currentPath}`,
               name: part,
-              path: isLeaf && d.mount ? d.mount : `${parent.path}/${part}`,
+              path: (isLeaf && d.mount ? d.mount : `${parent.path}/${part}`).replace(/\/+/g, "/"),
               isDrive: false,
               children: [],
             };
@@ -304,7 +315,7 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
             }
           } else if (i === parts.length - 1) {
             const existing = nodeMap.get(currentPath)!;
-            if (d.mount) existing.path = d.mount;
+            if (d.mount) existing.path = d.mount.replace(/\/+/g, "/");
             if (d.id) existing.id = `ds-${d.id}`;
           }
         }
@@ -392,8 +403,13 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
   const selectedDatasets = useMemo(() => {
     const set = new Set<string>();
     selectedTreeItems.forEach((item) => {
+      const clean = item.key.replace(/^\/+/, "");
+      set.add(clean);
+      set.add("/" + clean);
       set.add(item.key);
-      if (item.path) set.add(item.path);
+      if (item.path) {
+        set.add(item.path.replace(/\/+/g, "/"));
+      }
     });
     return set;
   }, [selectedTreeItems]);
@@ -525,17 +541,24 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
     const seenNodes = new Set<string>();
     Object.entries(parsedPerms).forEach(([key, val]) => {
       if (!val || val === "none") return;
-      const found = findNodeInTree(datasetTree, key);
-      const canonicalKey = (found?.node as any)?.key || found?.node.name || key;
-      if (seenNodes.has(canonicalKey) || (found?.node.path && seenNodes.has(found.node.path))) {
+      let cleanKey = key.trim().replace(/^\/\/+/, "/");
+      if (cleanKey.startsWith("/mnt/zfs-recovery/")) {
+        cleanKey = cleanKey.replace("/mnt/zfs-recovery/", "");
+      } else if (cleanKey.startsWith("/mnt/")) {
+        cleanKey = cleanKey.replace("/mnt/", "");
+      }
+      cleanKey = cleanKey.replace(/^\/+/, "");
+
+      const found = findNodeInTree(datasetTree, cleanKey) || findNodeInTree(datasetTree, key);
+      const canonicalKey = (found?.node as any)?.key || cleanKey;
+      if (!canonicalKey || seenNodes.has(canonicalKey)) {
         return;
       }
       seenNodes.add(canonicalKey);
-      if (found?.node.path) seenNodes.add(found.node.path);
 
       initialSelectedItems.push({
         key: canonicalKey,
-        path: found?.node.path,
+        path: "/" + canonicalKey.replace(/^\/+/, ""),
         depth: found?.depth ?? 0,
       });
       if (typeof val === "object" && val !== null) {
@@ -551,7 +574,7 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
       const targetDepth = initialSelectedItems[0].depth;
       const sameDepthItems = initialSelectedItems.filter((i) => i.depth === targetDepth).slice(0, 2);
       setSelectedTreeItems(sameDepthItems);
-      const uniquePaths = Array.from(new Set(sameDepthItems.map((it) => it.path || `/${it.key}`)));
+      const uniquePaths = Array.from(new Set(sameDepthItems.map((it) => "/" + it.key.replace(/^\/+/, ""))));
       setCategoryPath(uniquePaths.join(", "));
     } else {
       setSelectedTreeItems([]);
@@ -615,33 +638,34 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
   // - Nếu đang bấm ở cây cao hơn rồi bấm cây nhỏ hơn (hoặc ngược lại): tắt cây cũ đi và chỉ chọn cây mới đang bấm
   // - Chỉ chọn được tối đa 2 mục bằng nhau (cùng depth / cùng cấp)
   const handleToggleSelectDataset = (node: FolderTreeNode, depth: number) => {
-    const key = (node as any).key || node.name || node.path;
-    const path = node.path || (key ? `/${key}` : "");
+    const rawKey = (node as any).key || node.name || node.path;
+    const cleanKey = rawKey.replace(/^\/+/, "");
+    const cleanPath = "/" + cleanKey;
 
     setSelectedTreeItems((prev) => {
       const isAlreadySelected = prev.some(
-        (item) => item.key === key || (path && item.path === path)
+        (item) => item.key.replace(/^\/+/, "") === cleanKey
       );
 
       let nextItems: SelectedTreeItem[];
       if (isAlreadySelected) {
         // Bấm lại mục đang chọn thì tắt nó đi
         nextItems = prev.filter(
-          (item) => item.key !== key && (!path || item.path !== path)
+          (item) => item.key.replace(/^\/+/, "") !== cleanKey
         );
       } else if (prev.length === 0) {
-        nextItems = [{ key, path, depth }];
+        nextItems = [{ key: cleanKey, path: cleanPath, depth }];
       } else {
         const prevDepth = prev[0].depth;
 
         // Nếu bấm vào cây khác cấp (khác độ sâu/level):
         // Tắt hết cây ở cấp cũ và chỉ hiện đúng cây mình đang bấm!
         if (prevDepth !== depth) {
-          nextItems = [{ key, path, depth }];
+          nextItems = [{ key: cleanKey, path: cleanPath, depth }];
         } else if (prev.length === 1) {
-          nextItems = [...prev, { key, path, depth }];
+          nextItems = [...prev, { key: cleanKey, path: cleanPath, depth }];
         } else {
-          nextItems = [prev[1], { key, path, depth }];
+          nextItems = [prev[1], { key: cleanKey, path: cleanPath, depth }];
         }
       }
 
@@ -649,7 +673,7 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
       if (nextItems.length === 0) {
         setCategoryPath("");
       } else {
-        const uniquePaths = Array.from(new Set(nextItems.map((it) => it.path || `/${it.key}`)));
+        const uniquePaths = Array.from(new Set(nextItems.map((it) => "/" + it.key.replace(/^\/+/, ""))));
         setCategoryPath(uniquePaths.join(", "));
       }
 
@@ -706,20 +730,20 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
     const level: PermissionLevel = permWrite ? "editor" : (permRead ? "viewer" : "none");
     if (selectedTreeItems.length > 0) {
       selectedTreeItems.forEach((item) => {
-        permsToSave[item.key] = {
+        const cleanKey = item.key.trim().replace(/^\/+/, "");
+        if (!cleanKey) return;
+        permsToSave[cleanKey] = {
           level,
           read: permRead,
           write: permWrite,
           execute: permExecute,
         };
-        if (item.path && item.path !== item.key) {
-          permsToSave[item.path] = {
-            level,
-            read: permRead,
-            write: permWrite,
-            execute: permExecute,
-          };
-        }
+        permsToSave["/" + cleanKey] = {
+          level,
+          read: permRead,
+          write: permWrite,
+          execute: permExecute,
+        };
       });
     }
     const permsJsonString = JSON.stringify(permsToSave);

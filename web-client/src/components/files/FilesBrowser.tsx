@@ -166,13 +166,40 @@ export function FilesBrowser({
     if (!user) return { level: "none" as const, read: false, write: false, execute: false };
     if (user.role === "admin") return { level: "editor" as const, read: true, write: true, execute: true };
     if (userPerms[dsName]) return userPerms[dsName];
-    const lower = dsName.toLowerCase();
+
+    const cleanName = dsName.toLowerCase().trim().replace(/^\/+|\/+$/g, "");
+    if (!cleanName) return { level: "none" as const, read: false, write: false, execute: false };
+
+    // 1. Khớp chính xác
     for (const [k, v] of Object.entries(userPerms)) {
-      const kLower = k.toLowerCase();
-      if (kLower === lower || kLower.replace(/^\/+/, "") === lower.replace(/^\/+/, "") || lower.endsWith(kLower.replace(/^\/+/, ""))) {
+      const kClean = k.toLowerCase().trim().replace(/^\/+|\/+$/g, "");
+      if (kClean === cleanName) return v;
+    }
+
+    // 2. Thừa hưởng quyền từ dataset cha (ví dụ cấp quyền DATA/KiyoVN thì tự động có toàn quyền trên DATA/KiyoVN/1DATA)
+    for (const [k, v] of Object.entries(userPerms)) {
+      const kClean = k.toLowerCase().trim().replace(/^\/+|\/+$/g, "");
+      if (kClean && cleanName.startsWith(kClean + "/")) {
         return v;
       }
     }
+
+    // 3. Cho phép xem danh mục cha nếu được cấp quyền trên danh mục con (để người dùng mở được từ DATA -> KiyoVN -> 1DATA)
+    for (const [k, v] of Object.entries(userPerms)) {
+      const kClean = k.toLowerCase().trim().replace(/^\/+|\/+$/g, "");
+      if (kClean && kClean.startsWith(cleanName + "/")) {
+        return { level: "viewer" as const, read: true, write: false, execute: false };
+      }
+    }
+
+    // 4. Kiểm tra thành phần trong đường dẫn hoặc hậu tố
+    for (const [k, v] of Object.entries(userPerms)) {
+      const kClean = k.toLowerCase().trim().replace(/^\/+|\/+$/g, "");
+      if (kClean && (("/" + cleanName + "/").includes("/" + kClean + "/") || cleanName.endsWith("/" + kClean) || kClean.endsWith("/" + cleanName))) {
+        return v;
+      }
+    }
+
     if (userPerms["/"]) return userPerms["/"];
     if (userPerms["*"]) return userPerms["*"];
     return { level: "none" as const, read: false, write: false, execute: false };
@@ -187,13 +214,21 @@ export function FilesBrowser({
 
   // Determine root dataset name if within a dataset hierarchy
   const currentDatasetName = useMemo<string | null>(() => {
-    if (trail && trail.length > 0 && trail[0].id.startsWith("dataset:")) {
-      return trail[0].name;
-    }
     if (folderId.startsWith("dataset:")) {
       const stripped = folderId.replace(/^dataset:/, "");
       const colonIdx = stripped.indexOf(":");
       return colonIdx !== -1 ? decodeURIComponent(stripped.slice(0, colonIdx)) : decodeURIComponent(stripped);
+    }
+    if (trail && trail.length > 0) {
+      const last = trail[trail.length - 1];
+      if (last?.id && last.id.startsWith("dataset:")) {
+        const stripped = last.id.replace(/^dataset:/, "");
+        const colonIdx = stripped.indexOf(":");
+        return colonIdx !== -1 ? decodeURIComponent(stripped.slice(0, colonIdx)) : decodeURIComponent(stripped);
+      }
+      if (trail[0]?.id && trail[0].id.startsWith("dataset:")) {
+        return trail[0].name;
+      }
     }
     return null;
   }, [trail, folderId]);

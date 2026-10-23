@@ -90,8 +90,8 @@ rm -f "$TMP_BIN"
 
 DOWNLOADED=false
 URLS=(
-  "https://github.com/kiyogo/kidrive/releases/download/v1.1.2/localdrive-linux-${ARCH}"
-  "https://github.com/ngdaison/LocalDrive/releases/download/v1.1.2/localdrive-linux-${ARCH}"
+  "https://github.com/kiyogo/kidrive/releases/download/v1.1.3/localdrive-linux-${ARCH}"
+  "https://github.com/ngdaison/LocalDrive/releases/download/v1.1.3/localdrive-linux-${ARCH}"
   "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH}"
   "https://github.com/ngdaison/LocalDrive/releases/latest/download/localdrive-linux-${ARCH}"
   "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH_LEGACY}"
@@ -169,6 +169,7 @@ if ! command -v zpool >/dev/null 2>&1; then
   fi
 fi
 modprobe zfs 2>/dev/null || true
+zfs mount -a 2>/dev/null || true
 
 # 7. Khởi tạo cấu hình ban đầu nếu chưa có (Tuyệt đối không ghi đè cấu hình cũ)
 ENV_FILE="$INSTALL_DIR/.env"

@@ -225,9 +225,20 @@ func exportZFSPoolCmd(poolName string, force bool) error {
 }
 
 func getZFSPoolDisks(poolName string) []string {
-	out, err := exec.Command("zpool", "status", "-P", poolName).Output()
+	targetName := poolName
+	if out, err := exec.Command("zpool", "list", "-H", "-o", "name").Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			p := strings.TrimSpace(line)
+			if strings.EqualFold(p, poolName) {
+				targetName = p
+				break
+			}
+		}
+	}
+
+	out, err := exec.Command("zpool", "status", "-P", targetName).Output()
 	if err != nil {
-		out, err = exec.Command("zpool", "status", poolName).Output()
+		out, err = exec.Command("zpool", "status", targetName).Output()
 		if err != nil {
 			return nil
 		}
@@ -252,7 +263,8 @@ func getZFSPoolDisks(poolName string) []string {
 		if len(fields) > 0 {
 			devName := fields[0]
 			devLower := strings.ToLower(devName)
-			if devName == poolName ||
+			if strings.EqualFold(devName, targetName) ||
+				strings.EqualFold(devName, poolName) ||
 				strings.EqualFold(devName, "NAME") ||
 				strings.EqualFold(devName, "mirror") ||
 				strings.HasPrefix(devLower, "mirror-") ||
@@ -283,7 +295,47 @@ func getZFSPoolDisks(poolName string) []string {
 }
 
 func getZFSPoolCapacity(poolName string) (int64, int64, string, error) {
-	out, err := exec.Command("zpool", "list", "-H", "-p", "-o", "size,alloc,free,health", poolName).Output()
+	targetName := poolName
+
+	// 1. Quét danh sách các pool đang hoạt động để tìm tên chính xác không phân biệt hoa thường
+	if out, err := exec.Command("zpool", "list", "-H", "-p", "-o", "name,size,alloc,free,health").Output(); err == nil {
+		scanner := bufio.NewScanner(strings.NewReader(string(out)))
+		for scanner.Scan() {
+			fields := strings.Split(scanner.Text(), "\t")
+			if len(fields) < 5 {
+				fields = strings.Fields(scanner.Text())
+			}
+			if len(fields) >= 5 {
+				pName := strings.TrimSpace(fields[0])
+				if strings.EqualFold(pName, poolName) {
+					targetName = pName
+					size, _ := strconv.ParseInt(strings.TrimSpace(fields[1]), 10, 64)
+					alloc, _ := strconv.ParseInt(strings.TrimSpace(fields[2]), 10, 64)
+					rawHealth := strings.TrimSpace(fields[4])
+					health := "healthy"
+					if !strings.EqualFold(rawHealth, "ONLINE") && !strings.EqualFold(rawHealth, "healthy") {
+						health = rawHealth
+					}
+
+					// Lấy chính xác used_bytes từ ZFS dataset gốc (tránh double count)
+					if zfsOut, zfsErr := exec.Command("zfs", "get", "-H", "-p", "-o", "value", "used", pName).Output(); zfsErr == nil {
+						if zfsUsed, parseErr := strconv.ParseInt(strings.TrimSpace(string(zfsOut)), 10, 64); parseErr == nil && zfsUsed > 0 {
+							alloc = zfsUsed
+						}
+					}
+
+					if size > 0 && alloc > size {
+						alloc = size
+					}
+
+					return size, alloc, health, nil
+				}
+			}
+		}
+	}
+
+	// 2. Dự phòng: gọi trực tiếp zpool list với poolName
+	out, err := exec.Command("zpool", "list", "-H", "-p", "-o", "size,alloc,free,health", targetName).Output()
 	if err != nil {
 		return 0, 0, "", err
 	}
@@ -300,8 +352,7 @@ func getZFSPoolCapacity(poolName string) (int64, int64, string, error) {
 			health = rawHealth
 		}
 
-		// Lấy chính xác used_bytes từ ZFS dataset gốc (tránh double count)
-		if zfsOut, zfsErr := exec.Command("zfs", "get", "-H", "-p", "-o", "value", "used", poolName).Output(); zfsErr == nil {
+		if zfsOut, zfsErr := exec.Command("zfs", "get", "-H", "-p", "-o", "value", "used", targetName).Output(); zfsErr == nil {
 			if zfsUsed, parseErr := strconv.ParseInt(strings.TrimSpace(string(zfsOut)), 10, 64); parseErr == nil && zfsUsed > 0 {
 				alloc = zfsUsed
 			}

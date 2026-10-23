@@ -106,17 +106,34 @@ func (a *API) handleListDatasets(w http.ResponseWriter, r *http.Request) {
 		defer rows.Close()
 
 		poolFreeMap := make(map[string]int64)
+		zfsDsMap := make(map[string]int64)
+		if hasZFSTools() {
+			for _, zp := range detectZFSPools() {
+				free := zp.TotalBytes - zp.UsedBytes
+				if free < 0 {
+					free = 0
+				}
+				poolFreeMap[zp.Name] = free
+				poolFreeMap[strings.ToLower(zp.Name)] = free
+				poolFreeMap[strings.ToUpper(zp.Name)] = free
+				for _, zd := range zp.Datasets {
+					zfsDsMap[strings.ToLower(strings.Trim(zd.Name, "/"))] = zd.UsedBytes
+				}
+			}
+		}
 		if pRows, pErr := a.db.Read().QueryContext(r.Context(), `SELECT name, total_bytes, used_bytes FROM storage_pools`); pErr == nil {
 			for pRows.Next() {
 				var pName string
 				var pTotal, pUsed int64
 				if err := pRows.Scan(&pName, &pTotal, &pUsed); err == nil {
-					free := pTotal - pUsed
-					if free < 0 {
-						free = 0
+					if _, exists := poolFreeMap[pName]; !exists {
+						free := pTotal - pUsed
+						if free < 0 {
+							free = 0
+						}
+						poolFreeMap[pName] = free
+						poolFreeMap[strings.ToLower(pName)] = free
 					}
-					poolFreeMap[pName] = free
-					poolFreeMap[strings.ToLower(pName)] = free
 				}
 			}
 			pRows.Close()
@@ -129,6 +146,14 @@ func (a *API) handleListDatasets(w http.ResponseWriter, r *http.Request) {
 			if err := rows.Scan(&d.ID, &d.Name, &d.Pool, &d.Mount, &d.QuotaBytes, &d.UsedBytes, &recordsize, &d.Compression, &d.Atime, &d.Dedup, &d.SyncMode, &d.Status, &d.CreatedAt, &d.UpdatedAt); err != nil {
 				a.fail(w, r, err)
 				return
+			}
+			dClean := strings.ToLower(strings.Trim(d.Name, "/"))
+			if realUsed, ok := zfsDsMap[dClean]; ok && realUsed > 0 && realUsed != d.UsedBytes {
+				d.UsedBytes = realUsed
+				_ = a.db.Write(r.Context(), func(c context.Context, tx *sql.Tx) error {
+					_, _ = tx.ExecContext(c, `UPDATE datasets SET used_bytes = ? WHERE id = ?`, realUsed, d.ID)
+					return nil
+				})
 			}
 			pFree, ok := poolFreeMap[d.Pool]
 			if !ok {
@@ -166,17 +191,34 @@ func (a *API) handleListDatasets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	poolFreeMap := make(map[string]int64)
+	zfsDsMap := make(map[string]int64)
+	if hasZFSTools() {
+		for _, zp := range detectZFSPools() {
+			free := zp.TotalBytes - zp.UsedBytes
+			if free < 0 {
+				free = 0
+			}
+			poolFreeMap[zp.Name] = free
+			poolFreeMap[strings.ToLower(zp.Name)] = free
+			poolFreeMap[strings.ToUpper(zp.Name)] = free
+			for _, zd := range zp.Datasets {
+				zfsDsMap[strings.ToLower(strings.Trim(zd.Name, "/"))] = zd.UsedBytes
+			}
+		}
+	}
 	if pRows, pErr := a.db.Read().QueryContext(r.Context(), `SELECT name, total_bytes, used_bytes FROM storage_pools`); pErr == nil {
 		for pRows.Next() {
 			var pName string
 			var pTotal, pUsed int64
 			if err := pRows.Scan(&pName, &pTotal, &pUsed); err == nil {
-				free := pTotal - pUsed
-				if free < 0 {
-					free = 0
+				if _, exists := poolFreeMap[pName]; !exists {
+					free := pTotal - pUsed
+					if free < 0 {
+						free = 0
+					}
+					poolFreeMap[pName] = free
+					poolFreeMap[strings.ToLower(pName)] = free
 				}
-				poolFreeMap[pName] = free
-				poolFreeMap[strings.ToLower(pName)] = free
 			}
 		}
 		pRows.Close()
@@ -198,6 +240,14 @@ func (a *API) handleListDatasets(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&d.ID, &d.Name, &d.Pool, &d.Mount, &d.QuotaBytes, &d.UsedBytes, &recordsize, &d.Compression, &d.Atime, &d.Dedup, &d.SyncMode, &d.Status, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			a.fail(w, r, err)
 			return
+		}
+		dClean := strings.ToLower(strings.Trim(d.Name, "/"))
+		if realUsed, ok := zfsDsMap[dClean]; ok && realUsed > 0 && realUsed != d.UsedBytes {
+			d.UsedBytes = realUsed
+			_ = a.db.Write(r.Context(), func(c context.Context, tx *sql.Tx) error {
+				_, _ = tx.ExecContext(c, `UPDATE datasets SET used_bytes = ? WHERE id = ?`, realUsed, d.ID)
+				return nil
+			})
 		}
 		pFree, ok := poolFreeMap[d.Pool]
 		if !ok {
@@ -1956,11 +2006,35 @@ func (a *API) checkDatasetAccess(r *http.Request, datasetName string, needEditor
 	}
 
 	var matchedVal any
-	// 1. Direct or suffix match
+	// 1. Direct, ancestor inheritance, or suffix match
 	for k, v := range rawPerms {
 		kNorm := strings.ToLower(strings.TrimSpace(k))
 		kClean := strings.Trim(kNorm, "/")
-		if kNorm == normName || kClean == cleanName || (kClean != "" && strings.HasSuffix(cleanName, kClean)) || (cleanName != "" && strings.HasSuffix(kClean, cleanName)) {
+		if kClean == "" {
+			continue
+		}
+		// Khớp chính xác
+		if kClean == cleanName || kNorm == normName {
+			matchedVal = v
+			break
+		}
+		// Thừa hưởng quyền từ dataset cha (ví dụ cấp quyền DATA/KiyoVN thì tự động có quyền trên DATA/KiyoVN/1DATA)
+		if strings.HasPrefix(cleanName, kClean+"/") {
+			matchedVal = v
+			break
+		}
+		// Kiểm tra thành phần trong đường dẫn
+		if strings.Contains("/"+cleanName+"/", "/"+kClean+"/") {
+			matchedVal = v
+			break
+		}
+		// Cho phép xem cây thư mục cha nếu được cấp quyền trên tập dữ liệu con (khi chỉ cần xem/list)
+		if !needEditor && strings.HasPrefix(kClean, cleanName+"/") {
+			matchedVal = "viewer"
+			break
+		}
+		// Khớp hậu tố hoặc tiền tố đối xứng
+		if (kClean != "" && strings.HasSuffix(cleanName, "/"+kClean)) || (cleanName != "" && strings.HasSuffix(kClean, "/"+cleanName)) || strings.HasSuffix(cleanName, kClean) {
 			matchedVal = v
 			break
 		}
@@ -2035,19 +2109,29 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 
 	// 1. Nếu có ZFS tools, hỏi trực tiếp OpenZFS xem dataset này đang mount ở đâu
 	if hasZFSTools() && trimmedName != "" {
-		if out, err := exec.Command("zfs", "get", "-H", "-o", "value", "mountpoint", trimmedName).Output(); err == nil {
-			mp := strings.TrimSpace(string(out))
-			if mp != "" && mp != "none" && mp != "legacy" {
-				if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
-					return mp
+		for _, tryName := range []string{trimmedName, strings.ToUpper(trimmedName), strings.ToLower(trimmedName)} {
+			if out, err := exec.Command("zfs", "get", "-H", "-o", "value", "mountpoint", tryName).Output(); err == nil {
+				mp := strings.TrimSpace(string(out))
+				if mp != "" && mp != "none" && mp != "legacy" {
+					if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
+						return mp
+					}
+					_ = exec.Command("zfs", "mount", tryName).Run()
+					if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
+						return mp
+					}
 				}
 			}
-		}
-		if out, err := exec.Command("zfs", "list", "-H", "-o", "mountpoint", trimmedName).Output(); err == nil {
-			mp := strings.TrimSpace(string(out))
-			if mp != "" && mp != "none" && mp != "legacy" {
-				if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
-					return mp
+			if out, err := exec.Command("zfs", "list", "-H", "-o", "mountpoint", tryName).Output(); err == nil {
+				mp := strings.TrimSpace(string(out))
+				if mp != "" && mp != "none" && mp != "legacy" {
+					if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
+						return mp
+					}
+					_ = exec.Command("zfs", "mount", tryName).Run()
+					if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
+						return mp
+					}
 				}
 			}
 		}
@@ -2063,9 +2147,9 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 
 	// 3. Kiểm tra các thư mục mount thông dụng của TrueNAS / ZFS
 	candidates := []string{
-		filepath.Join("/mnt/zfs-recovery", trimmedName),
 		filepath.Join("/mnt", trimmedName),
 		"/" + trimmedName,
+		filepath.Join("/mnt/zfs-recovery", trimmedName),
 	}
 
 	for _, c := range candidates {
