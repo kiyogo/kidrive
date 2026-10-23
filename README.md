@@ -86,7 +86,7 @@ KiDrive is intended for personal cloud storage, home laboratories, private infra
 
 KiDrive provides several installation and deployment options depending on the target operating system.
 
-> **Release availability:** As of October 23, 2026, the primary KiDrive repository does not have published GitHub Releases. The installation methods below may require building the software from source or providing compatible binaries. The automated installer cannot complete successfully unless its required server binary is available.
+> 🚀 **Official Release v1.0.0 Available:** Pre-compiled binaries, Windows installer, and packages are now published on [GitHub Releases](https://github.com/kiyogo/kidrive/releases/tag/v1.0.0). The 1-line automated Linux installer downloads and configures the latest binary automatically.
 
 ### 🐧 1. Linux Server
 
