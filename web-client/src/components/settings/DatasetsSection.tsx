@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/Icon";
-import { Button, Dialog, DropdownStatus, Tappable, TextField, useDeviceClass, useToast } from "@/components/ui";
+import { Button, Dialog, DropdownStatus, Spinner, Tappable, TextField, useDeviceClass, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { bytes } from "@/lib/format";
@@ -964,51 +964,136 @@ export function DatasetsSection({
             {t.settingsDatasets}
           </h2>
         </div>
-        <Button
-          label="Thêm"
-          glyph="plus"
-          variant="primary"
-          compact
-          expand={false}
-          onClick={() => handleOpenCreateModal()}
-        />
+        {pools.length > 0 && visibleNodes.length > 0 && (
+          <Button
+            label="Thêm"
+            glyph="plus"
+            variant="primary"
+            compact
+            expand={false}
+            onClick={() => handleOpenCreateModal()}
+          />
+        )}
       </div>
 
-      {/* Cây cấu trúc phân cấp Bộ dữ liệu (Hierarchical Tree View) */}
-      {isMobile ? (
+      {/* Cấu trúc Tập dữ liệu */}
+      {loading && visibleNodes.length === 0 ? (
+        <div
+          style={{
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--stroke)",
+            borderRadius: "var(--r-card, 14px)",
+            padding: "36px 20px",
+            textAlign: "center",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Spinner size={26} color="var(--accent)" />
+          </div>
+        </div>
+      ) : pools.length === 0 ? (
+        <div
+          style={{
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--stroke)",
+            borderRadius: "var(--r-card, 14px)",
+            padding: "36px 20px",
+            textAlign: "center",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon glyph="storage" size={26} color="var(--fg-secondary)" />
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: "var(--fg-primary)", whiteSpace: "nowrap" }}>
+            Chưa có Nhóm lưu trữ nào
+          </div>
+          <div style={{ fontSize: 13.5, color: "var(--fg-secondary)", maxWidth: "none", lineHeight: 1.5, whiteSpace: "nowrap" }}>
+            Hệ thống cần ít nhất một Nhóm lưu trữ để có thể tạo Tập dữ liệu và bắt đầu lưu trữ tệp tin.
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
+            <Button
+              label="Đi đến Nhóm lưu trữ"
+              variant="primary"
+              compact
+              expand={false}
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  window.history.pushState(null, "", "/settings/storage_pools");
+                  window.dispatchEvent(new PopStateEvent("popstate"));
+                }
+              }}
+            />
+          </div>
+        </div>
+      ) : visibleNodes.length === 0 ? (
+        <div
+          style={{
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--stroke)",
+            borderRadius: "var(--r-card, 14px)",
+            padding: "36px 20px",
+            textAlign: "center",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon glyph="folder" size={26} color="var(--fg-secondary)" />
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: "var(--fg-primary)", whiteSpace: "nowrap" }}>
+            Chưa có Tập dữ liệu nào
+          </div>
+          <div style={{ fontSize: 13.5, color: "var(--fg-secondary)", maxWidth: "none", lineHeight: 1.5, whiteSpace: "nowrap" }}>
+            Bạn có thể tạo mới Tập dữ liệu để bắt đầu lưu trữ tệp tin và phân quyền người dùng.
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
+            <Button
+              label="Thêm"
+              glyph="plus"
+              compact
+              expand={false}
+              onClick={() => handleOpenCreateModal()}
+            />
+          </div>
+        </div>
+      ) : isMobile ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {loading && visibleNodes.length === 0 ? (
-            <DropdownStatus type="loading" message="Đang tải danh sách bộ dữ liệu..." />
-          ) : visibleNodes.length === 0 ? (
-            <DropdownStatus type="empty" glyph="folder" message="Chưa có bộ dữ liệu nào." />
-          ) : (
-            visibleNodes.map(({ node, depth }) => (
-              <DatasetMobileCard
-                key={node.id}
-                node={node}
-                depth={depth}
-                selectedId={selectedNodeId}
-                expandedIds={expandedNodeIds}
-                onToggleExpand={handleToggleExpand}
-                onSelectNode={handleSelectNode}
-                onManageQuota={(ds) => {
-                  setQuotaModalItem(ds);
-                  setQuotaSelectedOption(ds.quota || "Không giới hạn");
-                  setQuotaDropdownOpen(false);
-                }}
-                onEditDataset={(ds) => {
-                  const parts = ds.name.split("/");
-                  setEditDsName(parts[parts.length - 1] || parts[0]);
-                  setEditDsPool(ds.pool);
-                  setEditDsQuota(ds.quota || "Không giới hạn");
-                  setEditPoolDropdownOpen(false);
-                  setEditQuotaDropdownOpen(false);
-                  setEditModalItem(ds);
-                }}
-                onDeleteDataset={(ds) => setDeleteModalItem(ds)}
-              />
-            ))
-          )}
+          {visibleNodes.map(({ node, depth }) => (
+            <DatasetMobileCard
+              key={node.id}
+              node={node}
+              depth={depth}
+              selectedId={selectedNodeId}
+              expandedIds={expandedNodeIds}
+              onToggleExpand={handleToggleExpand}
+              onSelectNode={handleSelectNode}
+              onManageQuota={(ds) => {
+                setQuotaModalItem(ds);
+                setQuotaSelectedOption(ds.quota || "Không giới hạn");
+                setQuotaDropdownOpen(false);
+              }}
+              onEditDataset={(ds) => {
+                const parts = ds.name.split("/");
+                setEditDsName(parts[parts.length - 1] || parts[0]);
+                setEditDsPool(ds.pool);
+                setEditDsQuota(ds.quota || "Không giới hạn");
+                setEditPoolDropdownOpen(false);
+                setEditQuotaDropdownOpen(false);
+                setEditModalItem(ds);
+              }}
+              onDeleteDataset={(ds) => setDeleteModalItem(ds)}
+            />
+          ))}
         </div>
       ) : (
         <div
@@ -1039,91 +1124,40 @@ export function DatasetsSection({
                 <col style={{ width: 250 }} />
               </colgroup>
               <tbody>
-                {loading && visibleNodes.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} style={{ padding: 0 }}>
-                      <DropdownStatus type="loading" message="Đang tải danh sách bộ dữ liệu..." />
-                    </td>
-                  </tr>
-                ) : pools.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} style={{ padding: "48px 24px", textAlign: "center" }}>
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                        <div style={{ width: 52, height: 52, borderRadius: 12, background: "var(--bg-sunken)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <Icon glyph="storage" size={26} color="var(--accent)" />
-                        </div>
-                        <div style={{ fontSize: 16, fontWeight: 600, color: "var(--fg-primary)" }}>Chưa cấu hình Nhóm lưu trữ (Storage Pool)</div>
-                        <div style={{ fontSize: 13, color: "var(--fg-secondary)", maxWidth: 460 }}>
-                          Hệ thống cần ít nhất một Nhóm lưu trữ để có thể tạo Tập dữ liệu và bắt đầu lưu trữ tệp tin.
-                        </div>
-                        <Button
-                          label="Đi đến cấu hình Nhóm lưu trữ"
-                          variant="primary"
-                          onClick={() => {
-                            if (typeof window !== "undefined") {
-                              window.history.pushState(null, "", "/settings/storage_pools");
-                              window.dispatchEvent(new PopStateEvent("popstate"));
-                            }
-                          }}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ) : visibleNodes.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} style={{ padding: "48px 24px", textAlign: "center" }}>
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                        <div style={{ width: 52, height: 52, borderRadius: 12, background: "var(--bg-sunken)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <Icon glyph="folder" size={26} color="var(--accent)" />
-                        </div>
-                        <div style={{ fontSize: 16, fontWeight: 600, color: "var(--fg-primary)" }}>Chưa có Tập dữ liệu (Dataset) nào</div>
-                        <div style={{ fontSize: 13, color: "var(--fg-secondary)", maxWidth: 460 }}>
-                          Hãy tạo Tập dữ liệu đầu tiên để bắt đầu lưu trữ tệp, thư mục và phân quyền người dùng.
-                        </div>
-                        <Button
-                          label="+ Thêm Tập dữ liệu"
-                          variant="primary"
-                          onClick={() => handleOpenCreateModal()}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  visibleNodes.map(({ node, depth }, idx) => (
-                    <DatasetTreeRow
-                      key={node.id}
-                      node={node}
-                      depth={depth}
-                      isLast={idx === visibleNodes.length - 1}
-                      selectedId={selectedNodeId}
-                      expandedIds={expandedNodeIds}
-                      onToggleExpand={handleToggleExpand}
-                      onSelectNode={handleSelectNode}
-                      onManageQuota={(ds) => {
-                        setQuotaModalItem(ds);
-                        setQuotaSelectedOption(ds.quota || "Không giới hạn");
-                        setQuotaDropdownOpen(false);
-                      }}
-                      onEditDataset={(ds) => {
-                        const parts = ds.name.split("/");
-                        setEditDsName(parts[parts.length - 1] || parts[0]);
-                        setEditDsPool(ds.pool);
-                        setEditDsQuota(ds.quota || "Không giới hạn");
-                        setEditPoolDropdownOpen(false);
-                        setEditQuotaDropdownOpen(false);
-                        setEditModalItem(ds);
-                      }}
-                      onDeleteDataset={(ds) => setDeleteModalItem(ds)}
-                    />
-                  ))
-                )}
+                {visibleNodes.map(({ node, depth }, idx) => (
+                  <DatasetTreeRow
+                    key={node.id}
+                    node={node}
+                    depth={depth}
+                    isLast={idx === visibleNodes.length - 1}
+                    selectedId={selectedNodeId}
+                    expandedIds={expandedNodeIds}
+                    onToggleExpand={handleToggleExpand}
+                    onSelectNode={handleSelectNode}
+                    onManageQuota={(ds) => {
+                      setQuotaModalItem(ds);
+                      setQuotaSelectedOption(ds.quota || "Không giới hạn");
+                      setQuotaDropdownOpen(false);
+                    }}
+                    onEditDataset={(ds) => {
+                      const parts = ds.name.split("/");
+                      setEditDsName(parts[parts.length - 1] || parts[0]);
+                      setEditDsPool(ds.pool);
+                      setEditDsQuota(ds.quota || "Không giới hạn");
+                      setEditPoolDropdownOpen(false);
+                      setEditQuotaDropdownOpen(false);
+                      setEditModalItem(ds);
+                    }}
+                    onDeleteDataset={(ds) => setDeleteModalItem(ds)}
+                  />
+                ))}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* Modal 1: Thêm Bộ dữ liệu mới (Tự động nhận diện mảng/thư mục khi đã chọn từ bảng) */}
+      {/* Modal 1: Thêm Tập dữ liệu mới */}
       {createModalOpen && (
         <Dialog
           open={createModalOpen}
@@ -1139,9 +1173,9 @@ export function DatasetsSection({
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {/* Nhập tên */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg-primary)" }}>Tên bộ dữ liệu mới:</span>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg-primary)" }}>Tên tập dữ liệu mới:</span>
               <TextField
-                hint="Tên bộ dữ liệu"
+                hint="Tên tập dữ liệu"
                 value={newDsName}
                 onChange={setNewDsName}
               />
@@ -1164,8 +1198,8 @@ export function DatasetsSection({
                 <span>
                   Đường dẫn: /mnt/
                   {selectedNode
-                    ? `${selectedNode.isPool ? selectedNode.name : selectedNode.fullName}/${newDsName.trim().replace(/^\/+|\/+$/g, "") || "..."}`
-                    : `${newDsPool}/${newDsName.trim().replace(/^\/+|\/+$/g, "") || "..."}`}
+                    ? `${selectedNode.isPool ? selectedNode.name : selectedNode.fullName}/${newDsName.trim().replace(/^\/+|\/+$/g, "")}`
+                    : `${newDsPool}/${newDsName.trim().replace(/^\/+|\/+$/g, "")}`}
                 </span>
               </div>
             </div>

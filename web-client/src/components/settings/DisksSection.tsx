@@ -2403,9 +2403,9 @@ export function DisksSection({
             >
               <Icon glyph="storage" size={26} color="var(--fg-secondary)" />
             </div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: "var(--fg-primary)", whiteSpace: "nowrap" }}>Chưa có Pool lưu trữ nào</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "var(--fg-primary)", whiteSpace: "nowrap" }}>Chưa có Nhóm lưu trữ nào</div>
             <div style={{ fontSize: 13.5, color: "var(--fg-secondary)", maxWidth: "none", lineHeight: 1.5, whiteSpace: "nowrap" }}>
-              Bạn có thể tạo mới mảng lưu trữ hoặc sử dụng tính năng Nhập Pool để tự động nhận diện và cấu hình ổ đĩa có sẵn.
+              Bạn có thể tạo mới mảng lưu trữ hoặc sử dụng tính năng Nhập Pool để nhận diện và cấu hình ổ đĩa có sẵn.
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
               <Button
