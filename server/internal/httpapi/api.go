@@ -292,6 +292,9 @@ func (a *API) Router() http.Handler {
 					r.Get("/devices/pending", a.handleAdminPendingDevices)
 					r.Post("/devices/{id}/approve", a.handleApproveDevice)
 					r.Post("/devices/{id}/deny", a.handleDenyDevice)
+
+					r.Get("/system/update/check", a.handleSystemUpdateCheck)
+					r.Post("/system/update/apply", a.handleSystemUpdateApply)
 				})
 
 				// tus does its own routing under this prefix

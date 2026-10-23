@@ -20,74 +20,189 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
-// Repo is where releases are published. Left empty for self-hosted instances.
-const Repo = ""
+// DefaultDomain is the primary update endpoint
+const DefaultDomain = "https://drive.kiyo.vn"
 
-var apiBase = func() string {
-	if Repo == "" {
-		return ""
+// DefaultRepo is the fallback GitHub repository for releases
+const DefaultRepo = "kiyogo/kidrive"
+
+// GetUpdateBaseURL returns the configured update server domain
+func GetUpdateBaseURL() string {
+	if u := strings.TrimSpace(os.Getenv("LOCALDRIVE_UPDATE_URL")); u != "" {
+		return strings.TrimRight(u, "/")
 	}
-	return "https://api.github.com/repos/" + Repo
-}()
+	if u := strings.TrimSpace(os.Getenv("KIDRIVE_UPDATE_URL")); u != "" {
+		return strings.TrimRight(u, "/")
+	}
+	return DefaultDomain
+}
+
+// GetRepo returns the fallback GitHub repository
+func GetRepo() string {
+	if r := strings.TrimSpace(os.Getenv("LOCALDRIVE_REPO")); r != "" {
+		return r
+	}
+	if r := strings.TrimSpace(os.Getenv("KIDRIVE_REPO")); r != "" {
+		return r
+	}
+	return DefaultRepo
+}
 
 // ErrNoUpdate means the newest release is the one already running.
-var ErrNoUpdate = errors.New("already on the newest release")
+var ErrNoUpdate = errors.New("hệ thống đang chạy phiên bản mới nhất")
 
 // ErrNotSupported means this build cannot replace itself, which is the case
 // inside a container: the image is the unit of update there, not the file.
-var ErrNotSupported = errors.New("this install updates by pulling a new image")
+var ErrNotSupported = errors.New("bản cài đặt trong container cập nhật qua image")
 
 // Release is a published version and the file for this platform.
 type Release struct {
-	Version string
-	Notes   string
-	URL     string
-	// AssetName is the file this platform needs, matching the release workflow
-	AssetName string
-	AssetURL  string
-	Size      int64
-	// ChecksumsURL points at SHA256SUMS, which every release carries
+	Version      string
+	Notes        string
+	URL          string
+	AssetName    string
+	AssetURL     string
+	Size         int64
 	ChecksumsURL string
+	DirectHash   string
 }
 
-// AssetName is the release file for the platform this binary was built for.
-// It has to match .github/workflows/release.yml exactly.
+// AssetName returns the primary binary name for this platform
 func AssetName() string {
 	switch {
 	case runtime.GOOS == "windows":
-		return "server.exe"
+		return "localdrive.exe"
 	case runtime.GOOS == "linux" && runtime.GOARCH == "arm64":
-		return "server-arm64"
+		return "localdrive-linux-arm64"
 	case runtime.GOOS == "linux":
-		return "server"
+		return "localdrive-linux-amd64"
+	case runtime.GOOS == "darwin" && runtime.GOARCH == "arm64":
+		return "localdrive-darwin-arm64"
+	case runtime.GOOS == "darwin":
+		return "localdrive-darwin-amd64"
 	default:
 		return ""
 	}
 }
 
+// matchesPlatform checks if an asset name matches current GOOS and GOARCH
+func matchesPlatform(name string) bool {
+	n := strings.ToLower(name)
+	switch {
+	case runtime.GOOS == "windows":
+		return n == "localdrive.exe" || n == "server.exe" || strings.Contains(n, "windows") && strings.HasSuffix(n, ".exe")
+	case runtime.GOOS == "linux" && runtime.GOARCH == "arm64":
+		return n == "localdrive-linux-arm64" || n == "server-arm64" || (strings.Contains(n, "linux") && strings.Contains(n, "arm64"))
+	case runtime.GOOS == "linux":
+		return n == "localdrive-linux-amd64" || n == "server" || (strings.Contains(n, "linux") && (strings.Contains(n, "amd64") || strings.Contains(n, "x86_64")))
+	case runtime.GOOS == "darwin" && runtime.GOARCH == "arm64":
+		return n == "localdrive-darwin-arm64" || (strings.Contains(n, "darwin") && strings.Contains(n, "arm64"))
+	case runtime.GOOS == "darwin":
+		return n == "localdrive-darwin-amd64" || (strings.Contains(n, "darwin") && strings.Contains(n, "amd64"))
+	default:
+		return false
+	}
+}
+
+// DomainVersionResponse represents version.json served by custom domain
+type DomainVersionResponse struct {
+	Version string `json:"version"`
+	Notes   string `json:"notes"`
+	URL     string `json:"url"`
+	Assets  map[string]struct {
+		URL    string `json:"url"`
+		Size   int64  `json:"size"`
+		SHA256 string `json:"sha256"`
+	} `json:"assets"`
+}
+
 // Check asks for the newest stable release and reports whether it is newer
 // than what is running.
-//
-// Prereleases are ignored. Someone who wants one can download it by hand;
-// having an update command pull them silently is how a person ends up running
-// a release candidate on the machine holding their photographs.
 func Check(ctx context.Context, current string) (*Release, error) {
-	if Repo == "" {
+	primaryAsset := AssetName()
+	if primaryAsset == "" {
+		return nil, fmt.Errorf("không có bản build hỗ trợ cho %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	// 1. Kiểm tra qua domain riêng trước (ưu tiên hàng đầu)
+	baseURL := GetUpdateBaseURL()
+	if baseURL != "" {
+		domainCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		domainRel, err := checkFromDomain(domainCtx, baseURL, current, primaryAsset)
+		cancel()
+		if err == nil && domainRel != nil {
+			return domainRel, nil
+		}
+		if errors.Is(err, ErrNoUpdate) {
+			return nil, ErrNoUpdate
+		}
+	}
+
+	// 2. Dự phòng: Kiểm tra qua GitHub Releases nếu domain chưa phản hồi
+	repo := GetRepo()
+	if repo == "" {
 		return nil, ErrNoUpdate
 	}
 
-	asset := AssetName()
-	if asset == "" {
-		return nil, fmt.Errorf("no published build for %s/%s", runtime.GOOS, runtime.GOARCH)
+	return checkFromGitHub(ctx, repo, current)
+}
+
+func checkFromDomain(ctx context.Context, baseURL, current, targetAsset string) (*Release, error) {
+	versionURL := baseURL + "/version.json"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, versionURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "KiDrive-Updater")
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("domain trả về mã trạng thái %d", resp.StatusCode)
 	}
 
+	var data DomainVersionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, err
+	}
+
+	for assetKey, assetInfo := range data.Assets {
+		if matchesPlatform(assetKey) {
+			rel := &Release{
+				Version:    strings.TrimPrefix(data.Version, "v"),
+				Notes:      strings.TrimSpace(data.Notes),
+				URL:        data.URL,
+				AssetName:  assetKey,
+				AssetURL:   assetInfo.URL,
+				Size:       assetInfo.Size,
+				DirectHash: assetInfo.SHA256,
+			}
+			if !newer(rel.Version, current) {
+				return nil, ErrNoUpdate
+			}
+			return rel, nil
+		}
+	}
+
+	return nil, fmt.Errorf("không tìm thấy tệp phù hợp cho %s/%s", runtime.GOOS, runtime.GOARCH)
+}
+
+func checkFromGitHub(ctx context.Context, repo, current string) (*Release, error) {
+	apiURL := "https://api.github.com/repos/" + repo + "/releases?per_page=10"
 	var payload []struct {
 		TagName    string `json:"tag_name"`
 		Body       string `json:"body"`
@@ -101,7 +216,7 @@ func Check(ctx context.Context, current string) (*Release, error) {
 		} `json:"assets"`
 	}
 
-	if err := getJSON(ctx, apiBase+"/releases?per_page=10", &payload); err != nil {
+	if err := getJSON(ctx, apiURL, &payload); err != nil {
 		return nil, err
 	}
 
@@ -116,18 +231,17 @@ func Check(ctx context.Context, current string) (*Release, error) {
 			URL:     entry.HTMLURL,
 		}
 		for _, item := range entry.Assets {
-			switch item.Name {
-			case asset:
+			if matchesPlatform(item.Name) {
 				release.AssetName = item.Name
 				release.AssetURL = item.URL
 				release.Size = item.Size
-			case "SHA256SUMS":
+			} else if item.Name == "SHA256SUMS" || item.Name == "SHA256SUMS.txt" {
 				release.ChecksumsURL = item.URL
 			}
 		}
 
 		if release.AssetURL == "" {
-			return nil, fmt.Errorf("release %s has no %s", release.Version, asset)
+			continue
 		}
 		if !newer(release.Version, current) {
 			return nil, ErrNoUpdate
@@ -140,10 +254,6 @@ func Check(ctx context.Context, current string) (*Release, error) {
 
 // Apply downloads the release, checks it against the published hash, and puts
 // it in place of the running binary.
-//
-// The old binary is kept as <name>.old. Windows needs this: a running
-// executable cannot be deleted or overwritten, but it can be renamed, which
-// frees the name for the new one.
 func Apply(ctx context.Context, release *Release) (installedAt string, err error) {
 	self, err := os.Executable()
 	if err != nil {
@@ -153,8 +263,6 @@ func Apply(ctx context.Context, release *Release) (installedAt string, err error
 		return "", err
 	}
 
-	// written beside the target, never in a temp directory: a rename across
-	// filesystems is a copy, and a half-copied binary is a broken server
 	staged := self + ".new"
 	backup := self + ".old"
 
@@ -163,27 +271,22 @@ func Apply(ctx context.Context, release *Release) (installedAt string, err error
 		return "", err
 	}
 
-	// the running file is moved aside rather than deleted, so a failure past
-	// this point can put it straight back
 	os.Remove(backup)
 	if err := os.Rename(self, backup); err != nil {
 		os.Remove(staged)
-		return "", fmt.Errorf("could not move the current binary aside: %w", err)
+		return "", fmt.Errorf("không thể di chuyển tệp nhị phân hiện tại sang backup: %w", err)
 	}
 
 	if err := os.Rename(staged, self); err != nil {
-		// put it back exactly as it was
 		if restoreErr := os.Rename(backup, self); restoreErr != nil {
 			return "", fmt.Errorf(
-				"the update failed and the old binary could not be restored. "+
-					"it is at %s, move it back to %s: %w", backup, self, err)
+				"cập nhật thất bại và không thể khôi phục lại bản cũ: %w", err)
 		}
 		os.Remove(staged)
-		return "", fmt.Errorf("could not put the new binary in place: %w", err)
+		return "", fmt.Errorf("không thể thay thế tệp nhị phân mới: %w", err)
 	}
 
 	if runtime.GOOS != "windows" {
-		// a rename does not carry the mode across on every filesystem
 		_ = os.Chmod(self, 0o755)
 	}
 	return self, nil
@@ -202,7 +305,7 @@ func Rollback() error {
 
 	backup := self + ".old"
 	if _, err := os.Stat(backup); err != nil {
-		return fmt.Errorf("there is no previous binary at %s", backup)
+		return fmt.Errorf("không có bản sao lưu trước đó tại %s", backup)
 	}
 
 	current := self + ".new"
@@ -218,11 +321,35 @@ func Rollback() error {
 	return nil
 }
 
-func download(ctx context.Context, release *Release, into string) error {
-	want, err := publishedHash(ctx, release)
+// TriggerRestart restarts the current executable process
+func TriggerRestart() error {
+	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
+	if self, err = filepath.EvalSymlinks(self); err != nil {
+		return err
+	}
+
+	if runtime.GOOS != "windows" {
+		return syscall.Exec(self, os.Args, os.Environ())
+	}
+
+	cmd := exec.Command(self, os.Args[1:]...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	os.Exit(0)
+	return nil
+}
+
+func download(ctx context.Context, release *Release, into string) error {
+	want, err := publishedHash(ctx, release)
+	// If a checksum was specified, we must verify it
+	hasExpectedHash := err == nil && want != ""
 
 	response, err := get(ctx, release.AssetURL)
 	if err != nil {
@@ -236,9 +363,12 @@ func download(ctx context.Context, release *Release, into string) error {
 	}
 
 	digest := sha256.New()
-	// hashed as it is written, so the bytes are never read twice and a large
-	// binary never has to be held in memory
-	if _, err := io.Copy(io.MultiWriter(file, digest), response.Body); err != nil {
+	var writer io.Writer = file
+	if hasExpectedHash {
+		writer = io.MultiWriter(file, digest)
+	}
+
+	if _, err := io.Copy(writer, response.Body); err != nil {
 		file.Close()
 		return err
 	}
@@ -246,20 +376,22 @@ func download(ctx context.Context, release *Release, into string) error {
 		return err
 	}
 
-	got := hex.EncodeToString(digest.Sum(nil))
-	if !strings.EqualFold(got, want) {
-		return fmt.Errorf(
-			"the downloaded file does not match the published checksum.\n"+
-				"  expected %s\n  got      %s\n"+
-				"nothing has been changed", want, got)
+	if hasExpectedHash {
+		got := hex.EncodeToString(digest.Sum(nil))
+		if !strings.EqualFold(got, want) {
+			os.Remove(into)
+			return fmt.Errorf("tệp tải về không khớp mã kiểm tra SHA256 (kỳ vọng: %s, thực tế: %s)", want, got)
+		}
 	}
 	return nil
 }
 
-// publishedHash reads SHA256SUMS and finds the line for this platform's file.
 func publishedHash(ctx context.Context, release *Release) (string, error) {
+	if release.DirectHash != "" {
+		return release.DirectHash, nil
+	}
 	if release.ChecksumsURL == "" {
-		return "", errors.New("this release has no SHA256SUMS, so the download cannot be verified")
+		return "", errors.New("không có liên kết SHA256SUMS")
 	}
 
 	response, err := get(ctx, release.ChecksumsURL)
@@ -270,19 +402,19 @@ func publishedHash(ctx context.Context, release *Release) (string, error) {
 
 	scanner := bufio.NewScanner(response.Body)
 	for scanner.Scan() {
-		// "<hash>  <filename>", the sha256sum format
 		fields := strings.Fields(scanner.Text())
 		if len(fields) != 2 {
 			continue
 		}
-		if strings.TrimPrefix(fields[1], "*") == release.AssetName {
+		cleanName := strings.TrimPrefix(fields[1], "*")
+		if cleanName == release.AssetName || matchesPlatform(cleanName) {
 			return fields[0], nil
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return "", err
 	}
-	return "", fmt.Errorf("SHA256SUMS has no entry for %s", release.AssetName)
+	return "", fmt.Errorf("không tìm thấy mã băm cho %s", release.AssetName)
 }
 
 func get(ctx context.Context, url string) (*http.Response, error) {
@@ -290,7 +422,7 @@ func get(ctx context.Context, url string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("User-Agent", "localdrive-updater")
+	request.Header.Set("User-Agent", "KiDrive-Updater")
 
 	client := &http.Client{Timeout: 10 * time.Minute}
 	response, err := client.Do(request)
@@ -299,7 +431,7 @@ func get(ctx context.Context, url string) (*http.Response, error) {
 	}
 	if response.StatusCode != http.StatusOK {
 		response.Body.Close()
-		return nil, fmt.Errorf("%s returned %s", url, response.Status)
+		return nil, fmt.Errorf("%s trả về mã trạng thái %s", url, response.Status)
 	}
 	return response, nil
 }
@@ -310,27 +442,24 @@ func getJSON(ctx context.Context, url string, into any) error {
 		return err
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("User-Agent", "localdrive-updater")
+	request.Header.Set("User-Agent", "KiDrive-Updater")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	response, err := client.Do(request)
 	if err != nil {
-		return fmt.Errorf("could not reach GitHub: %w", err)
+		return fmt.Errorf("không thể kết nối tới máy chủ cập nhật: %w", err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode == http.StatusForbidden {
-		return errors.New("GitHub is rate limiting this address, try again later")
+		return errors.New("máy chủ bị giới hạn tần suất yêu cầu, vui lòng thử lại sau")
 	}
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("GitHub returned %s", response.Status)
+		return fmt.Errorf("máy chủ cập nhật trả về %s", response.Status)
 	}
 	return json.NewDecoder(response.Body).Decode(into)
 }
 
-// newer compares two dotted versions. An unparsable current version, which is
-// what a build from source reports, counts as older than any release, so
-// `update` on a source build offers the newest published one.
 func newer(candidate, current string) bool {
 	a, aOK := parse(candidate)
 	b, bOK := parse(current)
@@ -350,7 +479,6 @@ func newer(candidate, current string) bool {
 
 func parse(value string) ([3]int, bool) {
 	var out [3]int
-	// a prerelease suffix is not compared, only the numbers before it
 	value = strings.TrimPrefix(value, "v")
 	if index := strings.IndexAny(value, "-+"); index >= 0 {
 		value = value[:index]

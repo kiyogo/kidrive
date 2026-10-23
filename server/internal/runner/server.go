@@ -18,6 +18,7 @@ import (
 	"github.com/MultiX0/LocalDrive/server/internal/app"
 	"github.com/MultiX0/LocalDrive/server/internal/config"
 	"github.com/MultiX0/LocalDrive/server/internal/httpapi"
+	"github.com/MultiX0/LocalDrive/server/internal/updater"
 	"github.com/MultiX0/LocalDrive/server/internal/webui"
 )
 
@@ -161,6 +162,31 @@ func runServer(args []string) error {
 			}
 		}()
 	}
+
+	// Kiểm tra phiên bản mới định kỳ (ưu tiên domain drive.kiyo.vn và dự phòng GitHub)
+	go func() {
+		time.Sleep(30 * time.Second)
+		ticker := time.NewTicker(12 * time.Hour)
+		defer ticker.Stop()
+
+		checkNewVersion := func() {
+			checkCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if rel, err := updater.Check(checkCtx, Version); err == nil && rel != nil {
+				log.Info("Đã có bản cập nhật phiên bản mới", "version", rel.Version, "url", rel.URL)
+			}
+		}
+
+		checkNewVersion()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				checkNewVersion()
+			}
+		}
+	}()
 
 	select {
 	case err := <-errCh:

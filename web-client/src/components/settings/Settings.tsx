@@ -1099,6 +1099,58 @@ function AboutRow({
 function AboutSection({ onBack, embedded }: { onBack?: () => void; embedded?: boolean }) {
   const t = useL10n();
   const version = "0.0.1 (1)";
+  const [checking, setChecking] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{
+    hasUpdate: boolean;
+    latestVersion?: string;
+    notes?: string;
+    url?: string;
+  } | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState("");
+
+  const handleCheckUpdate = async () => {
+    setChecking(true);
+    setUpdateMsg("");
+    try {
+      const res = await api.get<{
+        has_update: boolean;
+        latest_version?: string;
+        notes?: string;
+        url?: string;
+      }>("/api/v1/admin/system/update/check");
+      if (res && res.has_update) {
+        setUpdateInfo({
+          hasUpdate: true,
+          latestVersion: res.latest_version,
+          notes: res.notes,
+          url: res.url,
+        });
+      } else {
+        setUpdateInfo({ hasUpdate: false });
+      }
+    } catch {
+      setUpdateInfo({ hasUpdate: false });
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const handleApplyUpdate = async () => {
+    if (!confirm("Xác nhận cập nhật hệ thống lên phiên bản mới?")) return;
+    setUpdating(true);
+    setUpdateMsg("Đang tải và cập nhật phiên bản mới, vui lòng chờ...");
+    try {
+      await api.post("/api/v1/admin/system/update/apply", {});
+      setUpdateMsg("Đang khởi động lại máy chủ. Hệ thống sẽ làm mới sau giây lát...");
+      setTimeout(() => {
+        window.location.reload();
+      }, 6000);
+    } catch (e: any) {
+      setUpdating(false);
+      setUpdateMsg("Lỗi khi cập nhật: " + (e?.message || "Không thể kết nối"));
+    }
+  };
 
   return (
     <Page title={t.settingsAbout} onBack={onBack} embedded={embedded}>
@@ -1120,7 +1172,52 @@ function AboutSection({ onBack, embedded }: { onBack?: () => void; embedded?: bo
 
       <SettingGroup title={t.versionSection}>
         <AboutRow label={t.versionInstalled} value={version} />
-        <AboutRow showDivider label={t.updateCheck} value={t.updateManualOnly} />
+        <AboutRow
+          showDivider
+          label="Kiểm tra phiên bản"
+          value={checking ? "Đang kiểm tra..." : "Kiểm tra ngay"}
+          onTap={checking || updating ? undefined : handleCheckUpdate}
+        />
+        {updateInfo?.hasUpdate && (
+          <div style={{ padding: "12px 16px", background: "rgba(34, 197, 94, 0.1)", borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ color: "#22c55e", fontWeight: 600, fontSize: 13 }}>
+              Đã có phiên bản mới: v{updateInfo.latestVersion}
+            </div>
+            {updateInfo.notes && (
+              <div style={{ fontSize: 12, color: "var(--fg-secondary)", whiteSpace: "pre-wrap" }}>
+                {updateInfo.notes}
+              </div>
+            )}
+            <button
+              disabled={updating}
+              onClick={handleApplyUpdate}
+              style={{
+                background: "#22c55e",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: 8,
+                padding: "8px 16px",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: updating ? "not-allowed" : "pointer",
+                marginTop: 4,
+                width: "fit-content",
+              }}
+            >
+              {updating ? "Đang xử lý..." : "Cập nhật ngay"}
+            </button>
+            {updateMsg && (
+              <div style={{ fontSize: 12, color: "var(--fg-primary)", marginTop: 4 }}>
+                {updateMsg}
+              </div>
+            )}
+          </div>
+        )}
+        {updateInfo && !updateInfo.hasUpdate && (
+          <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", fontSize: 12, color: "var(--fg-secondary)" }}>
+            ✓ Hệ thống đang chạy phiên bản mới nhất.
+          </div>
+        )}
       </SettingGroup>
 
       <SettingGroup title="Project">
