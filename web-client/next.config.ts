@@ -1,15 +1,14 @@
 import type { NextConfig } from "next";
 
-const isExport = process.env.NEXT_EXPORT === "true";
+const isDev = process.env.NODE_ENV === "development";
 
 const nextConfig: NextConfig = {
-  output: isExport ? "export" : undefined,
+  output: isDev ? undefined : "export",
   images: {
     unoptimized: true,
   },
-  ...(isExport
-    ? {}
-    : {
+  ...(isDev
+    ? {
         async rewrites() {
           return [
             {
@@ -22,7 +21,8 @@ const nextConfig: NextConfig = {
             },
           ];
         },
-      }),
+      }
+    : {}),
 };
 
 export default nextConfig;
