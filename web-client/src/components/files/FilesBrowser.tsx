@@ -552,9 +552,26 @@ export function FilesBrowser({
         }
 
         const accessible = sysDatasets.filter((ds) => getDatasetPerm(ds.name).read);
-        // Only top-level root datasets (not child datasets whose parent is also accessible)
+        // Chỉ hiển thị dataset ở cấp cao nhất (Root), loại bỏ hoàn toàn các dataset con
         const rootDatasets = accessible.filter((ds) => {
-          return !accessible.some((other) => other.name !== ds.name && ds.name.startsWith(other.name + "/"));
+          const dsNorm = (ds.name || "").toLowerCase().trim().replace(/^\/+|\/+$/g, "");
+          const slashParts = dsNorm.split("/").filter(Boolean);
+          if (slashParts.length > 1) {
+            const poolPrefix = slashParts[0];
+            const hasAncestor = accessible.some((other) => {
+              const otherNorm = (other.name || "").toLowerCase().trim().replace(/^\/+|\/+$/g, "");
+              const otherPool = (other.pool || "").toLowerCase().trim();
+              if (otherNorm === dsNorm) return false;
+              if (dsNorm.startsWith(otherNorm + "/")) return true;
+              if (otherNorm === poolPrefix || otherPool === poolPrefix) return true;
+              return false;
+            });
+            if (hasAncestor) return false;
+          }
+          return !accessible.some((other) => {
+            const otherNorm = (other.name || "").toLowerCase().trim().replace(/^\/+|\/+$/g, "");
+            return otherNorm !== dsNorm && dsNorm.startsWith(otherNorm + "/");
+          });
         });
 
         const datasetNodes: NodeModel[] = [];

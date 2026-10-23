@@ -45,7 +45,12 @@ function FolderTreeItem({
   onSelect: (node: FolderTreeNode) => void;
   onToggle: (id: string, e: React.MouseEvent) => void;
 }) {
-  const isSelected = selectedPath === node.path;
+  const isSelected = Boolean(
+    selectedPath &&
+    node.path &&
+    (selectedPath === node.path ||
+      selectedPath.replace(/\/+$/, "") === node.path.replace(/\/+$/, ""))
+  );
   const hasChildren = !!node.children && node.children.length > 0;
   const isExpanded = expandedIds.has(node.id);
 
@@ -226,21 +231,25 @@ export function NetworkSharesSection({
     try {
       const res = await api.get<{ tree: FolderTreeNode[] }>(Api.adminSharesTree);
       if (res?.tree && res.tree.length > 0) {
-        const root = res.tree[0];
-        const nodes =
-          res.tree.length === 1 && root?.name === "/" && root.children && root.children.length > 0
-            ? root.children
-            : res.tree;
-        setFolderTree(nodes);
-        setExpandedNodeIds((prev) => {
-          const next = new Set(prev);
-          nodes.forEach((n) => {
+        let nodes = res.tree;
+        if (nodes.length === 1 && nodes[0]?.name === "/" && nodes[0].children && nodes[0].children.length > 0) {
+          nodes = nodes[0].children;
+        }
+
+        // Tự động mở rộng tất cả các cấp thư mục để người dùng thấy rõ cấu trúc cây
+        const allIds = new Set<string>();
+        const collectIds = (items: FolderTreeNode[]) => {
+          items.forEach((n) => {
+            allIds.add(n.id);
             if (n.children && n.children.length > 0) {
-              next.add(n.id);
+              collectIds(n.children);
             }
           });
-          return next;
-        });
+        };
+        collectIds(nodes);
+
+        setFolderTree(nodes);
+        setExpandedNodeIds(allIds);
       } else {
         setFolderTree([]);
       }
@@ -305,7 +314,7 @@ export function NetworkSharesSection({
     setEditingShareId(null);
     setShareName("");
     setPurpose("Chia sẻ mặc định");
-    setSharePath("/");
+    setSharePath("");
     setExpandedNodeIds(new Set());
     setPurposeDropdownOpen(false);
     setShareDescription("");
@@ -614,7 +623,7 @@ export function NetworkSharesSection({
                         type="text"
                         value={sharePath}
                         onChange={(e) => setSharePath(e.target.value)}
-                        placeholder="/"
+                        placeholder="Chọn thư mục bên dưới hoặc nhập đường dẫn..."
                         style={{
                           width: "100%",
                           border: "none",
@@ -653,13 +662,9 @@ export function NetworkSharesSection({
                             selectedPath={sharePath}
                             expandedIds={expandedNodeIds}
                             onSelect={(node) => {
-                              if (sharePath === node.path) {
-                                setSharePath("/");
-                              } else {
-                                setSharePath(node.path);
-                                if (!shareName.trim()) {
-                                  setShareName(node.name === "/" ? "root" : node.name);
-                                }
+                              setSharePath(node.path);
+                              if (!shareName.trim()) {
+                                setShareName(node.name === "/" ? "root" : node.name);
                               }
                               if (node.children && node.children.length > 0) {
                                 setExpandedNodeIds((prev) => new Set(prev).add(node.id));

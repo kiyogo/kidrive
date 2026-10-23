@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"bufio"
+	"errors"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -70,14 +71,15 @@ func detectZFSPools() []ZFSPoolInfo {
 				size, _ := strconv.ParseInt(strings.TrimSpace(fields[1]), 10, 64)
 				alloc, _ := strconv.ParseInt(strings.TrimSpace(fields[2]), 10, 64)
 				health := strings.TrimSpace(fields[4])
-
 				datasets := listZFSDatasets(name)
+				disks := getZFSPoolDisks(name)
 
 				pools = append(pools, ZFSPoolInfo{
 					Name:       name,
 					State:      health,
 					Status:     "Mảng lưu trữ ZFS đã kết nối",
 					Layout:     "ZFS",
+					Disks:      disks,
 					TotalBytes: size,
 					UsedBytes:  alloc,
 					Imported:   true,
@@ -220,4 +222,80 @@ func exportZFSPoolCmd(poolName string, force bool) error {
 	}
 	args = append(args, poolName)
 	return exec.Command("zpool", args...).Run()
+}
+
+func getZFSPoolDisks(poolName string) []string {
+	out, err := exec.Command("zpool", "status", "-P", poolName).Output()
+	if err != nil {
+		out, err = exec.Command("zpool", "status", poolName).Output()
+		if err != nil {
+			return nil
+		}
+	}
+	var disks []string
+	seen := make(map[string]bool)
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	inConfig := false
+	for scanner.Scan() {
+		trimmed := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(trimmed, "config:") {
+			inConfig = true
+			continue
+		}
+		if !inConfig {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "errors:") {
+			break
+		}
+		fields := strings.Fields(trimmed)
+		if len(fields) > 0 {
+			devName := fields[0]
+			devLower := strings.ToLower(devName)
+			if devName == poolName ||
+				strings.EqualFold(devName, "NAME") ||
+				strings.EqualFold(devName, "mirror") ||
+				strings.HasPrefix(devLower, "mirror-") ||
+				strings.HasPrefix(devLower, "raidz") ||
+				strings.HasPrefix(devLower, "draid") ||
+				strings.HasPrefix(devLower, "spare") ||
+				strings.HasPrefix(devLower, "spares") ||
+				strings.HasPrefix(devLower, "log") ||
+				strings.HasPrefix(devLower, "logs") ||
+				strings.HasPrefix(devLower, "cache") ||
+				strings.EqualFold(devName, "state") ||
+				strings.EqualFold(devName, "read") ||
+				strings.EqualFold(devName, "write") ||
+				strings.EqualFold(devName, "cksum") {
+				continue
+			}
+			devPath := devName
+			if !strings.HasPrefix(devPath, "/dev/") && !strings.HasPrefix(devPath, "/") {
+				devPath = "/dev/" + devName
+			}
+			if !seen[devPath] {
+				seen[devPath] = true
+				disks = append(disks, devPath)
+			}
+		}
+	}
+	return disks
+}
+
+func getZFSPoolCapacity(poolName string) (int64, int64, string, error) {
+	out, err := exec.Command("zpool", "list", "-H", "-p", "-o", "size,alloc,free,health", poolName).Output()
+	if err != nil {
+		return 0, 0, "", err
+	}
+	fields := strings.Split(strings.TrimSpace(string(out)), "\t")
+	if len(fields) < 4 {
+		fields = strings.Fields(strings.TrimSpace(string(out)))
+	}
+	if len(fields) >= 4 {
+		size, _ := strconv.ParseInt(strings.TrimSpace(fields[0]), 10, 64)
+		alloc, _ := strconv.ParseInt(strings.TrimSpace(fields[1]), 10, 64)
+		health := strings.TrimSpace(fields[3])
+		return size, alloc, health, nil
+	}
+	return 0, 0, "", errors.New("invalid zpool list output")
 }

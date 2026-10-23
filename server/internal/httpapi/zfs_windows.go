@@ -46,3 +46,11 @@ func importZFSPoolCmd(poolNameOrID string) error {
 func exportZFSPoolCmd(poolName string, force bool) error {
 	return nil
 }
+
+func getZFSPoolDisks(poolName string) []string {
+	return nil
+}
+
+func getZFSPoolCapacity(poolName string) (int64, int64, string, error) {
+	return 0, 0, "", nil
+}

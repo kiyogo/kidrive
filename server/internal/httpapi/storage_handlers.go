@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -883,8 +884,24 @@ func readSubdirs(dirPath string, maxDepth int) []FolderTreeNodeDTO {
 }
 
 func (a *API) handleShareFolderTree(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.Read().QueryContext(r.Context(),
-		`SELECT id, name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY pool ASC, name ASC`)
+	ctx := r.Context()
+
+	// 1. Get pools
+	poolNames := make(map[string]bool)
+	pRows, err := a.db.Read().QueryContext(ctx, `SELECT name FROM storage_pools`)
+	if err == nil {
+		for pRows.Next() {
+			var pn string
+			if pRows.Scan(&pn) == nil && strings.TrimSpace(pn) != "" {
+				poolNames[strings.TrimSpace(pn)] = true
+			}
+		}
+		pRows.Close()
+	}
+
+	// 2. Get datasets
+	rows, err := a.db.Read().QueryContext(ctx,
+		`SELECT id, name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY name ASC`)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -902,62 +919,135 @@ func (a *API) handleShareFolderTree(w http.ResponseWriter, r *http.Request) {
 		var d rawDs
 		if err := rows.Scan(&d.id, &d.name, &d.pool, &d.mount); err == nil {
 			rawList = append(rawList, d)
-		}
-	}
-
-	nodeMap := make(map[string]*FolderTreeNodeDTO)
-	var rootNodes []FolderTreeNodeDTO
-
-	for _, d := range rawList {
-		normName := strings.Trim(strings.TrimSpace(d.name), "/")
-		parts := strings.Split(normName, "/")
-		leafName := parts[len(parts)-1]
-		isDrive := len(parts) == 1
-
-		subdirs := readSubdirs(d.mount, 4)
-		node := &FolderTreeNodeDTO{
-			ID:       "ds-" + d.id,
-			Name:     leafName,
-			Path:     d.mount,
-			IsDrive:  isDrive,
-			Children: subdirs,
-		}
-		nodeMap[normName] = node
-	}
-
-	for _, d := range rawList {
-		normName := strings.Trim(strings.TrimSpace(d.name), "/")
-		node := nodeMap[normName]
-		if node == nil {
-			continue
-		}
-
-		parts := strings.Split(normName, "/")
-		if len(parts) == 1 {
-			rootNodes = append(rootNodes, *node)
-		} else {
-			parentPath := strings.Join(parts[:len(parts)-1], "/")
-			if parentNode, ok := nodeMap[parentPath]; ok {
-				// Deduplicate by name if readSubdirs already found this directory
-				alreadyHas := false
-				for idx, ch := range parentNode.Children {
-					if ch.Name == node.Name {
-						parentNode.Children[idx] = *node
-						alreadyHas = true
-						break
-					}
-				}
-				if !alreadyHas {
-					parentNode.Children = append(parentNode.Children, *node)
-				}
-			} else {
-				rootNodes = append(rootNodes, *node)
+			norm := strings.Trim(strings.TrimSpace(d.name), "/")
+			parts := strings.Split(norm, "/")
+			if len(parts) > 0 && parts[0] != "" {
+				poolNames[parts[0]] = true
 			}
 		}
 	}
 
+	type TreeNode struct {
+		ID       string      `json:"id"`
+		Name     string      `json:"name"`
+		Path     string      `json:"path"`
+		IsDrive  bool        `json:"isDrive,omitempty"`
+		Children []*TreeNode `json:"children,omitempty"`
+	}
+
+	nodeMap := make(map[string]*TreeNode)
+	var rootList []*TreeNode
+
+	// Create root drive node for each pool
+	for pName := range poolNames {
+		pMount := a.resolveRealMountPath(pName, "")
+		pNode := &TreeNode{
+			ID:       "pool-" + pName,
+			Name:     pName,
+			Path:     pMount,
+			IsDrive:  true,
+			Children: make([]*TreeNode, 0),
+		}
+		nodeMap[strings.ToLower(pName)] = pNode
+		rootList = append(rootList, pNode)
+	}
+
+	// Attach datasets hierarchically
+	for _, d := range rawList {
+		norm := strings.Trim(strings.TrimSpace(d.name), "/")
+		parts := strings.Split(norm, "/")
+		if len(parts) == 0 || parts[0] == "" {
+			continue
+		}
+
+		realMount := a.resolveRealMountPath(d.name, d.mount)
+		if realMount != d.mount && realMount != "" {
+			_ = a.db.Write(ctx, func(c context.Context, tx *sql.Tx) error {
+				_, wErr := tx.ExecContext(c, `UPDATE datasets SET mount = ? WHERE id = ?`, realMount, d.id)
+				return wErr
+			})
+			d.mount = realMount
+		}
+
+		poolPart := parts[0]
+		poolNode := nodeMap[strings.ToLower(poolPart)]
+		if poolNode == nil {
+			pMount := a.resolveRealMountPath(poolPart, "")
+			poolNode = &TreeNode{
+				ID:       "pool-" + poolPart,
+				Name:     poolPart,
+				Path:     pMount,
+				IsDrive:  true,
+				Children: make([]*TreeNode, 0),
+			}
+			nodeMap[strings.ToLower(poolPart)] = poolNode
+			rootList = append(rootList, poolNode)
+		}
+
+		if len(parts) == 1 {
+			if d.mount != "" {
+				poolNode.Path = d.mount
+			}
+			continue
+		}
+
+		curPath := poolPart
+		for i := 1; i < len(parts); i++ {
+			partName := parts[i]
+			prevPath := curPath
+			curPath = curPath + "/" + partName
+			curKey := strings.ToLower(curPath)
+
+			existing := nodeMap[curKey]
+			if existing == nil {
+				isLeaf := i == len(parts)-1
+				nodePath := d.mount
+				if !isLeaf {
+					nodePath = a.resolveRealMountPath(curPath, "")
+				}
+				var subdirs []*TreeNode
+				if isLeaf && nodePath != "" {
+					for _, sd := range readSubdirs(nodePath, 3) {
+						subdirs = append(subdirs, &TreeNode{
+							ID:      sd.ID,
+							Name:    sd.Name,
+							Path:    sd.Path,
+							IsDrive: false,
+						})
+					}
+				}
+				childNode := &TreeNode{
+					ID:       "ds-" + d.id + "-" + partName,
+					Name:     partName,
+					Path:     nodePath,
+					IsDrive:  false,
+					Children: subdirs,
+				}
+				nodeMap[curKey] = childNode
+
+				parentNode := nodeMap[strings.ToLower(prevPath)]
+				if parentNode != nil {
+					parentNode.Children = append(parentNode.Children, childNode)
+				}
+			}
+		}
+	}
+
+	var sortSubtree func(nodes []*TreeNode)
+	sortSubtree = func(nodes []*TreeNode) {
+		sort.Slice(nodes, func(i, j int) bool {
+			return strings.ToLower(nodes[i].Name) < strings.ToLower(nodes[j].Name)
+		})
+		for _, n := range nodes {
+			if len(n.Children) > 0 {
+				sortSubtree(n.Children)
+			}
+		}
+	}
+	sortSubtree(rootList)
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"tree": rootNodes,
+		"tree": rootList,
 	})
 }
 
@@ -996,8 +1086,64 @@ func (a *API) handleListPools(w http.ResponseWriter, r *http.Request) {
 			p.Disks = []string{}
 		}
 
-		// Tính toán dung lượng thật sự 100% dựa trên phần cứng máy tính
-		if len(p.Disks) > 0 && len(driveMap) > 0 {
+		// 1. Nếu là mảng ZFS (OpenZFS / TrueNAS): Lấy 100% số ổ đĩa và dung lượng thực tế từ OpenZFS
+		isZFS := strings.EqualFold(p.Layout, "ZFS")
+		if hasZFSTools() {
+			realDisks := getZFSPoolDisks(p.Name)
+			if len(realDisks) == 0 {
+				realDisks = getZFSPoolDisks(strings.ToUpper(p.Name))
+			}
+			if len(realDisks) == 0 {
+				realDisks = getZFSPoolDisks(strings.ToLower(p.Name))
+			}
+			if len(realDisks) > 0 {
+				p.Disks = realDisks
+				isZFS = true
+				p.Layout = "ZFS"
+			}
+
+			total, used, health, err := getZFSPoolCapacity(p.Name)
+			if err != nil || total == 0 {
+				total, used, health, err = getZFSPoolCapacity(strings.ToUpper(p.Name))
+			}
+			if err != nil || total == 0 {
+				total, used, health, err = getZFSPoolCapacity(strings.ToLower(p.Name))
+			}
+			if err == nil && total > 0 {
+				isZFS = true
+				p.Layout = "ZFS"
+				p.TotalBytes = total
+				p.UsedBytes = used
+				if health != "" {
+					p.Status = health
+				}
+			}
+
+			// Nếu UsedBytes hiển thị chưa đầy đủ (ví dụ chỉ có refer size của root dataset ~300MB),
+			// lấy tổng used_bytes thực tế của tất cả các datasets con thuộc pool này:
+			var dsSum int64
+			_ = a.db.Read().QueryRowContext(r.Context(),
+				`SELECT COALESCE(SUM(used_bytes), 0) FROM datasets WHERE (pool = ? OR pool = ? OR pool = ? OR name LIKE ? OR name LIKE ? OR name LIKE ?) AND status != 'deleted'`,
+				p.Name, strings.ToUpper(p.Name), strings.ToLower(p.Name),
+				p.Name+"/%", strings.ToUpper(p.Name)+"/%", strings.ToLower(p.Name)+"/%").Scan(&dsSum)
+			if dsSum > p.UsedBytes {
+				p.UsedBytes = dsSum
+			}
+
+			// Tự động đồng bộ và lưu vào DB để xóa bỏ triệt để dữ liệu ảo / số ổ đĩa sai (chỉ giữ đúng 2 ổ thực tế)
+			if len(p.Disks) > 0 || p.TotalBytes > 0 {
+				disksJSON, _ := json.Marshal(p.Disks)
+				_ = a.db.Write(r.Context(), func(c context.Context, tx *sql.Tx) error {
+					_, err := tx.ExecContext(c,
+						`UPDATE storage_pools SET total_bytes = ?, used_bytes = ?, disks_json = ?, status = ?, layout = 'ZFS' WHERE id = ? OR name = ?`,
+						p.TotalBytes, p.UsedBytes, string(disksJSON), p.Status, p.ID, p.Name)
+					return err
+				})
+			}
+		}
+
+		// 2. Tính toán dung lượng cho các mảng không phải ZFS
+		if !isZFS && len(p.Disks) > 0 && len(driveMap) > 0 {
 			var realTotal int64 = 0
 			var realUsed int64 = 0
 			var minSize int64 = 0
@@ -1892,12 +2038,37 @@ func (a *API) checkDatasetAccess(r *http.Request, datasetName string, needEditor
 }
 
 func (a *API) resolveRealMountPath(name, mount string) string {
-	cleanMount := filepath.Clean(mount)
-	if fi, err := os.Stat(cleanMount); err == nil && fi.IsDir() {
-		return cleanMount
+	trimmedName := strings.Trim(strings.TrimSpace(name), "/")
+
+	// 1. Nếu có ZFS tools, hỏi trực tiếp OpenZFS xem dataset này đang mount ở đâu
+	if hasZFSTools() && trimmedName != "" {
+		if out, err := exec.Command("zfs", "get", "-H", "-o", "value", "mountpoint", trimmedName).Output(); err == nil {
+			mp := strings.TrimSpace(string(out))
+			if mp != "" && mp != "none" && mp != "legacy" {
+				if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
+					return mp
+				}
+			}
+		}
+		if out, err := exec.Command("zfs", "list", "-H", "-o", "mountpoint", trimmedName).Output(); err == nil {
+			mp := strings.TrimSpace(string(out))
+			if mp != "" && mp != "none" && mp != "legacy" {
+				if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
+					return mp
+				}
+			}
+		}
 	}
 
-	trimmedName := strings.Trim(strings.TrimSpace(name), "/")
+	// 2. Kiểm tra mount truyền vào
+	cleanMount := filepath.Clean(mount)
+	if cleanMount != "" && cleanMount != "/" && cleanMount != "." {
+		if fi, err := os.Stat(cleanMount); err == nil && fi.IsDir() {
+			return cleanMount
+		}
+	}
+
+	// 3. Kiểm tra các thư mục mount thông dụng của TrueNAS / ZFS
 	candidates := []string{
 		filepath.Join("/mnt/zfs-recovery", trimmedName),
 		filepath.Join("/mnt", trimmedName),
@@ -1910,18 +2081,14 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 		}
 	}
 
-	if hasZFSTools() {
-		if out, err := exec.Command("zfs", "list", "-H", "-o", "mountpoint", trimmedName).Output(); err == nil {
-			mp := strings.TrimSpace(string(out))
-			if mp != "" && mp != "none" && mp != "legacy" {
-				if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
-					return mp
-				}
-			}
-		}
+	// 4. Dự phòng nếu chưa được mount vật lý
+	if cleanMount != "" && cleanMount != "." && cleanMount != "/" {
+		return cleanMount
 	}
-
-	return mount
+	if trimmedName != "" {
+		return "/mnt/" + trimmedName
+	}
+	return "/"
 }
 
 func (a *API) getDatasetMount(ctx context.Context, nameOrID string) (string, string, error) {

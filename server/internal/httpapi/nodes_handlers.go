@@ -246,17 +246,26 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 			var rootDsNodes []nodeDTO
 			for _, d := range accessible {
 				isChild := false
+				dLower := strings.ToLower(d.name)
 				for _, other := range accessible {
-					if other.name != d.name && strings.HasPrefix(d.name, other.name+"/") {
+					oLower := strings.ToLower(other.name)
+					if oLower != dLower && strings.HasPrefix(dLower, oLower+"/") {
 						isChild = true
 						break
 					}
 				}
-				if !isChild {
-					displayName := d.name
-					if idx := strings.LastIndex(d.name, "/"); idx != -1 {
-						displayName = d.name[idx+1:]
+				slashParts := strings.Split(strings.Trim(d.name, "/"), "/")
+				if len(slashParts) > 1 {
+					poolPrefix := strings.ToLower(slashParts[0])
+					for _, other := range accessible {
+						if strings.ToLower(other.name) == poolPrefix || strings.ToLower(other.pool) == poolPrefix {
+							isChild = true
+							break
+						}
 					}
+				}
+				if !isChild {
+					displayName := slashParts[len(slashParts)-1]
 					color := "azure"
 					if d.pool == "kiyo-pool" {
 						color = "grape"
@@ -277,16 +286,14 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			if len(rootDsNodes) > 0 || len(accessible) > 0 || !isAdmin {
-				writeJSON(w, http.StatusOK, map[string]any{
-					"nodes":       rootDsNodes,
-					"limit":       opts.Limit,
-					"offset":      opts.Offset,
-					"has_more":    false,
-					"next_offset": len(rootDsNodes),
-				})
-				return
-			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"nodes":       rootDsNodes,
+				"limit":       opts.Limit,
+				"offset":      opts.Offset,
+				"has_more":    false,
+				"next_offset": len(rootDsNodes),
+			})
+			return
 		}
 	}
 
