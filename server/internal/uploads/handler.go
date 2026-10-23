@@ -160,6 +160,12 @@ func translate(err error) error {
 		return handler.NewError("ERR_FORBIDDEN", "you cannot add to that folder", http.StatusForbidden)
 	case errors.Is(err, files.ErrQuota):
 		return handler.NewError("ERR_QUOTA", "Dung lượng lưu trữ đã đầy, không thể tải tệp lên", http.StatusInsufficientStorage)
+	case errors.Is(err, files.ErrNoStoragePool):
+		return handler.NewError("ERR_NO_STORAGE_POOL", "Máy chủ chưa cấu hình Nhóm lưu trữ (Storage Pool), không thể lưu tệp", http.StatusPreconditionRequired)
+	case errors.Is(err, files.ErrNoDataset):
+		return handler.NewError("ERR_NO_DATASET", "Máy chủ chưa cấu hình Tập dữ liệu (Dataset), không thể lưu tệp", http.StatusPreconditionRequired)
+	case errors.Is(err, files.ErrNoCategoryPermission):
+		return handler.NewError("ERR_NO_CATEGORY_PERM", "Tài khoản chưa được phân quyền danh mục lưu trữ (Tập dữ liệu), không thể lưu tệp", http.StatusForbidden)
 	case errors.Is(err, files.ErrInvalidName):
 		return handler.NewError("ERR_INVALID_NAME", "that filename cannot be used", http.StatusBadRequest)
 	case errors.Is(err, files.ErrNotAFolder):

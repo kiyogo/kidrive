@@ -97,6 +97,7 @@ export const Api = {
   adminSharesTree: `${prefix}/admin/shares/tree`,
 
   // storage pools
+  storageReadiness: `${prefix}/storage/readiness`,
   adminPools: `${prefix}/admin/pools`,
   adminPoolsDiscover: `${prefix}/admin/pools/discover`,
   adminPoolsImport: `${prefix}/admin/pools/import`,

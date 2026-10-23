@@ -11,6 +11,21 @@ import { isFolder, type NodeModel } from "./models";
 import { transfers } from "./upload";
 
 /**
+ * Check whether system has configured storage pools, datasets, and user permissions
+ */
+export async function checkStorageReadiness(): Promise<{ ready: boolean; message: string; code?: string }> {
+  try {
+    const res = await api.get<{ ready: boolean; message?: string; code?: string }>(Api.storageReadiness);
+    if (!res.ready) {
+      return { ready: false, message: res.message || "Hệ thống chưa sẵn sàng để lưu tệp.", code: res.code };
+    }
+    return { ready: true, message: "" };
+  } catch (err: any) {
+    return { ready: false, message: err?.message || "Không thể kiểm tra trạng thái lưu trữ." };
+  }
+}
+
+/**
  * Picking files and uncompressed folders, including the question that has to
  * be asked when a name is already taken. Ported from upload/widgets/duplicate_sheet.
  *
@@ -48,6 +63,11 @@ export function useUploader(parentId: string, onDone?: () => void) {
   const send = useCallback(
     async (list: File[], into: string, replacing?: Map<File, string>) => {
       if (!list.length) return;
+      const readiness = await checkStorageReadiness();
+      if (!readiness.ready) {
+        showToast(readiness.message, "error");
+        return;
+      }
       const totalSize = list.reduce((acc, f) => acc + (f.size || 0), 0);
       if (!checkQuota(totalSize)) return;
       await transfers.enqueue(list, into, onDone, replacing);
@@ -60,6 +80,11 @@ export function useUploader(parentId: string, onDone?: () => void) {
       if (!files) return;
       const list = Array.from(files);
       if (!list.length) return;
+      const readiness = await checkStorageReadiness();
+      if (!readiness.ready) {
+        showToast(readiness.message, "error");
+        return;
+      }
       const totalSize = list.reduce((acc, f) => acc + (f.size || 0), 0);
       if (!checkQuota(totalSize)) return;
 
@@ -79,6 +104,11 @@ export function useUploader(parentId: string, onDone?: () => void) {
     async (files: FileList | File[] | null, into = parentId) => {
       const list = files ? Array.from(files) : [];
       if (!list.length) return;
+      const readiness = await checkStorageReadiness();
+      if (!readiness.ready) {
+        showToast(readiness.message, "error");
+        return;
+      }
 
       const totalSize = list.reduce((acc, f) => acc + (f.size || 0), 0);
       if (!checkQuota(totalSize)) return;
@@ -122,6 +152,11 @@ export function useUploader(parentId: string, onDone?: () => void) {
   const dropDataTransfer = useCallback(
     async (dt: DataTransfer, into = parentId) => {
       if (!checkQuota()) return;
+      const readiness = await checkStorageReadiness();
+      if (!readiness.ready) {
+        showToast(readiness.message, "error");
+        return;
+      }
       const plan = await planDataTransfer(dt);
       const totalSize = plan.files.reduce((acc, f) => acc + (f.file.size || 0), 0);
       if (!checkQuota(totalSize)) return;

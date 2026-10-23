@@ -352,7 +352,7 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
         }
         return {
           ...u,
-          dataset_permissions: permsStr || (u.role === "admin" ? '{"/":"editor"}' : '{"DATA/Shares":"editor","DATA/Media":"viewer"}'),
+          dataset_permissions: permsStr || (u.role === "admin" ? '{"/":"editor"}' : "{}"),
         };
       });
       return {

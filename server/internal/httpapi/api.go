@@ -251,6 +251,7 @@ func (a *API) Router() http.Handler {
 				r.Get("/pools", a.handleListPools)
 				r.Get("/pools/discover", a.handleDiscoverImportablePool)
 				r.Post("/pools/import", a.handleImportPool)
+				r.Get("/storage/readiness", a.handleStorageReadiness)
 
 				r.Route("/admin", func(r chi.Router) {
 					r.Use(a.requireAdmin)

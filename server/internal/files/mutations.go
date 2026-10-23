@@ -3,6 +3,7 @@ package files
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -34,6 +35,9 @@ type CreateFolderParams struct {
 // CreateFolder makes a folder. A folder inside another folder inherits its
 // parent's library and owner; only a top-level folder chooses a library.
 func (s *Service) CreateFolder(ctx context.Context, p CreateFolderParams) (models.Node, error) {
+	if err := s.checkStorageAndPermissions(ctx, p.UserID); err != nil {
+		return models.Node{}, err
+	}
 	name := strings.TrimSpace(p.Name)
 	if err := pathsafe.ValidateName(name); err != nil {
 		return models.Node{}, fmt.Errorf("%w: %v", ErrInvalidName, err)
@@ -543,6 +547,9 @@ func (s *Service) releaseObjects(list []orphanObject) {
 // fits the owner's quota. Failing here means a client is told no at creation
 // time rather than after a long transfer.
 func (s *Service) PrepareUpload(ctx context.Context, userID, parentID, nodeID string, size int64) (libraryID, ownerID string, err error) {
+	if err := s.checkStorageAndPermissions(ctx, userID); err != nil {
+		return "", "", err
+	}
 	if nodeID != "" {
 		acc, err := s.Resolve(ctx, userID, nodeID)
 		if err != nil {
@@ -602,6 +609,70 @@ func (s *Service) checkQuota(ctx context.Context, ownerID string, delta int64) e
 	}
 	if used+delta > quota {
 		return fmt.Errorf("%w: %d bytes needed, %d available", ErrQuota, delta, quota-used)
+	}
+	return nil
+}
+
+func (s *Service) checkStorageAndPermissions(ctx context.Context, userID string) error {
+	var poolCount int
+	if err := s.database.Read().QueryRowContext(ctx, `SELECT COUNT(*) FROM storage_pools`).Scan(&poolCount); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	if poolCount == 0 {
+		return ErrNoStoragePool
+	}
+
+	var datasetCount int
+	if err := s.database.Read().QueryRowContext(ctx, `SELECT COUNT(*) FROM datasets WHERE status != 'deleted'`).Scan(&datasetCount); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	if datasetCount == 0 {
+		return ErrNoDataset
+	}
+
+	if userID == "" {
+		return nil
+	}
+
+	var role, perms string
+	err := s.database.Read().QueryRowContext(ctx, `SELECT role, COALESCE(dataset_permissions, '{}') FROM users WHERE id = ?`, userID).Scan(&role, &perms)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if role == "admin" {
+		return nil
+	}
+
+	perms = strings.TrimSpace(perms)
+	if perms == "" || perms == "{}" || perms == "null" {
+		return ErrNoCategoryPermission
+	}
+	var pMap map[string]any
+	if err := json.Unmarshal([]byte(perms), &pMap); err != nil || len(pMap) == 0 {
+		return ErrNoCategoryPermission
+	}
+	hasWrite := false
+	for _, v := range pMap {
+		if str, ok := v.(string); ok && (str == "editor" || str == "writer" || str == "owner") {
+			hasWrite = true
+			break
+		}
+		if obj, ok := v.(map[string]any); ok {
+			if wr, ok := obj["write"].(bool); ok && wr {
+				hasWrite = true
+				break
+			}
+		}
+	}
+	if !hasWrite {
+		return ErrNoCategoryPermission
 	}
 	return nil
 }

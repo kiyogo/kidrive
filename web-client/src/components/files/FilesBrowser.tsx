@@ -26,7 +26,7 @@ import { bytes, extensionOf, relative } from "@/lib/format";
 import { categoryOf, isFolder, type NodeModel } from "@/lib/models";
 import { colorForCategory, folderSwatches, wash } from "@/lib/tokens";
 import { useKeptIds } from "@/lib/offline";
-import { useUploader } from "@/lib/uploads";
+import { useUploader, checkStorageReadiness } from "@/lib/uploads";
 import { ShareSheet } from "@/components/share/ShareSheet";
 import { DetailsPane } from "./DetailsPane";
 import { bandStyle, hasPointer, rangeBetween, useFileKeys, useMarquee, useNodeDrag } from "./desktop";
@@ -184,6 +184,20 @@ export function FilesBrowser({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmDeleteNode, setConfirmDeleteNode] = useState<NodeModel | null>(null);
   const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
+  const [storageReadiness, setStorageReadiness] = useState<{ ready: boolean; message?: string; code?: string } | null>(null);
+
+  const refreshReadiness = useCallback(async () => {
+    try {
+      const res = await api.get<{ ready: boolean; message?: string; code?: string }>(Api.storageReadiness);
+      setStorageReadiness(res);
+    } catch {
+      setStorageReadiness(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshReadiness();
+  }, [refreshReadiness, folderId]);
 
   useEffect(() => {
     if (createFolderTrigger && createFolderTrigger > 0) {
@@ -191,8 +205,15 @@ export function FilesBrowser({
         toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này!", "error");
         return;
       }
-      setFolderName("");
-      setCreateFolderOpen(true);
+      void (async () => {
+        const readiness = await checkStorageReadiness();
+        if (!readiness.ready) {
+          toast(readiness.message, "error");
+          return;
+        }
+        setFolderName("");
+        setCreateFolderOpen(true);
+      })();
     }
   }, [createFolderTrigger, isReadOnly, toast]);
 
@@ -200,6 +221,11 @@ export function FilesBrowser({
     if (!folderName.trim()) return;
     if (isReadOnly) {
       toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này!", "error");
+      return;
+    }
+    const readiness = await checkStorageReadiness();
+    if (!readiness.ready) {
+      toast(readiness.message, "error");
       return;
     }
     setIsSubmitting(true);
@@ -327,6 +353,11 @@ export function FilesBrowser({
   const handleDatasetUpload = async (files: FileList) => {
     if (isReadOnly) {
       toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này, không thể tải lên!", "error");
+      return;
+    }
+    const readiness = await checkStorageReadiness();
+    if (!readiness.ready) {
+      toast(readiness.message, "error");
       return;
     }
     if (user && user.quota_bytes > 0) {
@@ -1102,6 +1133,46 @@ export function FilesBrowser({
         <Banner glyph="recent" message={t.trashRetentionNote({ days: 30 })} tint="var(--fg-secondary)" />
       )}
 
+      {storageReadiness && !storageReadiness.ready && (
+        <div style={{ margin: "0 16px 12px" }}>
+          <div
+            style={{
+              padding: "10px 16px",
+              background: "rgba(234, 134, 0, 0.08)",
+              border: "1px solid rgba(234, 134, 0, 0.28)",
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              color: "var(--fg-primary)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Icon glyph="storage" size={20} color="#ea8600" />
+              <div style={{ fontSize: 13, lineHeight: 1.4 }}>
+                <span style={{ fontWeight: 600, color: "#ea8600", marginRight: 6 }}>Chưa sẵn sàng lưu tệp:</span>
+                <span>{storageReadiness.message}</span>
+              </div>
+            </div>
+            {user?.role === "admin" && (storageReadiness.code === "no_pool" || storageReadiness.code === "no_dataset") && (
+              <Button
+                label={storageReadiness.code === "no_pool" ? "Tạo Nhóm lưu trữ" : "Tạo Tập dữ liệu"}
+                variant="primary"
+                compact
+                onClick={() => {
+                  if (typeof window !== "undefined") {
+                    const target = storageReadiness.code === "no_pool" ? "/settings/storage_pools" : "/settings/datasets";
+                    window.history.pushState(null, "", target);
+                    window.dispatchEvent(new PopStateEvent("popstate"));
+                  }
+                }}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
       {searching && (
         <div style={{ padding: "0 16px 8px" }}>
           <div
@@ -1141,8 +1212,14 @@ export function FilesBrowser({
         type="file"
         multiple
         hidden
-        onChange={(e) => {
+        onChange={async (e) => {
           if (!e.target.files) return;
+          const readiness = await checkStorageReadiness();
+          if (!readiness.ready) {
+            toast(readiness.message, "error");
+            e.target.value = "";
+            return;
+          }
           if (isReadOnly) {
             toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này, không thể tải lên!", "error");
             return;
@@ -1175,8 +1252,14 @@ export function FilesBrowser({
         multiple
         hidden
         {...({ webkitdirectory: "", directory: "" } as any)}
-        onChange={(e) => {
+        onChange={async (e) => {
           if (!e.target.files) return;
+          const readiness = await checkStorageReadiness();
+          if (!readiness.ready) {
+            toast(readiness.message, "error");
+            e.target.value = "";
+            return;
+          }
           if (isReadOnly) {
             toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này, không thể tải lên!", "error");
             return;

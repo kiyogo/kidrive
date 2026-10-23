@@ -22,6 +22,9 @@ var (
 	ErrCrossLibrary = errors.New("files: that move crosses a library boundary")
 	ErrConflict     = errors.New("files: conflicting change")
 	ErrTrashed      = errors.New("files: node is in the trash")
+	ErrNoStoragePool        = errors.New("chưa tạo Nhóm lưu trữ (Storage Pool), không thể lưu tệp")
+	ErrNoDataset            = errors.New("chưa tạo Tập dữ liệu (Dataset), không thể lưu tệp")
+	ErrNoCategoryPermission = errors.New("tài khoản chưa được cài đặt danh mục lưu trữ (Tập dữ liệu), không thể lưu tệp")
 )
 
 // Capability is one thing a caller may want to do to a node.

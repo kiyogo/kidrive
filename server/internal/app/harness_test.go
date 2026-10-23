@@ -3,6 +3,7 @@ package app_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -64,6 +65,14 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("could not build the server: %v", err)
 	}
+
+	_ = application.DB().Write(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+		now := time.Now().UnixMilli()
+		_, _ = tx.ExecContext(ctx, `INSERT OR IGNORE INTO storage_pools (id, name, layout, status, total_bytes, used_bytes, auto_trim, scrub_schedule, disks_json, created_at, updated_at) VALUES ('test-pool', 'tank', 'mirror', 'healthy', 1000000000000, 0, 1, 'weekly', '[]', ?, ?)`, now, now)
+		_, _ = tx.ExecContext(ctx, `INSERT OR IGNORE INTO datasets (id, name, pool, mount, quota_bytes, used_bytes, recordsize, compression, atime, dedup, sync_mode, status, created_at, updated_at) VALUES ('test-ds', 'tank/test', 'tank', ?, 0, 0, '128K', 'lz4', 'off', 'off', 'standard', 'mounted', ?, ?)`, filepath.Join(dir, "dataset"), now, now)
+		return nil
+	})
+
 	server := httptest.NewServer(application.Handler())
 
 	h := &harness{t: t, app: application, server: server}

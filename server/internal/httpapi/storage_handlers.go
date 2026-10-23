@@ -30,6 +30,7 @@ type DatasetDTO struct {
 	Mount       string `json:"mount"`
 	QuotaBytes  int64  `json:"quota_bytes"`
 	UsedBytes   int64  `json:"used_bytes"`
+	AvailableBytes int64 `json:"available_bytes"`
 	Compression string `json:"compression"`
 	Atime       string `json:"atime"`
 	Dedup       string `json:"dedup"`
@@ -102,6 +103,23 @@ func (a *API) handleListDatasets(w http.ResponseWriter, r *http.Request) {
 		}
 		defer rows.Close()
 
+		poolFreeMap := make(map[string]int64)
+		if pRows, pErr := a.db.Read().QueryContext(r.Context(), `SELECT name, total_bytes, used_bytes FROM storage_pools`); pErr == nil {
+			for pRows.Next() {
+				var pName string
+				var pTotal, pUsed int64
+				if err := pRows.Scan(&pName, &pTotal, &pUsed); err == nil {
+					free := pTotal - pUsed
+					if free < 0 {
+						free = 0
+					}
+					poolFreeMap[pName] = free
+					poolFreeMap[strings.ToLower(pName)] = free
+				}
+			}
+			pRows.Close()
+		}
+
 		out := make([]DatasetDTO, 0)
 		for rows.Next() {
 			var d DatasetDTO
@@ -109,6 +127,23 @@ func (a *API) handleListDatasets(w http.ResponseWriter, r *http.Request) {
 			if err := rows.Scan(&d.ID, &d.Name, &d.Pool, &d.Mount, &d.QuotaBytes, &d.UsedBytes, &recordsize, &d.Compression, &d.Atime, &d.Dedup, &d.SyncMode, &d.Status, &d.CreatedAt, &d.UpdatedAt); err != nil {
 				a.fail(w, r, err)
 				return
+			}
+			pFree, ok := poolFreeMap[d.Pool]
+			if !ok {
+				pFree = poolFreeMap[strings.ToLower(d.Pool)]
+			}
+			if d.QuotaBytes > 0 {
+				remQuota := d.QuotaBytes - d.UsedBytes
+				if remQuota < 0 {
+					remQuota = 0
+				}
+				if pFree > 0 && remQuota > pFree {
+					d.AvailableBytes = pFree
+				} else {
+					d.AvailableBytes = remQuota
+				}
+			} else {
+				d.AvailableBytes = pFree
 			}
 			out = append(out, d)
 		}
@@ -128,6 +163,23 @@ func (a *API) handleListDatasets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	poolFreeMap := make(map[string]int64)
+	if pRows, pErr := a.db.Read().QueryContext(r.Context(), `SELECT name, total_bytes, used_bytes FROM storage_pools`); pErr == nil {
+		for pRows.Next() {
+			var pName string
+			var pTotal, pUsed int64
+			if err := pRows.Scan(&pName, &pTotal, &pUsed); err == nil {
+				free := pTotal - pUsed
+				if free < 0 {
+					free = 0
+				}
+				poolFreeMap[pName] = free
+				poolFreeMap[strings.ToLower(pName)] = free
+			}
+		}
+		pRows.Close()
+	}
+
 	rows, err := a.db.Read().QueryContext(r.Context(),
 		`SELECT id, name, pool, mount, quota_bytes, used_bytes, recordsize, compression, atime, dedup, sync_mode, status, created_at, updated_at
 		 FROM datasets ORDER BY name ASC`)
@@ -144,6 +196,23 @@ func (a *API) handleListDatasets(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&d.ID, &d.Name, &d.Pool, &d.Mount, &d.QuotaBytes, &d.UsedBytes, &recordsize, &d.Compression, &d.Atime, &d.Dedup, &d.SyncMode, &d.Status, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			a.fail(w, r, err)
 			return
+		}
+		pFree, ok := poolFreeMap[d.Pool]
+		if !ok {
+			pFree = poolFreeMap[strings.ToLower(d.Pool)]
+		}
+		if d.QuotaBytes > 0 {
+			remQuota := d.QuotaBytes - d.UsedBytes
+			if remQuota < 0 {
+				remQuota = 0
+			}
+			if pFree > 0 && remQuota > pFree {
+				d.AvailableBytes = pFree
+			} else {
+				d.AvailableBytes = remQuota
+			}
+		} else {
+			d.AvailableBytes = pFree
 		}
 		out = append(out, d)
 	}
@@ -176,9 +245,28 @@ func (a *API) handleCreateDataset(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "dataset name is required")
 		return
 	}
+
+	var poolCount int
+	_ = a.db.Read().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM storage_pools`).Scan(&poolCount)
+	if poolCount == 0 {
+		writeError(w, http.StatusBadRequest, "no_storage_pool", "Chưa cấu hình Nhóm lưu trữ (Storage Pool). Vui lòng tạo Nhóm lưu trữ trước khi tạo Tập dữ liệu.")
+		return
+	}
+
 	pool := strings.TrimSpace(req.Pool)
 	if pool == "" {
-		pool = "tank"
+		// Default to first existing pool
+		_ = a.db.Read().QueryRowContext(r.Context(), `SELECT name FROM storage_pools ORDER BY name ASC LIMIT 1`).Scan(&pool)
+		if pool == "" {
+			pool = "tank"
+		}
+	} else {
+		var poolExists int
+		_ = a.db.Read().QueryRowContext(r.Context(), `SELECT COUNT(*) FROM storage_pools WHERE name = ?`, pool).Scan(&poolExists)
+		if poolExists == 0 {
+			writeError(w, http.StatusBadRequest, "invalid_pool", "Nhóm lưu trữ không tồn tại trong hệ thống")
+			return
+		}
 	}
 	mount := strings.TrimSpace(req.Mount)
 	if mount == "" {
@@ -1799,4 +1887,66 @@ func (a *API) handleDownloadDatasetFile(w http.ResponseWriter, r *http.Request) 
 	}
 
 	http.ServeFile(w, r, cleanTarget)
+}
+
+// handleStorageReadiness checks whether the system has configured storage pools,
+// datasets, and whether the calling user has assigned dataset permissions / categories.
+func (a *API) handleStorageReadiness(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var poolCount int
+	_ = a.db.Read().QueryRowContext(ctx, `SELECT COUNT(*) FROM storage_pools`).Scan(&poolCount)
+
+	var datasetCount int
+	_ = a.db.Read().QueryRowContext(ctx, `SELECT COUNT(*) FROM datasets WHERE status != 'deleted'`).Scan(&datasetCount)
+
+	user, hasUser := mw.UserFrom(ctx)
+	userConfigured := false
+	if hasUser {
+		if user.Role == models.RoleAdmin {
+			userConfigured = true
+		} else {
+			perms := strings.TrimSpace(user.DatasetPermissions)
+			if perms != "" && perms != "{}" && perms != "null" {
+				var pMap map[string]any
+				if err := json.Unmarshal([]byte(perms), &pMap); err == nil && len(pMap) > 0 {
+					for _, v := range pMap {
+						if str, ok := v.(string); ok && (str == "editor" || str == "writer" || str == "owner") {
+							userConfigured = true
+							break
+						}
+						if obj, ok := v.(map[string]any); ok {
+							if wr, ok := obj["write"].(bool); ok && wr {
+								userConfigured = true
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	ready := poolCount > 0 && datasetCount > 0 && userConfigured
+	code := "ready"
+	msg := ""
+
+	if poolCount == 0 {
+		code = "no_pool"
+		msg = "Chưa cấu hình Nhóm lưu trữ (Storage Pool). Vui lòng tạo Nhóm lưu trữ trước khi lưu tệp."
+	} else if datasetCount == 0 {
+		code = "no_dataset"
+		msg = "Chưa cấu hình Tập dữ liệu (Dataset). Vui lòng tạo Tập dữ liệu trước khi lưu tệp."
+	} else if !userConfigured {
+		code = "no_user_category"
+		msg = "Tài khoản của bạn chưa được phân quyền danh mục lưu trữ (Tập dữ liệu). Vui lòng liên hệ quản trị viên."
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ready":           ready,
+		"pool_count":      poolCount,
+		"dataset_count":   datasetCount,
+		"user_configured": userConfigured,
+		"code":            code,
+		"message":         msg,
+	})
 }

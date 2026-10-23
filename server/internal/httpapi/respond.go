@@ -61,6 +61,15 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, files.ErrQuota):
 		writeError(w, http.StatusInsufficientStorage, "quota_exceeded", "Dung lượng lưu trữ đã đầy, không thể tải tệp lên")
 
+	case errors.Is(err, files.ErrNoStoragePool):
+		writeError(w, http.StatusPreconditionRequired, "no_storage_pool", "Máy chủ chưa cấu hình Nhóm lưu trữ (Storage Pool), không thể lưu tệp")
+
+	case errors.Is(err, files.ErrNoDataset):
+		writeError(w, http.StatusPreconditionRequired, "no_dataset", "Máy chủ chưa cấu hình Tập dữ liệu (Dataset), không thể lưu tệp")
+
+	case errors.Is(err, files.ErrNoCategoryPermission):
+		writeError(w, http.StatusForbidden, "no_category_permission", "Tài khoản chưa được phân quyền danh mục lưu trữ (Tập dữ liệu), không thể lưu tệp")
+
 	case errors.Is(err, files.ErrInvalidName), errors.Is(err, files.ErrNotAFolder),
 		errors.Is(err, files.ErrNotAFile), errors.Is(err, files.ErrCycle),
 		errors.Is(err, files.ErrCrossLibrary), errors.Is(err, files.ErrConflict),

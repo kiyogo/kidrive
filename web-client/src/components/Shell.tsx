@@ -7,6 +7,7 @@ import { Banner, CanvasOverlayScrollbar, Menu, Sheet, Tappable, useDeviceClass, 
 import { bytes, percent } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { wsClient, type ConnectionState } from "@/lib/websocket";
+import { checkStorageReadiness } from "@/lib/uploads";
 
 export type Section =
   | "files"
@@ -130,8 +131,13 @@ export function Shell({
     }
   }, [section, pathname]);
 
-  const handleUploadFiles = (files: FileList | null) => {
+  const handleUploadFiles = async (files: FileList | null) => {
     if (!files || !files.length) return;
+    const readiness = await checkStorageReadiness();
+    if (!readiness.ready) {
+      showToast(readiness.message, "error");
+      return;
+    }
     if (user && user.quota_bytes > 0) {
       const totalSize = Array.from(files).reduce((acc, f) => acc + (f.size || 0), 0);
       if (user.quota_bytes_used >= user.quota_bytes || user.quota_bytes_used + totalSize > user.quota_bytes) {
@@ -142,8 +148,13 @@ export function Shell({
     onUpload(files);
   };
 
-  const handleUploadFolder = (files: FileList | null) => {
+  const handleUploadFolder = async (files: FileList | null) => {
     if (!files || !files.length) return;
+    const readiness = await checkStorageReadiness();
+    if (!readiness.ready) {
+      showToast(readiness.message, "error");
+      return;
+    }
     if (user && user.quota_bytes > 0) {
       const totalSize = Array.from(files).reduce((acc, f) => acc + (f.size || 0), 0);
       if (user.quota_bytes_used >= user.quota_bytes || user.quota_bytes_used + totalSize > user.quota_bytes) {
@@ -155,7 +166,12 @@ export function Shell({
     else onUpload(files);
   };
 
-  const pick = () => {
+  const pick = async () => {
+    const readiness = await checkStorageReadiness();
+    if (!readiness.ready) {
+      showToast(readiness.message, "error");
+      return;
+    }
     if (user && user.quota_bytes > 0 && user.quota_bytes_used >= user.quota_bytes) {
       showToast("Dung lượng lưu trữ đã đầy, không thể tải tệp lên", "error");
       return;
@@ -163,7 +179,12 @@ export function Shell({
     shellFileInput.current?.click();
   };
 
-  const pickFolder = () => {
+  const pickFolder = async () => {
+    const readiness = await checkStorageReadiness();
+    if (!readiness.ready) {
+      showToast(readiness.message, "error");
+      return;
+    }
     if (user && user.quota_bytes > 0 && user.quota_bytes_used >= user.quota_bytes) {
       showToast("Dung lượng lưu trữ đã đầy, không thể tải tệp lên", "error");
       return;

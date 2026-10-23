@@ -582,12 +582,14 @@ export function DatasetsSection({
       const mapped = list.map((d: any) => {
         const poolName = formatProperCase(d.pool || "");
         const dsName = formatProperCase(d.name || "");
+        const usedBytes = d.used_bytes || 0;
+        const availBytes = d.available_bytes ?? (d.quota_bytes > 0 ? Math.max(0, d.quota_bytes - usedBytes) : 0);
         return {
           id: d.id,
           name: dsName,
           pool: poolName,
-          used: formatDatasetBytes(d.used_bytes || 0),
-          available: poolName === "Ổ lưu trữ" || dsName.startsWith("Ổ lưu trữ") ? "1,5 TiB" : "288,76 GiB",
+          used: formatDatasetBytes(usedBytes),
+          available: availBytes > 0 ? formatDatasetBytes(availBytes) : "0 B",
           mount: d.mount,
           quota: d.quota_bytes > 0 ? formatDatasetBytes(d.quota_bytes) : "Không giới hạn",
           status: (d.status === "readonly" ? "Chỉ đọc" : "Hoạt động") as "Chỉ đọc" | "Hoạt động",
@@ -618,16 +620,10 @@ export function DatasetsSection({
           }))
         );
       } else {
-        setPools([
-          { id: "pool-du-lieu", name: "Dữ liệu", totalBytes: 1926344795750, usedBytes: 1616290165555 },
-          { id: "pool-luu-tru", name: "Ổ lưu trữ", totalBytes: 2186138353664, usedBytes: 536870912000 },
-        ]);
+        setPools([]);
       }
     } catch {
-      setPools([
-        { id: "pool-du-lieu", name: "Dữ liệu", totalBytes: 1926344795750, usedBytes: 1616290165555 },
-        { id: "pool-luu-tru", name: "Ổ lưu trữ", totalBytes: 2186138353664, usedBytes: 536870912000 },
-      ]);
+      setPools([]);
     }
   }, []);
 
@@ -669,24 +665,14 @@ export function DatasetsSection({
 
   // Build hierarchical dataset tree
   const treeNodes = useMemo(() => {
-    const DEFAULT_DATASETS: DatasetItem[] = [
-      { id: "ds-kiyovn", name: "Dữ liệu/KiyoVN", pool: "Dữ liệu", used: "1,47 TiB", available: "288,76 GiB", mount: "/mnt/Dữ liệu/KiyoVN", quota: "Không giới hạn", status: "Hoạt động", createdAt: 0 },
-      { id: "ds-1data", name: "Dữ liệu/KiyoVN/1Data", pool: "Dữ liệu", used: "141,12 GiB", available: "288,76 GiB", mount: "/mnt/Dữ liệu/KiyoVN/1Data", quota: "Không giới hạn", status: "Hoạt động", createdAt: 0 },
-      { id: "ds-daoky5", name: "Dữ liệu/KiyoVN/DaoKy_5", pool: "Dữ liệu", used: "1,04 MiB", available: "288,76 GiB", mount: "/mnt/Dữ liệu/KiyoVN/DaoKy_5", quota: "Không giới hạn", status: "Hoạt động", createdAt: 0 },
-      { id: "ds-dai4", name: "Dữ liệu/KiyoVN/Dài_4", pool: "Dữ liệu", used: "303,27 GiB", available: "288,76 GiB", mount: "/mnt/Dữ liệu/KiyoVN/Dài_4", quota: "Không giới hạn", status: "Hoạt động", createdAt: 0 },
-      { id: "ds-ngloc6", name: "Dữ liệu/KiyoVN/NgLoc_6", pool: "Dữ liệu", used: "96 KiB", available: "288,76 GiB", mount: "/mnt/Dữ liệu/KiyoVN/NgLoc_6", quota: "Không giới hạn", status: "Hoạt động", createdAt: 0 },
-      { id: "ds-ngson1", name: "Dữ liệu/KiyoVN/NgSon_1", pool: "Dữ liệu", used: "1,04 TiB", available: "288,76 GiB", mount: "/mnt/Dữ liệu/KiyoVN/NgSon_1", quota: "Không giới hạn", status: "Hoạt động", createdAt: 0 },
-      { id: "ds-luutru-data", name: "Ổ lưu trữ/Media", pool: "Ổ lưu trữ", used: "500 GiB", available: "1,5 TiB", mount: "/mnt/Ổ lưu trữ/Media", quota: "Không giới hạn", status: "Hoạt động", createdAt: 0 },
-    ];
-
-    const activeDatasets = datasets.length > 0 ? datasets : DEFAULT_DATASETS;
+    const activeDatasets = datasets;
 
     const getDatasetRootPool = (d: DatasetItem): string => {
       const normName = formatProperCase((d.name || "").normalize("NFC").trim());
       if (normName.includes("/")) {
         return normName.split("/")[0].trim();
       }
-      return formatProperCase((d.pool || "Dữ liệu").normalize("NFC").trim());
+      return formatProperCase((d.pool || pools[0]?.name || "").normalize("NFC").trim());
     };
 
     const poolNames = new Set<string>();
@@ -697,9 +683,9 @@ export function DatasetsSection({
       const p = getDatasetRootPool(d);
       if (p) poolNames.add(p);
     });
+
     if (poolNames.size === 0) {
-      poolNames.add("Dữ liệu");
-      poolNames.add("Ổ lưu trữ");
+      return [];
     }
 
     const roots: DatasetTreeNode[] = [];
@@ -716,6 +702,10 @@ export function DatasetsSection({
 
       // Sort datasets by path depth so parents are processed cleanly
       const sortedDatasets = [...poolDatasets].sort((a, b) => a.name.localeCompare(b.name));
+
+      const poolTotal = poolInfo?.totalBytes;
+      const poolUsed = poolInfo?.usedBytes;
+      const poolFree = poolTotal !== undefined && poolUsed !== undefined ? Math.max(0, poolTotal - poolUsed) : undefined;
 
       sortedDatasets.forEach((d) => {
         const normName = formatProperCase(d.name.normalize("NFC"));
@@ -743,15 +733,15 @@ export function DatasetsSection({
           if (!nodeMap.has(currentPath)) {
             const isShared = isLeaf
               ? (sharedNames.has(d.name) || sharedNames.has(d.mount) || sharedNames.has(properPart) || sharedNames.has(part))
-              : (properPart === "KiyoVN" || sharedNames.has(properPart) || sharedNames.has(part));
+              : (sharedNames.has(properPart) || sharedNames.has(part));
             const node: DatasetTreeNode = {
               id: isLeaf ? d.id : `virt-${normPool}-${currentPath}`,
               name: properPart,
               fullName: `${normPool}/${currentPath}`,
               pool: normPool,
               isPool: false,
-              used: isLeaf ? d.used : (properPart === "KiyoVN" ? "1,47 TiB" : "0 B"),
-              available: isLeaf ? d.available : "288,76 GiB",
+              used: isLeaf ? d.used : "0 B",
+              available: isLeaf ? d.available : (poolFree !== undefined ? formatDatasetBytes(poolFree) : "0 B"),
               quota: isLeaf ? d.quota : "Không giới hạn",
               status: isLeaf ? d.status : "Hoạt động",
               isShared,
@@ -761,8 +751,8 @@ export function DatasetsSection({
                     id: `virt-${normPool}-${currentPath}`,
                     name: `${normPool}/${currentPath}`,
                     pool: normPool,
-                    used: properPart === "KiyoVN" ? "1,47 TiB" : "0 B",
-                    available: "288,76 GiB",
+                    used: "0 B",
+                    available: poolFree !== undefined ? formatDatasetBytes(poolFree) : "0 B",
                     mount: `/mnt/${normPool}/${currentPath}`,
                     quota: "Không giới hạn",
                     status: "Hoạt động",
@@ -795,24 +785,19 @@ export function DatasetsSection({
         }
       });
 
-      const poolTotal = poolInfo?.totalBytes;
-      const poolUsed = poolInfo?.usedBytes;
-      const poolFree = poolTotal !== undefined && poolUsed !== undefined ? Math.max(0, poolTotal - poolUsed) : undefined;
-      const isLuuTru = normPool === "Ổ lưu trữ" || normPool === "Ổ LƯU TRỮ";
-
       const poolNode: DatasetTreeNode = {
         id: `pool-${normPool}`,
         name: normPool,
         fullName: normPool,
         pool: normPool,
         isPool: true,
-        used: poolUsed ? formatDatasetBytes(poolUsed) : (isLuuTru ? "500 GiB" : "1,47 TiB"),
-        available: poolFree ? formatDatasetBytes(poolFree) : (isLuuTru ? "1,5 TiB" : "288,76 GiB"),
-        total: poolTotal ? formatDatasetBytes(poolTotal) : (isLuuTru ? "2,0 TiB" : "1,76 TiB"),
-        free: poolFree ? formatDatasetBytes(poolFree) : (isLuuTru ? "1,5 TiB" : "288,76 GiB"),
+        used: poolUsed !== undefined ? formatDatasetBytes(poolUsed) : "0 B",
+        available: poolFree !== undefined ? formatDatasetBytes(poolFree) : "0 B",
+        total: poolTotal !== undefined ? formatDatasetBytes(poolTotal) : "0 B",
+        free: poolFree !== undefined ? formatDatasetBytes(poolFree) : "0 B",
         quota: "Không giới hạn",
         status: "Hoạt động",
-        isShared: normPool === "Dữ liệu" || sharedNames.has(poolName) || sharedNames.has(normPool),
+        isShared: sharedNames.has(poolName) || sharedNames.has(normPool),
         children: topLevelChildren,
       };
 
@@ -905,20 +890,21 @@ export function DatasetsSection({
     if (pools.length > 0) {
       return pools.map((p) => ({ id: formatProperCase(p.name), label: `Mảng ${formatProperCase(p.name)}` }));
     }
-    return [
-      { id: "Dữ liệu", label: "Mảng Dữ liệu" },
-      { id: "Ổ lưu trữ", label: "Mảng Ổ lưu trữ" },
-    ];
+    return [];
   }, [pools]);
 
   const handleOpenCreateModal = (targetNode?: DatasetTreeNode | null) => {
+    if (pools.length === 0) {
+      toast("Chưa có Nhóm lưu trữ (Storage Pool). Vui lòng tạo Nhóm lưu trữ trước khi thêm Tập dữ liệu!", "error");
+      return;
+    }
     const nodeToUse = targetNode !== undefined ? targetNode : selectedNode;
     setNewDsName("");
     setNewDsQuota("Không giới hạn");
     if (nodeToUse) {
-      setNewDsPool(formatProperCase(nodeToUse.pool || "Dữ liệu"));
+      setNewDsPool(formatProperCase(nodeToUse.pool || pools[0]?.name || ""));
     } else {
-      setNewDsPool(formatProperCase(pools[0]?.name || "Dữ liệu"));
+      setNewDsPool(formatProperCase(pools[0]?.name || ""));
     }
     setCreatePoolDropdownOpen(false);
     setCreateQuotaDropdownOpen(false);
@@ -1059,10 +1045,47 @@ export function DatasetsSection({
                       <DropdownStatus type="loading" message="Đang tải danh sách bộ dữ liệu..." />
                     </td>
                   </tr>
+                ) : pools.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} style={{ padding: "48px 24px", textAlign: "center" }}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+                        <div style={{ width: 52, height: 52, borderRadius: 12, background: "var(--bg-sunken)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <Icon glyph="storage" size={26} color="var(--accent)" />
+                        </div>
+                        <div style={{ fontSize: 16, fontWeight: 600, color: "var(--fg-primary)" }}>Chưa cấu hình Nhóm lưu trữ (Storage Pool)</div>
+                        <div style={{ fontSize: 13, color: "var(--fg-secondary)", maxWidth: 460 }}>
+                          Hệ thống cần ít nhất một Nhóm lưu trữ để có thể tạo Tập dữ liệu và bắt đầu lưu trữ tệp tin.
+                        </div>
+                        <Button
+                          label="Đi đến cấu hình Nhóm lưu trữ"
+                          variant="primary"
+                          onClick={() => {
+                            if (typeof window !== "undefined") {
+                              window.history.pushState(null, "", "/settings/storage_pools");
+                              window.dispatchEvent(new PopStateEvent("popstate"));
+                            }
+                          }}
+                        />
+                      </div>
+                    </td>
+                  </tr>
                 ) : visibleNodes.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ padding: 0 }}>
-                      <DropdownStatus type="empty" glyph="folder" message="Chưa có bộ dữ liệu nào." />
+                    <td colSpan={5} style={{ padding: "48px 24px", textAlign: "center" }}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+                        <div style={{ width: 52, height: 52, borderRadius: 12, background: "var(--bg-sunken)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <Icon glyph="folder" size={26} color="var(--accent)" />
+                        </div>
+                        <div style={{ fontSize: 16, fontWeight: 600, color: "var(--fg-primary)" }}>Chưa có Tập dữ liệu (Dataset) nào</div>
+                        <div style={{ fontSize: 13, color: "var(--fg-secondary)", maxWidth: 460 }}>
+                          Hãy tạo Tập dữ liệu đầu tiên để bắt đầu lưu trữ tệp, thư mục và phân quyền người dùng.
+                        </div>
+                        <Button
+                          label="+ Thêm Tập dữ liệu"
+                          variant="primary"
+                          onClick={() => handleOpenCreateModal()}
+                        />
+                      </div>
                     </td>
                   </tr>
                 ) : (
