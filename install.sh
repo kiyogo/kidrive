@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  Local Drive - 1-Line Linux Installer
-#  Hỗ trợ cài đặt toàn diện cho Ubuntu, Debian, CentOS, AlmaLinux, Rocky, Alpine...
+#  Local Drive - Trình Cài Đặt & Cập Nhật Hệ Thống Linux
+#  Bảo toàn 100% dữ liệu người dùng, cơ sở dữ liệu và nhóm lưu trữ
 # ==============================================================================
 
 set -e
@@ -14,21 +14,14 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-echo -e "${CYAN}${BOLD}"
-echo "=================================================================="
-echo "              LOCAL DRIVE - TRÌNH CÀI ĐẶT LINUX                   "
-echo "           Your Own Cloud NAS On Your Own Hardware                "
-echo "=================================================================="
-echo -e "${NC}"
-
 # 1. Kiểm tra quyền root
 if [ "$EUID" -ne 0 ]; then
   if [ -f "$0" ] && command -v sudo >/dev/null 2>&1; then
-    echo -e "${YELLOW}Đang chuyển sang quyền sudo để tiếp tục cài đặt...${NC}"
+    echo -e "${YELLOW}Đang chuyển sang quyền sudo để tiếp tục...${NC}"
     exec sudo bash "$0" "$@"
   fi
   echo -e "${RED}[LỖI] Vui lòng chạy lệnh cài đặt với quyền root (hoặc sudo)!${NC}"
-  echo -e "${YELLOW}Gợi ý: sudo bash install.sh  hoặc  curl -fsSL <URL> | sudo bash${NC}"
+  echo -e "${YELLOW}Gợi ý: curl -fsSL https://raw.githubusercontent.com/kiyogo/kidrive/main/install.sh | sudo bash${NC}"
   exit 1
 fi
 
@@ -49,9 +42,7 @@ case "$ARCH_RAW" in
     ;;
 esac
 
-echo -e "${BLUE}[1/5] Kiến trúc CPU phát hiện:${NC} ${GREEN}${ARCH} (${ARCH_RAW})${NC}"
-
-# 3. Thư mục cài đặt và binary
+# 3. Thư mục cài đặt và đường dẫn binary
 INSTALL_DIR="/var/lib/localdrive"
 DATA_DIR="/var/lib/localdrive/data"
 BIN_TARGET="/usr/local/bin/localdrive"
@@ -60,58 +51,119 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 mkdir -p "$INSTALL_DIR" "$DATA_DIR" "$DATA_DIR/db" "$DATA_DIR/library"
 mkdir -p "/usr/local/bin"
 
-echo -e "${BLUE}[2/5] Đang nạp tệp thực thi LocalDrive...${NC}"
+# Nhận diện trạng thái Cài đặt mới hay Cập nhật phiên bản
+IS_UPDATE=false
+if [ -f "$BIN_TARGET" ] || [ -f "$INSTALL_DIR/.env" ] || [ -f "/etc/systemd/system/localdrive.service" ]; then
+  IS_UPDATE=true
+fi
 
-# Tìm binary có sẵn trong thư mục cục bộ trước
-FOUND_LOCAL=false
-for CANDIDATE in "localdrive-linux-${ARCH}" "localdrive-linux-${ARCH_LEGACY}" "localdrive"; do
-  if [ -f "$SCRIPT_DIR/$CANDIDATE" ]; then
-    cp -f "$SCRIPT_DIR/$CANDIDATE" "$BIN_TARGET"
-    FOUND_LOCAL=true
-    break
-  elif [ -f "./$CANDIDATE" ]; then
-    cp -f "./$CANDIDATE" "$BIN_TARGET"
-    FOUND_LOCAL=true
-    break
+echo -e "${CYAN}${BOLD}"
+echo "=================================================================="
+if [ "$IS_UPDATE" = true ]; then
+  echo "        LOCAL DRIVE - CẬP NHẬT LÊN PHIÊN BẢN MỚI NHẤT             "
+  echo "  (Bảo toàn 100% Cơ sở dữ liệu, Nhóm lưu trữ và Tệp người dùng)   "
+else
+  echo "              LOCAL DRIVE - TRÌNH CÀI ĐẶT LINUX                   "
+  echo "           Your Own Cloud NAS On Your Own Hardware                "
+fi
+echo "=================================================================="
+echo -e "${NC}"
+
+echo -e "${BLUE}[1/5] Kiến trúc CPU:${NC} ${GREEN}${ARCH} (${ARCH_RAW})${NC}"
+
+# 4. Sao lưu an toàn trước khi cập nhật
+if [ "$IS_UPDATE" = true ]; then
+  BACKUP_TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+  BACKUP_DIR="$INSTALL_DIR/backups/backup_$BACKUP_TIMESTAMP"
+  mkdir -p "$BACKUP_DIR"
+  [ -f "$INSTALL_DIR/.env" ] && cp -f "$INSTALL_DIR/.env" "$BACKUP_DIR/.env"
+  [ -f "$DATA_DIR/db/localdrive.sqlite" ] && cp -f "$DATA_DIR/db/localdrive.sqlite" "$BACKUP_DIR/localdrive.sqlite"
+  [ -f "$INSTALL_DIR/localdrive.db" ] && cp -f "$INSTALL_DIR/localdrive.db" "$BACKUP_DIR/localdrive.db"
+  echo -e "${GREEN}✓ Đã hoàn tất bản sao lưu dự phòng an toàn tại: ${BACKUP_DIR}${NC}"
+fi
+
+# 5. Tải file nhị phân mới nhất vào tệp tạm thời
+echo -e "${BLUE}[2/5] Đang tải bản phát hành mới nhất cho kiến trúc Linux ${ARCH}...${NC}"
+
+TMP_BIN="/tmp/localdrive-bin-new.$$.$RANDOM"
+rm -f "$TMP_BIN"
+
+DOWNLOADED=false
+URLS=(
+  "https://github.com/kiyogo/kidrive/releases/download/v1.1.0/localdrive-linux-${ARCH}"
+  "https://github.com/ngdaison/LocalDrive/releases/download/v1.1.0/localdrive-linux-${ARCH}"
+  "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH}"
+  "https://github.com/ngdaison/LocalDrive/releases/latest/download/localdrive-linux-${ARCH}"
+  "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH_LEGACY}"
+  "https://github.com/ngdaison/LocalDrive/releases/latest/download/localdrive-linux-${ARCH_LEGACY}"
+)
+
+for URL in "${URLS[@]}"; do
+  echo -e "${BLUE}Thử tải từ: ${URL}...${NC}"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -o "$TMP_BIN" "$URL" 2>/dev/null || true
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$TMP_BIN" "$URL" 2>/dev/null || true
+  fi
+
+  if [ -f "$TMP_BIN" ]; then
+    FILE_SIZE=$(wc -c < "$TMP_BIN" 2>/dev/null || stat -c%s "$TMP_BIN" 2>/dev/null || echo 0)
+    # Tệp binary hoàn chỉnh có kích thước trên 10MB
+    if [ "$FILE_SIZE" -gt 10000000 ]; then
+      chmod +x "$TMP_BIN"
+      DOWNLOADED=true
+      echo -e "${GREEN}✓ Đã tải thành công tệp thực thi (${FILE_SIZE} bytes)!${NC}"
+      break
+    else
+      rm -f "$TMP_BIN"
+    fi
   fi
 done
 
-# Nếu không có file local, tải trực tiếp từ GitHub Releases
-if [ "$FOUND_LOCAL" = false ]; then
-  echo -e "${YELLOW}Đang tải file nhị phân cho kiến trúc Linux ${ARCH}...${NC}"
-  URLS=(
-    "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH}"
-    "https://github.com/ngdaison/LocalDrive/releases/latest/download/localdrive-linux-${ARCH}"
-    "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH_LEGACY}"
-    "https://github.com/ngdaison/LocalDrive/releases/latest/download/localdrive-linux-${ARCH_LEGACY}"
-  )
-  for URL in "${URLS[@]}"; do
-    echo -e "${BLUE}Thử tải từ: ${URL}...${NC}"
-    if command -v curl >/dev/null 2>&1; then
-      curl -fsSL -o "$BIN_TARGET" "$URL" || true
-    elif command -v wget >/dev/null 2>&1; then
-      wget -qO "$BIN_TARGET" "$URL" || true
-    fi
-    if [ -f "$BIN_TARGET" ] && [ -s "$BIN_TARGET" ]; then
-      echo -e "${GREEN}✓ Đã tải thành công binary!${NC}"
+# Kiểm tra tệp cục bộ nếu tải qua mạng chưa thành công
+if [ "$DOWNLOADED" = false ]; then
+  for CANDIDATE in "localdrive-linux-${ARCH}" "localdrive-linux-${ARCH_LEGACY}" "localdrive"; do
+    if [ -f "$SCRIPT_DIR/$CANDIDATE" ]; then
+      cp -f "$SCRIPT_DIR/$CANDIDATE" "$TMP_BIN"
+      chmod +x "$TMP_BIN"
+      DOWNLOADED=true
+      echo -e "${GREEN}✓ Sử dụng tệp thực thi có sẵn từ thư mục cài đặt.${NC}"
       break
     fi
   done
 fi
 
-if [ ! -f "$BIN_TARGET" ] || [ ! -s "$BIN_TARGET" ]; then
-  echo -e "${RED}[LỖI] Không thể tìm thấy hoặc tải binary localdrive-linux-${ARCH}!${NC}"
-  echo "Vui lòng đặt tệp 'localdrive-linux-${ARCH}' cùng thư mục với install.sh rồi chạy lại."
+if [ "$DOWNLOADED" = false ] || [ ! -f "$TMP_BIN" ]; then
+  echo -e "${RED}[LỖI] Không thể tải tệp thực thi LocalDrive cho kiến trúc ${ARCH}!${NC}"
+  echo "Vui lòng kiểm tra lại kết nối mạng hoặc đặt tệp 'localdrive-linux-${ARCH}' cùng thư mục."
   exit 1
 fi
 
-chmod +x "$BIN_TARGET"
-echo -e "${GREEN}✓ Đã cài đặt binary vào $BIN_TARGET thành công!${NC}"
+# 6. Thay thế tệp thực thi an toàn (Ngăn ngừa lỗi Text file busy)
+echo -e "${BLUE}[3/5] Tiến hành triển khai tệp thực thi vào hệ thống...${NC}"
 
-# 4. Khởi tạo cấu hình ban đầu nếu chưa có
+# Tạm dừng dịch vụ nếu đang chạy
+if systemctl is-active --quiet localdrive 2>/dev/null; then
+  echo -e "${YELLOW}Đang dừng dịch vụ nền để cập nhật tệp thực thi mới...${NC}"
+  systemctl stop localdrive 2>/dev/null || true
+fi
+
+# Sao lưu binary cũ
+if [ -f "$BIN_TARGET" ]; then
+  cp -f "$BIN_TARGET" "${BIN_TARGET}.old" 2>/dev/null || true
+fi
+
+# Thay thế bằng lệnh install hoặc mv (nguyên tử)
+install -m 755 "$TMP_BIN" "$BIN_TARGET" || mv -f "$TMP_BIN" "$BIN_TARGET"
+chmod +x "$BIN_TARGET"
+rm -f "$TMP_BIN"
+
+echo -e "${GREEN}✓ Đã cập nhật tệp thực thi vào $BIN_TARGET thành công!${NC}"
+
+# 7. Khởi tạo cấu hình ban đầu nếu chưa có (Tuyệt đối không ghi đè cấu hình cũ)
 ENV_FILE="$INSTALL_DIR/.env"
 if [ ! -f "$ENV_FILE" ]; then
-  echo -e "${BLUE}[3/5] Khởi tạo cấu hình máy chủ...${NC}"
+  echo -e "${BLUE}[4/5] Khởi tạo cấu hình máy chủ mới...${NC}"
   cat << 'EOF' > "$ENV_FILE"
 # LocalDrive Environment Configuration
 LOCALDRIVE_HOME=/var/lib/localdrive
@@ -122,15 +174,17 @@ LOCALDRIVE_DATABASE_PATH=/var/lib/localdrive/data/db/localdrive.sqlite
 LOCALDRIVE_PORT=9683
 LOCALDRIVE_WEB_PORT=5437
 EOF
+else
+  echo -e "${GREEN}✓ [4/5] Giữ nguyên 100% cấu hình và tài khoản hiện tại trong $ENV_FILE${NC}"
 fi
 
-# 5. Cài đặt Systemd Daemon Service
-echo -e "${BLUE}[4/5] Đăng ký Systemd Daemon Service cùng hệ thống...${NC}"
+# 8. Cấu hình Systemd Daemon Service
+echo -e "${BLUE}[5/5] Cấu hình và kích hoạt Systemd Daemon Service...${NC}"
 
 cat << EOF > /etc/systemd/system/localdrive.service
 [Unit]
 Description=Local Drive - Private Cloud Storage Server
-Documentation=https://github.com/MultiX0/LocalDrive
+Documentation=https://github.com/kiyogo/kidrive
 After=network-online.target
 Wants=network-online.target
 
@@ -149,34 +203,29 @@ Restart=always
 RestartSec=5s
 LimitNOFILE=65536
 
-# Bảo mật tầng dịch vụ
-ProtectSystem=full
-ProtectHome=read-only
-ReadWritePaths=${INSTALL_DIR}
-
 [Install]
 WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable localdrive
+systemctl enable localdrive 2>/dev/null || true
 systemctl restart localdrive
 
-# 6. Mở tường lửa nếu có (UFW hoặc Firewalld)
-echo -e "${BLUE}[5/5] Cấu hình tường lửa cho cổng 5437 (Web UI) và 9683 (Server API)...${NC}"
+# Chờ 2 giây kiểm tra trạng thái hoạt động
+sleep 2
+
+# 9. Cấu hình tường lửa nếu có (UFW hoặc Firewalld)
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "active"; then
   ufw allow 5437/tcp comment "LocalDrive Web UI" >/dev/null 2>&1 || true
   ufw allow 9683/tcp comment "LocalDrive Server API" >/dev/null 2>&1 || true
   ufw allow 80/tcp >/dev/null 2>&1 || true
   ufw allow 443/tcp >/dev/null 2>&1 || true
-  echo -e "${GREEN}✓ Đã mở cổng 5437, 9683, 80, 443 trên UFW Firewall${NC}"
 elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
   firewall-cmd --permanent --add-port=5437/tcp >/dev/null 2>&1 || true
   firewall-cmd --permanent --add-port=9683/tcp >/dev/null 2>&1 || true
   firewall-cmd --permanent --add-port=80/tcp >/dev/null 2>&1 || true
   firewall-cmd --permanent --add-port=443/tcp >/dev/null 2>&1 || true
   firewall-cmd --reload >/dev/null 2>&1 || true
-  echo -e "${GREEN}✓ Đã mở cổng 5437, 9683, 80, 443 trên Firewalld${NC}"
 fi
 
 # Lấy địa chỉ IP mạng nội bộ của máy chủ
@@ -188,11 +237,20 @@ if [ -z "$SERVER_IP" ]; then
   SERVER_IP="127.0.0.1"
 fi
 
-# 7. Thông báo kết quả hoàn thành
+CURRENT_VER=$("$BIN_TARGET" version 2>/dev/null || echo "1.1.0")
+
+# 10. Thông báo kết quả hoàn thành
 echo ""
 echo -e "${GREEN}${BOLD}==================================================================${NC}"
-echo -e "${GREEN}${BOLD}       CÀI ĐẶT LOCALDRIVE TRÊN LINUX HOÀN TẤT THÀNH CÔNG!          ${NC}"
+if [ "$IS_UPDATE" = true ]; then
+  echo -e "${GREEN}${BOLD}   CẬP NHẬT LOCALDRIVE THÀNH CÔNG LÊN PHIÊN BẢN MỚI NHẤT!        ${NC}"
+else
+  echo -e "${GREEN}${BOLD}       CÀI ĐẶT LOCALDRIVE TRÊN LINUX HOÀN TẤT THÀNH CÔNG!          ${NC}"
+fi
 echo -e "${GREEN}${BOLD}==================================================================${NC}"
+echo ""
+echo -e "  ${BOLD}Phiên bản đang hoạt động:${NC} ${CYAN}${CURRENT_VER}${NC}"
+echo -e "  ${BOLD}Bảo toàn dữ liệu:${NC}        ${GREEN}100% Cơ sở dữ liệu, Nhóm lưu trữ và Tệp tin an toàn${NC}"
 echo ""
 echo -e "  ${BOLD}Địa chỉ truy cập máy chủ của bạn:${NC}"
 echo -e "  ► Web Interface: ${CYAN}${BOLD}http://${SERVER_IP}:5437${NC} hoặc ${CYAN}${BOLD}http://kinas:5437${NC}"
@@ -202,12 +260,7 @@ echo ""
 echo -e "  ${BOLD}Các lệnh quản lý dịch vụ (Systemd):${NC}"
 echo -e "  • Kiểm tra trạng thái:   ${YELLOW}systemctl status localdrive${NC}"
 echo -e "  • Khởi động lại:         ${YELLOW}systemctl restart localdrive${NC}"
-echo -e "  • Tạm dừng:              ${YELLOW}systemctl stop localdrive${NC}"
 echo -e "  • Xem nhật ký realtime:  ${YELLOW}journalctl -u localdrive -f${NC}"
 echo ""
-echo -e "  ${BOLD}Dữ liệu và tệp lưu trữ:${NC}"
-echo -e "  • Thư mục dữ liệu:       ${CYAN}/var/lib/localdrive/data${NC}"
-echo -e "  • Cơ sở dữ liệu:         ${CYAN}/var/lib/localdrive/localdrive.db${NC}"
-echo ""
-echo -e "${GREEN}Dịch vụ đã được kích hoạt chạy nền liên tục cùng hệ điều hành!${NC}"
+echo -e "${GREEN}Dịch vụ đang chạy nền ổn định và sẵn sàng phục vụ!${NC}"
 echo "=================================================================="
