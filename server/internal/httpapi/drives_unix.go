@@ -111,12 +111,14 @@ func detectHostDrives(registered map[string]struct{}) []driveDTO {
 		dec.UseNumber()
 		if err := dec.Decode(&resp); err == nil {
 			for _, dev := range resp.BlockDevices {
-				// Process root disk devices (or loop devices with mountpoints)
-				if dev.Type == "disk" || (dev.Type == "loop" && dev.MountPoint != "") {
-					devPath := dev.Path
-					if devPath == "" {
-						devPath = "/dev/" + dev.Name
-					}
+				// Strictly only physical disk devices: skip loop, ram, dm, sr
+				if dev.Type != "disk" || strings.HasPrefix(dev.Name, "loop") || strings.HasPrefix(dev.Name, "ram") || strings.HasPrefix(dev.Name, "dm-") || strings.HasPrefix(dev.Name, "sr") {
+					continue
+				}
+				devPath := dev.Path
+				if devPath == "" {
+					devPath = "/dev/" + dev.Name
+				}
 					totalSize := parseSizeBytes(dev.Size)
 					isRotational := parseBool(dev.Rota)
 					isRemovable := parseBool(dev.Hotplug) || dev.Tran == "usb"
@@ -223,7 +225,6 @@ func detectHostDrives(registered map[string]struct{}) []driveDTO {
 					})
 					seenIDs[devPath] = true
 					seenIDs[dev.Name] = true
-				}
 			}
 		}
 	}
@@ -245,8 +246,8 @@ func detectHostDrives(registered map[string]struct{}) []driveDTO {
 			mountPt := parts[1]
 			fsType := parts[2]
 
-			// Only real hardware or interesting mounts
-			if !strings.HasPrefix(devPath, "/dev/") && !strings.HasPrefix(fsType, "zfs") && !strings.HasPrefix(fsType, "btrfs") {
+			// Only real ZFS or Btrfs dataset mounts
+			if !strings.HasPrefix(fsType, "zfs") && !strings.HasPrefix(fsType, "btrfs") {
 				continue
 			}
 			// Skip special virtual fs or system root/boot paths

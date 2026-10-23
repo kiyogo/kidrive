@@ -88,54 +88,76 @@ func detectZFSPools() []ZFSPoolInfo {
 		}
 	}
 
-	// 2. Check unimported pools: zpool import
-	if out, err := exec.Command("zpool", "import").Output(); err == nil {
-		scanner := bufio.NewScanner(strings.NewReader(string(out)))
-		var currentPool *ZFSPoolInfo
-		inConfig := false
+	// 2. Check unimported pools: try zpool import -d /dev first, then zpool import
+	importCmds := [][]string{
+		{"zpool", "import", "-d", "/dev"},
+		{"zpool", "import"},
+	}
+	for _, cmdArgs := range importCmds {
+		if out, err := exec.Command(cmdArgs[0], cmdArgs[1:]...).Output(); err == nil && len(out) > 0 {
+			scanner := bufio.NewScanner(strings.NewReader(string(out)))
+			var currentPool *ZFSPoolInfo
+			inConfig := false
 
-		for scanner.Scan() {
-			line := scanner.Text()
-			trimmed := strings.TrimSpace(line)
+			for scanner.Scan() {
+				line := scanner.Text()
+				trimmed := strings.TrimSpace(line)
 
-			if strings.HasPrefix(trimmed, "pool:") {
-				if currentPool != nil && currentPool.Name != "" && !seenPools[strings.ToLower(currentPool.Name)] {
-					pools = append(pools, *currentPool)
-					seenPools[strings.ToLower(currentPool.Name)] = true
-				}
-				name := strings.TrimSpace(strings.TrimPrefix(trimmed, "pool:"))
-				currentPool = &ZFSPoolInfo{
-					Name:     name,
-					Layout:   "ZFS",
-					State:    "ONLINE",
-					Status:   "Mảng lưu trữ ZFS (TrueNAS) sẵn sàng nhập",
-					Imported: false,
-				}
-				inConfig = false
-			} else if currentPool != nil {
-				if strings.HasPrefix(trimmed, "id:") {
-					currentPool.ID = strings.TrimSpace(strings.TrimPrefix(trimmed, "id:"))
-				} else if strings.HasPrefix(trimmed, "state:") {
-					currentPool.State = strings.TrimSpace(strings.TrimPrefix(trimmed, "state:"))
-				} else if strings.HasPrefix(trimmed, "status:") {
-					currentPool.Status = strings.TrimSpace(strings.TrimPrefix(trimmed, "status:"))
-				} else if strings.HasPrefix(trimmed, "config:") {
-					inConfig = true
-				} else if inConfig {
-					fields := strings.Fields(trimmed)
-					if len(fields) > 0 {
-						devName := fields[0]
-						if devName != currentPool.Name && !strings.EqualFold(devName, "mirror") && !strings.HasPrefix(strings.ToLower(devName), "raidz") && devName != "NAME" {
-							currentPool.Disks = append(currentPool.Disks, "/dev/"+devName)
+				if strings.HasPrefix(trimmed, "pool:") {
+					if currentPool != nil && currentPool.Name != "" && !seenPools[strings.ToLower(currentPool.Name)] {
+						pools = append(pools, *currentPool)
+						seenPools[strings.ToLower(currentPool.Name)] = true
+					}
+					name := strings.TrimSpace(strings.TrimPrefix(trimmed, "pool:"))
+					currentPool = &ZFSPoolInfo{
+						Name:     name,
+						Layout:   "ZFS",
+						State:    "ONLINE",
+						Status:   "Mảng lưu trữ ZFS (TrueNAS) sẵn sàng nhập",
+						Imported: false,
+					}
+					inConfig = false
+				} else if currentPool != nil {
+					if strings.HasPrefix(trimmed, "id:") {
+						currentPool.ID = strings.TrimSpace(strings.TrimPrefix(trimmed, "id:"))
+					} else if strings.HasPrefix(trimmed, "state:") {
+						currentPool.State = strings.TrimSpace(strings.TrimPrefix(trimmed, "state:"))
+					} else if strings.HasPrefix(trimmed, "status:") {
+						currentPool.Status = strings.TrimSpace(strings.TrimPrefix(trimmed, "status:"))
+					} else if strings.HasPrefix(trimmed, "config:") {
+						inConfig = true
+					} else if inConfig {
+						fields := strings.Fields(trimmed)
+						if len(fields) > 0 {
+							devName := fields[0]
+							devLower := strings.ToLower(devName)
+							if devName != currentPool.Name &&
+								!strings.EqualFold(devName, "mirror") &&
+								!strings.HasPrefix(devLower, "mirror-") &&
+								!strings.HasPrefix(devLower, "raidz") &&
+								!strings.HasPrefix(devLower, "spare") &&
+								!strings.HasPrefix(devLower, "log") &&
+								!strings.HasPrefix(devLower, "cache") &&
+								devName != "NAME" &&
+								devName != "STATE" &&
+								devName != "READ" &&
+								devName != "WRITE" &&
+								devName != "CKSUM" {
+								devPath := devName
+								if !strings.HasPrefix(devPath, "/dev/") {
+									devPath = "/dev/" + devName
+								}
+								currentPool.Disks = append(currentPool.Disks, devPath)
+							}
 						}
 					}
 				}
 			}
-		}
 
-		if currentPool != nil && currentPool.Name != "" && !seenPools[strings.ToLower(currentPool.Name)] {
-			pools = append(pools, *currentPool)
-			seenPools[strings.ToLower(currentPool.Name)] = true
+			if currentPool != nil && currentPool.Name != "" && !seenPools[strings.ToLower(currentPool.Name)] {
+				pools = append(pools, *currentPool)
+				seenPools[strings.ToLower(currentPool.Name)] = true
+			}
 		}
 	}
 
@@ -177,11 +199,14 @@ func listZFSDatasets(poolName string) []ZFSDatasetInfo {
 }
 
 func importZFSPoolCmd(poolNameOrID string) error {
-	cmd := exec.Command("zpool", "import", "-f", poolNameOrID)
+	cmd := exec.Command("zpool", "import", "-f", "-d", "/dev", poolNameOrID)
 	if err := cmd.Run(); err != nil {
-		cmd2 := exec.Command("zpool", "import", "-f", "-N", poolNameOrID)
+		cmd2 := exec.Command("zpool", "import", "-f", poolNameOrID)
 		if err2 := cmd2.Run(); err2 != nil {
-			return err
+			cmd3 := exec.Command("zpool", "import", "-f", "-N", poolNameOrID)
+			if err3 := cmd3.Run(); err3 != nil {
+				return err
+			}
 		}
 	}
 	_ = exec.Command("zfs", "mount", "-a").Run()

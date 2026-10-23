@@ -168,6 +168,7 @@ if ! command -v zpool >/dev/null 2>&1; then
     apt-get update -qq && apt-get install -y -qq zfsutils-linux 2>/dev/null || true
   fi
 fi
+modprobe zfs 2>/dev/null || true
 
 # 7. Khởi tạo cấu hình ban đầu nếu chưa có (Tuyệt đối không ghi đè cấu hình cũ)
 ENV_FILE="$INSTALL_DIR/.env"
