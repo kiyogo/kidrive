@@ -93,11 +93,13 @@ export function useUploader(parentId: string, onDone?: () => void) {
           if (user.dataset_permissions) userPerms = JSON.parse(user.dataset_permissions);
         } catch {}
         for (const [dsKey, val] of Object.entries(userPerms)) {
+          const cleanDs = dsKey.trim().replace(/^\/+/, "");
+          if (!cleanDs || cleanDs === "*" || cleanDs === "/") continue;
           if (val && typeof val === "object" && (val.write || val.level === "editor")) {
-            return `dataset:${dsKey}`;
+            return `dataset:${cleanDs}`;
           }
           if (typeof val === "string" && (val === "editor" || val === "writer" || val === "owner")) {
-            return `dataset:${dsKey}`;
+            return `dataset:${cleanDs}`;
           }
         }
       }

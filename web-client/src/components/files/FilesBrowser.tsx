@@ -184,10 +184,10 @@ export function FilesBrowser({
       }
     }
 
-    // 3. Kiểm tra thành phần trong đường dẫn hoặc hậu tố
+    // 3. Khớp nếu kClean không có tên pool (ví dụ kClean là "kiyovn" còn cleanName là "data/kiyovn" hoặc "data/kiyovn/sub")
     for (const [k, v] of Object.entries(userPerms)) {
       const kClean = k.toLowerCase().trim().replace(/^\/+|\/+$/g, "");
-      if (kClean && (("/" + cleanName + "/").includes("/" + kClean + "/") || cleanName.endsWith("/" + kClean) || kClean.endsWith("/" + cleanName))) {
+      if (kClean && (cleanName.endsWith("/" + kClean) || cleanName.includes("/" + kClean + "/"))) {
         return v;
       }
     }
@@ -258,8 +258,12 @@ export function FilesBrowser({
       const perm = getDatasetPerm(currentDatasetName);
       return !perm.write;
     }
+    if (defaultSingleDataset) {
+      const perm = getDatasetPerm(defaultSingleDataset);
+      return !perm.write;
+    }
     return false;
-  }, [user, currentDatasetName, getDatasetPerm, hasAssignedCategory]);
+  }, [user, currentDatasetName, defaultSingleDataset, getDatasetPerm, hasAssignedCategory]);
 
   // Is current view forbidden?
   const isForbidden = useMemo<boolean>(() => {

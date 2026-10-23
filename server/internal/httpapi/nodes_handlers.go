@@ -247,25 +247,16 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 			var rootDsNodes []nodeDTO
 			for _, d := range accessible {
 				isChild := false
-				dLower := strings.ToLower(d.name)
+				dClean := strings.ToLower(strings.Trim(d.name, "/"))
 				for _, other := range accessible {
-					oLower := strings.ToLower(other.name)
-					if oLower != dLower && strings.HasPrefix(dLower, oLower+"/") {
+					oClean := strings.ToLower(strings.Trim(other.name, "/"))
+					if oClean != dClean && strings.HasPrefix(dClean, oClean+"/") {
 						isChild = true
 						break
 					}
 				}
-				slashParts := strings.Split(strings.Trim(d.name, "/"), "/")
-				if len(slashParts) > 1 {
-					poolPrefix := strings.ToLower(slashParts[0])
-					for _, other := range accessible {
-						if strings.ToLower(other.name) == poolPrefix || strings.ToLower(other.pool) == poolPrefix {
-							isChild = true
-							break
-						}
-					}
-				}
 				if !isChild {
+					slashParts := strings.Split(strings.Trim(d.name, "/"), "/")
 					displayName := slashParts[len(slashParts)-1]
 					color := "azure"
 					if d.pool == "kiyo-pool" {
@@ -565,6 +556,60 @@ func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID, ip := caller(r)
+
+	if req.ParentID == "" || req.ParentID == "root" {
+		user, uOk := mw.UserFrom(r.Context())
+		if uOk && user.Role != models.RoleAdmin && user.DatasetPermissions != "" {
+			var pMap map[string]any
+			if err := json.Unmarshal([]byte(user.DatasetPermissions), &pMap); err == nil {
+				var writeDatasets []string
+				for k, v := range pMap {
+					kClean := strings.Trim(k, "/")
+					if kClean == "" || kClean == "*" {
+						continue
+					}
+					canWrite := false
+					if str, ok := v.(string); ok && (str == "editor" || str == "writer" || str == "owner") {
+						canWrite = true
+					} else if obj, ok := v.(map[string]any); ok {
+						if wr, ok := obj["write"].(bool); ok && wr {
+							canWrite = true
+						} else if lvl, ok := obj["level"].(string); ok && (lvl == "editor" || lvl == "writer") {
+							canWrite = true
+						}
+					}
+					if canWrite {
+						writeDatasets = append(writeDatasets, kClean)
+					}
+				}
+				var uniqueRoots []string
+				for _, ds := range writeDatasets {
+					isSub := false
+					for _, other := range writeDatasets {
+						if other != ds && strings.HasPrefix(strings.ToLower(ds), strings.ToLower(other)+"/") {
+							isSub = true
+							break
+						}
+					}
+					if !isSub {
+						exists := false
+						for _, u := range uniqueRoots {
+							if strings.EqualFold(u, ds) {
+								exists = true
+								break
+							}
+						}
+						if !exists {
+							uniqueRoots = append(uniqueRoots, ds)
+						}
+					}
+				}
+				if len(uniqueRoots) == 1 {
+					req.ParentID = "dataset:" + uniqueRoots[0]
+				}
+			}
+		}
+	}
 
 	if strings.HasPrefix(req.ParentID, "dataset:") {
 		parts := strings.SplitN(strings.TrimPrefix(req.ParentID, "dataset:"), ":", 2)

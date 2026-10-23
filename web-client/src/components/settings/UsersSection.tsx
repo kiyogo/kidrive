@@ -830,25 +830,34 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
       map = {};
     }
     const permitted = Object.entries(map).filter(([_, v]) => v && v !== "none");
-    const keys = permitted.map(([k]) => k);
+    const rawKeys = permitted.map(([k]) => k.trim());
+    const normalizedKeys = Array.from(
+      new Set(
+        rawKeys
+          .map((k) => "/" + k.replace(/^\/+/, ""))
+          .filter((k) => k !== "/" && k !== "/*")
+      )
+    );
 
     if (u.role === "admin") {
-      if (keys.length > 0 && !keys.includes("/")) {
-        return keys.length <= 2 ? keys.join(", ") : `${keys[0]}, ${keys[1]} (+${keys.length - 2})`;
+      if (normalizedKeys.length > 0 && !rawKeys.includes("/") && !rawKeys.includes("*")) {
+        return normalizedKeys.length <= 2
+          ? normalizedKeys.join(", ")
+          : `${normalizedKeys[0]}, ${normalizedKeys[1]} (+${normalizedKeys.length - 2})`;
       }
       return "Tất cả danh mục";
     }
 
-    if (keys.length === 0) {
+    if (normalizedKeys.length === 0) {
       return "Chưa phân danh mục";
     }
-    if (keys.length === 1) {
-      return keys[0];
+    if (normalizedKeys.length === 1) {
+      return normalizedKeys[0];
     }
-    if (keys.length === 2) {
-      return `${keys[0]}, ${keys[1]}`;
+    if (normalizedKeys.length === 2) {
+      return `${normalizedKeys[0]}, ${normalizedKeys[1]}`;
     }
-    return `${keys[0]}, ${keys[1]} (+${keys.length - 2})`;
+    return `${normalizedKeys[0]}, ${normalizedKeys[1]} (+${normalizedKeys.length - 2})`;
   };
 
   // =========================================================================
