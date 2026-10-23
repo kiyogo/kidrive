@@ -449,6 +449,31 @@ export function Shell({
                       setNavDrawerOpen(false);
                       onNavigate("settings");
                       if (typeof window !== "undefined") {
+                        window.history.pushState(null, "", "/settings/pools");
+                        window.dispatchEvent(new PopStateEvent("popstate"));
+                      }
+                    }}
+                    radius={12}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "12px 14px",
+                      background: "var(--bg-elevated)",
+                      border: "1px solid var(--stroke)",
+                    }}
+                  >
+                    <Icon glyph="storage" size={20} color="var(--accent)" />
+                    <span className="t-body-md" style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {t.settingsStoragePools}
+                    </span>
+                  </Tappable>
+
+                  <Tappable
+                    onClick={() => {
+                      setNavDrawerOpen(false);
+                      onNavigate("settings");
+                      if (typeof window !== "undefined") {
                         window.history.pushState(null, "", "/settings/datasets");
                         window.dispatchEvent(new PopStateEvent("popstate"));
                       }

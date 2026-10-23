@@ -2288,8 +2288,8 @@ export function DisksSection({
               <Icon glyph="chevron-left" size={20} color="var(--fg-primary)" />
             </Tappable>
           )}
-          <Icon glyph="drive" size={22} color="var(--accent)" />
-          <h2 className="t-title-md" style={{ margin: 0, fontWeight: 600, color: "var(--fg-primary)", fontSize: 18 }}>Kho ổ</h2>
+          <Icon glyph="storage" size={22} color="var(--accent)" />
+          <h2 className="t-title-md" style={{ margin: 0, fontWeight: 600, color: "var(--fg-primary)", fontSize: 18 }}>{t.settingsStoragePools}</h2>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Button

@@ -56,6 +56,7 @@ type SectionId =
   | "security"
   | "shares"
   | "network-shares"
+  | "pools"
   | "disks"
   | "datasets"
   | "users"
@@ -73,6 +74,7 @@ const sections: { id: SectionId; key: keyof Strings; glyph: Glyph; adminOnly?: b
   { id: "dashboard", key: "settingsDashboard", glyph: "grid", adminOnly: true },
   { id: "security", key: "settingsSecurity", glyph: "lock", adminOnly: true },
   { id: "shares", key: "settingsNetworkShares", glyph: "share", adminOnly: true },
+  { id: "pools", key: "settingsStoragePools", glyph: "storage", adminOnly: true },
   { id: "datasets", key: "settingsDatasets", glyph: "folder", adminOnly: true },
   { id: "users", key: "settingsUsers", glyph: "people", adminOnly: true },
   { id: "server", key: "settingsServer", glyph: "server", adminOnly: true },
@@ -310,7 +312,7 @@ export function SettingsScreen({
             <div
               style={{
                 width: "100%",
-                maxWidth: desktopSection === "shares" || desktopSection === "network-shares" || desktopSection === "disks" || desktopSection === "datasets" || desktopSection === "users" ? "100%" : 640,
+                maxWidth: desktopSection === "shares" || desktopSection === "network-shares" || desktopSection === "pools" || desktopSection === "disks" || desktopSection === "datasets" || desktopSection === "users" ? "100%" : 640,
               }}
             >
               <Detail key={`${desktopSection}-${navKey}`} section={desktopSection} embedded />
@@ -464,6 +466,9 @@ function Detail({
     case "shares":
     case "network-shares":
       return <NetworkSharesSection onBack={onBack} embedded={embedded} />;
+    case "pools":
+    case "disks":
+      return <DisksSection onBack={onBack} embedded={embedded} />;
     case "datasets":
       return <DatasetsSection onBack={onBack} embedded={embedded} />;
     case "language":
