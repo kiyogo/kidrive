@@ -3,7 +3,7 @@
 
 <img src="docs/assets/mark.svg" width="96" alt="KiDrive / LocalDrive Logo">
 
-# KiDrive (LocalDrive)
+# KiDrive
 
 **Your Private Cloud. Your Hardware. Your Data.**
 
