@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -1366,6 +1367,15 @@ func (a *API) handleImportPool(w http.ResponseWriter, r *http.Request) {
 	mountPath := filepath.Join(a.cfg.LibraryPath, name)
 	if len(disks) > 0 && strings.Contains(disks[0], ":") {
 		mountPath = filepath.Join(disks[0]+"\\", "DATA")
+	} else if len(disks) > 0 {
+		for _, hd := range hostDrives {
+			for _, d := range disks {
+				if (hd.ID == d || hd.Name == d) && hd.MountPoint != "" && hd.MountPoint != "/" {
+					mountPath = hd.MountPoint
+					break
+				}
+			}
+		}
 	}
 	_ = os.MkdirAll(mountPath, 0755)
 
@@ -1393,7 +1403,7 @@ func (a *API) handleImportPool(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		},
-		"message": fmt.Sprintf("Nhập Pool \"%s\" thành công! Đã tự động cấu hình tối ưu.", name),
+		"message": fmt.Sprintf("Nhập Pool \"%s\" thành công! Đã cấu hình và kết nối an toàn mà không làm mất dữ liệu.", name),
 	})
 }
 
@@ -1421,52 +1431,86 @@ func (a *API) handleDriveSmart(w http.ResponseWriter, r *http.Request) {
 		driveLetter = strings.TrimPrefix(driveID, "drive_")
 	}
 
-	// Query PowerShell for real drive hardware status
-	psScript := fmt.Sprintf(`
-		$part = Get-Partition | Where-Object DriveLetter -eq '%s' | Select-Object -First 1 DiskNumber
-		if ($part) {
-			$disk = Get-PhysicalDisk | Where-Object DeviceId -eq $part.DiskNumber | Select-Object FriendlyName, SerialNumber, MediaType, HealthStatus, OperationalStatus | ConvertTo-Json -Compress
-			Write-Output $disk
-		} else {
-			$any = Get-PhysicalDisk | Select-Object -First 1 FriendlyName, SerialNumber, MediaType, HealthStatus, OperationalStatus | ConvertTo-Json -Compress
-			Write-Output $any
-		}
-	`, driveLetter)
-
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
-	out, err := cmd.Output()
-
 	model := "Local Disk"
 	serial := "N/A"
 	mediaType := "SSD"
 	health := "healthy"
 	operationalStatus := "OK"
 
-	if err == nil && len(out) > 0 {
-		var diskData struct {
-			FriendlyName      string `json:"FriendlyName"`
-			SerialNumber      string `json:"SerialNumber"`
-			MediaType         string `json:"MediaType"`
-			HealthStatus      string `json:"HealthStatus"`
-			OperationalStatus string `json:"OperationalStatus"`
+	if target != nil {
+		if target.Model != "" {
+			model = target.Model
 		}
-		if jsonErr := json.Unmarshal(out, &diskData); jsonErr == nil {
-			if diskData.FriendlyName != "" {
-				model = diskData.FriendlyName
-			}
-			if diskData.SerialNumber != "" {
-				serial = diskData.SerialNumber
-			}
-			if diskData.MediaType != "" {
-				mediaType = diskData.MediaType
-			}
-			if strings.EqualFold(diskData.HealthStatus, "Healthy") {
-				health = "healthy"
+		if target.SerialNumber != "" {
+			serial = target.SerialNumber
+		}
+		if target.MediaType != "" {
+			mediaType = target.MediaType
+		}
+		if target.HealthStatus != "" {
+			health = target.HealthStatus
+		}
+		if target.OperationalStatus != "" {
+			operationalStatus = target.OperationalStatus
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		// Query PowerShell for real drive hardware status
+		psScript := fmt.Sprintf(`
+			$part = Get-Partition | Where-Object DriveLetter -eq '%s' | Select-Object -First 1 DiskNumber
+			if ($part) {
+				$disk = Get-PhysicalDisk | Where-Object DeviceId -eq $part.DiskNumber | Select-Object FriendlyName, SerialNumber, MediaType, HealthStatus, OperationalStatus | ConvertTo-Json -Compress
+				Write-Output $disk
 			} else {
-				health = "warning"
+				$any = Get-PhysicalDisk | Select-Object -First 1 FriendlyName, SerialNumber, MediaType, HealthStatus, OperationalStatus | ConvertTo-Json -Compress
+				Write-Output $any
 			}
-			if diskData.OperationalStatus != "" {
-				operationalStatus = diskData.OperationalStatus
+		`, driveLetter)
+
+		cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+		out, err := cmd.Output()
+		if err == nil && len(out) > 0 {
+			var diskData struct {
+				FriendlyName      string `json:"FriendlyName"`
+				SerialNumber      string `json:"SerialNumber"`
+				MediaType         string `json:"MediaType"`
+				HealthStatus      string `json:"HealthStatus"`
+				OperationalStatus string `json:"OperationalStatus"`
+			}
+			if jsonErr := json.Unmarshal(out, &diskData); jsonErr == nil {
+				if diskData.FriendlyName != "" {
+					model = diskData.FriendlyName
+				}
+				if diskData.SerialNumber != "" {
+					serial = diskData.SerialNumber
+				}
+				if diskData.MediaType != "" {
+					mediaType = diskData.MediaType
+				}
+				if strings.EqualFold(diskData.HealthStatus, "Healthy") {
+					health = "healthy"
+				} else {
+					health = "warning"
+				}
+				if diskData.OperationalStatus != "" {
+					operationalStatus = diskData.OperationalStatus
+				}
+			}
+		}
+	} else {
+		// Linux: query smartctl if available
+		targetDev := driveID
+		if target != nil && target.ID != "" {
+			targetDev = target.ID
+		}
+		if smartPath, err := exec.LookPath("smartctl"); err == nil && targetDev != "" {
+			cmd := exec.Command(smartPath, "-H", targetDev)
+			if out, err := cmd.Output(); err == nil {
+				if strings.Contains(strings.ToUpper(string(out)), "PASSED") || strings.Contains(strings.ToUpper(string(out)), "OK") {
+					health = "healthy"
+					operationalStatus = "OK"
+				}
 			}
 		}
 	}
@@ -1513,18 +1557,88 @@ func (a *API) checkDatasetAccess(r *http.Request, datasetName string, needEditor
 	if user.Role == models.RoleAdmin {
 		return "editor", nil
 	}
-	var perms map[string]string
+
+	normName := strings.ToLower(strings.TrimSpace(datasetName))
+	cleanName := strings.Trim(normName, "/")
+
+	var rawPerms map[string]any
 	if user.DatasetPermissions != "" {
-		_ = json.Unmarshal([]byte(user.DatasetPermissions), &perms)
+		_ = json.Unmarshal([]byte(user.DatasetPermissions), &rawPerms)
 	}
-	perm := perms[datasetName]
-	if perm == "editor" {
+
+	var matchedVal any
+	// 1. Direct or suffix match
+	for k, v := range rawPerms {
+		kNorm := strings.ToLower(strings.TrimSpace(k))
+		kClean := strings.Trim(kNorm, "/")
+		if kNorm == normName || kClean == cleanName || (kClean != "" && strings.HasSuffix(cleanName, kClean)) || (cleanName != "" && strings.HasSuffix(kClean, cleanName)) {
+			matchedVal = v
+			break
+		}
+	}
+	// 2. Wildcard match
+	if matchedVal == nil {
+		if v, ok := rawPerms["/"]; ok {
+			matchedVal = v
+		} else if v, ok := rawPerms["*"]; ok {
+			matchedVal = v
+		}
+	}
+
+	if matchedVal == nil {
+		return "", fmt.Errorf("forbidden: bạn không có quyền truy cập vào tập dữ liệu %s", datasetName)
+	}
+
+	canRead := false
+	canWrite := false
+	canExec := false
+
+	switch val := matchedVal.(type) {
+	case string:
+		s := strings.ToLower(strings.TrimSpace(val))
+		if s == "editor" || s == "writer" || s == "owner" {
+			canRead = true
+			canWrite = true
+			canExec = true
+		} else if s == "viewer" || s == "reader" {
+			canRead = true
+			canExec = true
+		}
+	case map[string]any:
+		lvl, _ := val["level"].(string)
+		lvl = strings.ToLower(lvl)
+		if r, ok := val["read"].(bool); ok {
+			canRead = r
+		} else {
+			canRead = lvl == "viewer" || lvl == "editor" || lvl == "writer"
+		}
+		if w, ok := val["write"].(bool); ok {
+			canWrite = w
+		} else {
+			canWrite = lvl == "editor" || lvl == "writer"
+		}
+		if x, ok := val["execute"].(bool); ok {
+			canExec = x
+		} else {
+			canExec = canRead
+		}
+	}
+
+	if needEditor {
+		if !canWrite {
+			return "", fmt.Errorf("forbidden: bạn chỉ có quyền xem (Chỉ đọc) trên tập dữ liệu %s, không thể ghi/chỉnh sửa", datasetName)
+		}
 		return "editor", nil
 	}
-	if !needEditor && perm == "viewer" {
-		return "viewer", nil
+
+	if !canRead && !canExec {
+		return "", fmt.Errorf("forbidden: bạn không có quyền truy cập vào tập dữ liệu %s", datasetName)
 	}
-	return "", fmt.Errorf("forbidden: bạn không có quyền truy cập vào bộ dữ liệu %s", datasetName)
+
+	if canWrite {
+		return "editor", nil
+	}
+	return "viewer", nil
 }
 
 func (a *API) getDatasetMount(ctx context.Context, nameOrID string) (string, string, error) {
@@ -1746,9 +1860,33 @@ func (a *API) handleDeleteDatasetItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var deletedBytes int64 = 0
+	_ = filepath.Walk(cleanTarget, func(_ string, fi os.FileInfo, err error) error {
+		if err == nil && fi != nil && !fi.IsDir() {
+			deletedBytes += fi.Size()
+		}
+		return nil
+	})
+
 	if err := os.RemoveAll(cleanTarget); err != nil {
 		a.fail(w, r, err)
 		return
+	}
+
+	if deletedBytes > 0 {
+		now := db.NowMillis()
+		user, _ := mw.UserFrom(r.Context())
+		_ = a.db.Write(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
+			if user.ID != "" {
+				_, _ = tx.ExecContext(ctx,
+					`UPDATE users SET quota_bytes_used = MAX(0, quota_bytes_used - ?), updated_at = ? WHERE id = ?`,
+					deletedBytes, now, user.ID)
+			}
+			_, _ = tx.ExecContext(ctx,
+				`UPDATE datasets SET used_bytes = MAX(0, used_bytes - ?), updated_at = ? WHERE name = ? OR id = ?`,
+				deletedBytes, now, dsName, dsName)
+			return nil
+		})
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -1810,6 +1948,40 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 1. Quota check for user
+	user, _ := mw.UserFrom(r.Context())
+	var userQuota, userUsed int64
+	if user.ID != "" {
+		_ = a.db.Read().QueryRowContext(r.Context(),
+			`SELECT quota_bytes, quota_bytes_used FROM users WHERE id = ?`, user.ID).Scan(&userQuota, &userUsed)
+	}
+
+	// 2. Quota check for dataset
+	var dsQuota, dsUsed int64
+	_ = a.db.Read().QueryRowContext(r.Context(),
+		`SELECT quota_bytes, used_bytes FROM datasets WHERE name = ? OR id = ?`, dsName, dsName).Scan(&dsQuota, &dsUsed)
+
+	var totalIncoming int64 = 0
+	for _, fh := range formFiles {
+		totalIncoming += fh.Size
+	}
+
+	if userQuota > 0 && userUsed+totalIncoming > userQuota {
+		writeJSON(w, http.StatusInsufficientStorage, map[string]any{
+			"error":   "quota_exceeded",
+			"message": fmt.Sprintf("Dung lượng vượt quá hạn ngạch cho phép của tài khoản (%d MB / %d MB)", (userUsed+totalIncoming)/(1024*1024), userQuota/(1024*1024)),
+		})
+		return
+	}
+
+	if dsQuota > 0 && dsUsed+totalIncoming > dsQuota {
+		writeJSON(w, http.StatusInsufficientStorage, map[string]any{
+			"error":   "quota_exceeded",
+			"message": fmt.Sprintf("Dung lượng vượt quá hạn ngạch cho phép của tập dữ liệu (%d MB / %d MB)", (dsUsed+totalIncoming)/(1024*1024), dsQuota/(1024*1024)),
+		})
+		return
+	}
+
 	uploaded := make([]DatasetItemDTO, 0, len(formFiles))
 	for _, fh := range formFiles {
 		src, err := fh.Open()
@@ -1842,6 +2014,25 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 			Role:      "editor",
 			CreatedAt: now,
 			UpdatedAt: now,
+		})
+	}
+
+	var totalSaved int64 = 0
+	for _, it := range uploaded {
+		totalSaved += it.SizeBytes
+	}
+	if totalSaved > 0 {
+		now := db.NowMillis()
+		_ = a.db.Write(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
+			if user.ID != "" {
+				_, _ = tx.ExecContext(ctx,
+					`UPDATE users SET quota_bytes_used = quota_bytes_used + ?, updated_at = ? WHERE id = ?`,
+					totalSaved, now, user.ID)
+			}
+			_, _ = tx.ExecContext(ctx,
+				`UPDATE datasets SET used_bytes = used_bytes + ?, updated_at = ? WHERE name = ? OR id = ?`,
+				totalSaved, now, dsName, dsName)
+			return nil
 		})
 	}
 

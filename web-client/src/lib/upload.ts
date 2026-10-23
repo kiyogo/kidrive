@@ -1,6 +1,7 @@
 "use client";
 
 import { api } from "./api";
+import { Api } from "./endpoints";
 import { stringsFor } from "./l10n";
 
 /** A transfer's error text is shown on the transfers screen, so it has to be
@@ -166,6 +167,28 @@ class Transfers {
     this.patch(id, { state: "uploading" });
     const token = localStorage.getItem("ld.access") ?? "";
     const auth = { Authorization: `Bearer ${token}` };
+
+    if (parentId.startsWith("dataset:")) {
+      const parts = parentId.replace(/^dataset:/, "").split(":");
+      const dsName = parts[0];
+      const subpath = parts.slice(1).join("/");
+      const formData = new FormData();
+      formData.append("file", file);
+      const url = api.absolute(Api.datasetUpload(dsName, subpath));
+      const res = await fetch(url, {
+        method: "POST",
+        headers: auth,
+        body: formData,
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        if (res.status === 507 || errJson.error?.includes("hạn ngạch") || errJson.error?.includes("quota")) {
+          throw new Error("Dung lượng lưu trữ đã đầy, không thể tải tệp lên");
+        }
+        throw new Error(errJson.message || errJson.error || "Không thể tải tệp lên tập dữ liệu");
+      }
+      return;
+    }
 
     // 1. creation. the metadata keys are the ones the store reads
     const meta = [

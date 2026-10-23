@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"fmt"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -208,11 +210,34 @@ func (a *API) handleUnstar(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (a *API) extractNodeID(r *http.Request, suffix string) string {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		wildcard := chi.URLParam(r, "*")
+		if wildcard != "" {
+			if suffix != "" && strings.HasSuffix(wildcard, "/"+suffix) {
+				id = strings.TrimSuffix(wildcard, "/"+suffix)
+			} else {
+				id = wildcard
+			}
+		}
+	}
+	if unescaped, err := url.PathUnescape(id); err == nil {
+		id = unescaped
+	}
+	return id
+}
+
 // handleFolderPreview returns up to four thumbnail urls for the content peek
 // on a folder's icon.
 func (a *API) handleFolderPreview(w http.ResponseWriter, r *http.Request) {
+	nodeID := a.extractNodeID(r, "preview")
+	if strings.HasPrefix(nodeID, "dataset:") {
+		writeJSON(w, http.StatusOK, map[string]any{"previews": []any{}})
+		return
+	}
 	userID, _ := caller(r)
-	children, err := a.files.Preview(r.Context(), userID, chi.URLParam(r, "id"))
+	children, err := a.files.Preview(r.Context(), userID, nodeID)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -231,8 +256,69 @@ func (a *API) handleFolderPreview(w http.ResponseWriter, r *http.Request) {
 // handleDownload streams a file, honoring Range so video scrubbing and
 // resumed downloads work without reading anything into memory.
 func (a *API) handleDownload(w http.ResponseWriter, r *http.Request) {
+	nodeID := a.extractNodeID(r, "download")
+	if strings.HasPrefix(nodeID, "dataset:") {
+		parts := strings.SplitN(strings.TrimPrefix(nodeID, "dataset:"), ":", 2)
+		dsName := parts[0]
+		subpath := ""
+		if len(parts) > 1 {
+			subpath = parts[1]
+		}
+		if unescaped, err := url.PathUnescape(dsName); err == nil {
+			dsName = unescaped
+		}
+		if unescaped, err := url.PathUnescape(subpath); err == nil {
+			subpath = unescaped
+		}
+		dsName, mount, err := a.getDatasetMount(r.Context(), dsName)
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		_, err = a.checkDatasetAccess(r, dsName, false)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
+			return
+		}
+		cleanedSub := filepath.Clean("/" + subpath)
+		cleanedSub = strings.TrimPrefix(cleanedSub, "/")
+		cleanedSub = strings.TrimPrefix(cleanedSub, "\\")
+		cleanTarget := filepath.Clean(filepath.Join(mount, cleanedSub))
+		cleanMount := filepath.Clean(mount)
+		if !strings.HasPrefix(strings.ToLower(cleanTarget), strings.ToLower(cleanMount)) {
+			a.fail(w, r, fmt.Errorf("đường dẫn không hợp lệ"))
+			return
+		}
+		f, err := os.Open(cleanTarget)
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		filename := filepath.Base(cleanTarget)
+		mimeType := mime.TypeByExtension(filepath.Ext(filename))
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		disposition := "attachment"
+		if boolQuery(r, "inline") {
+			disposition = "inline"
+		}
+		w.Header().Set("Content-Type", mimeType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"; filename*=UTF-8''%s`,
+			disposition, sanitizeFilename(filename), url.PathEscape(filename)))
+		w.Header().Set("Accept-Ranges", "bytes")
+		http.ServeContent(w, r, filename, info.ModTime(), f)
+		return
+	}
+
 	userID, ip := caller(r)
-	node, f, info, err := a.files.OpenForDownload(r.Context(), userID, chi.URLParam(r, "id"))
+	node, f, info, err := a.files.OpenForDownload(r.Context(), userID, nodeID)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -281,14 +367,76 @@ func sanitizeFilename(name string) string {
 }
 
 func (a *API) handleThumbnail(w http.ResponseWriter, r *http.Request) {
+	nodeID := a.extractNodeID(r, "thumbnail")
+	if strings.HasPrefix(nodeID, "dataset:") {
+		parts := strings.SplitN(strings.TrimPrefix(nodeID, "dataset:"), ":", 2)
+		dsName := parts[0]
+		subpath := ""
+		if len(parts) > 1 {
+			subpath = parts[1]
+		}
+		if unescaped, err := url.PathUnescape(dsName); err == nil {
+			dsName = unescaped
+		}
+		if unescaped, err := url.PathUnescape(subpath); err == nil {
+			subpath = unescaped
+		}
+		dsName, mount, err := a.getDatasetMount(r.Context(), dsName)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "no_thumbnail", "dataset not found")
+			return
+		}
+		_, err = a.checkDatasetAccess(r, dsName, false)
+		if err != nil {
+			writeError(w, http.StatusForbidden, "forbidden", err.Error())
+			return
+		}
+		cleanTarget := filepath.Clean(filepath.Join(mount, filepath.Clean("/"+subpath)))
+		if !strings.HasPrefix(strings.ToLower(cleanTarget), strings.ToLower(filepath.Clean(mount))) {
+			writeError(w, http.StatusForbidden, "forbidden", "đường dẫn không hợp lệ")
+			return
+		}
+		ext := strings.ToLower(filepath.Ext(cleanTarget))
+		if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp" || ext == ".gif" {
+			http.ServeFile(w, r, cleanTarget)
+			return
+		}
+		writeError(w, http.StatusNotFound, "no_thumbnail", "this file has no preview")
+		return
+	}
+
 	userID, _ := caller(r)
-	node, path, err := a.files.ThumbnailPath(r.Context(), userID, chi.URLParam(r, "id"))
+	node, path, err := a.files.ThumbnailPath(r.Context(), userID, nodeID)
 	if err != nil {
 		// a missing preview is normal: the client falls back to a type badge
 		writeError(w, http.StatusNotFound, "no_thumbnail", "this file has no preview")
 		return
 	}
 	serveThumbnail(w, r, node, path)
+}
+
+// handleNodeWildcard dispatches wildcard node routes (e.g. /nodes/dataset:.../download)
+func (a *API) handleNodeWildcard(w http.ResponseWriter, r *http.Request) {
+	wildcard := chi.URLParam(r, "*")
+	if wildcard == "" {
+		writeError(w, http.StatusNotFound, "not_found", "no such node")
+		return
+	}
+
+	if strings.HasSuffix(wildcard, "/download") {
+		a.handleDownload(w, r)
+		return
+	}
+	if strings.HasSuffix(wildcard, "/thumbnail") {
+		a.handleThumbnail(w, r)
+		return
+	}
+	if strings.HasSuffix(wildcard, "/preview") {
+		a.handleFolderPreview(w, r)
+		return
+	}
+
+	writeError(w, http.StatusNotFound, "not_found", "no such node")
 }
 
 func serveThumbnail(w http.ResponseWriter, r *http.Request, node models.Node, path string) {

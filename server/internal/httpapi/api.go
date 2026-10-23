@@ -318,6 +318,7 @@ func (a *API) Router() http.Handler {
 			r.Get("/nodes/{id}/preview", a.handleFolderPreview)
 			r.Get("/nodes/{id}/download", a.handleDownload)
 			r.Get("/nodes/{id}/thumbnail", a.handleThumbnail)
+			r.Get("/nodes/*", a.handleNodeWildcard)
 		})
 	})
 

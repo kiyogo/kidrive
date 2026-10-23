@@ -124,23 +124,59 @@ export function FilesBrowser({
   const { user } = useSession();
 
   // Parse permissions of current user
-  const userPerms = useMemo<Record<string, "none" | "viewer" | "editor">>(() => {
+  const userPerms = useMemo<Record<string, { level: "editor" | "viewer" | "none"; read: boolean; write: boolean; execute: boolean }>>(() => {
     if (!user) return {};
     if (user.role === "admin") return {};
-    let perms: Record<string, "none" | "viewer" | "editor"> = {};
+    let raw: Record<string, any> = {};
     try {
       if (typeof window !== "undefined") {
         const cached = localStorage.getItem(`ld_user_dataset_perms_${user.id}`);
-        if (cached) perms = JSON.parse(cached);
+        if (cached) raw = JSON.parse(cached);
       }
     } catch {}
-    if (Object.keys(perms).length === 0 && user.dataset_permissions) {
+    if (Object.keys(raw).length === 0 && user.dataset_permissions) {
       try {
-        perms = JSON.parse(user.dataset_permissions);
+        raw = JSON.parse(user.dataset_permissions);
       } catch {}
+    }
+    const perms: Record<string, { level: "editor" | "viewer" | "none"; read: boolean; write: boolean; execute: boolean }> = {};
+    for (const [key, val] of Object.entries(raw)) {
+      if (!val || val === "none") continue;
+      if (typeof val === "object" && val !== null) {
+        const r = typeof val.read === "boolean" ? val.read : true;
+        const w = typeof val.write === "boolean" ? val.write : (val.level === "editor");
+        const x = typeof val.execute === "boolean" ? val.execute : (val.level === "editor" || r);
+        const lvl = w ? "editor" : (r ? "viewer" : "none");
+        perms[key] = { level: lvl, read: r, write: w, execute: x };
+      } else if (typeof val === "string") {
+        const isEditor = val === "editor" || val === "writer" || val === "owner";
+        const isViewer = val === "viewer" || val === "reader";
+        perms[key] = {
+          level: isEditor ? "editor" : (isViewer ? "viewer" : "none"),
+          read: isEditor || isViewer,
+          write: isEditor,
+          execute: isEditor || isViewer,
+        };
+      }
     }
     return perms;
   }, [user]);
+
+  const getDatasetPerm = useCallback((dsName: string) => {
+    if (!user) return { level: "none" as const, read: false, write: false, execute: false };
+    if (user.role === "admin") return { level: "editor" as const, read: true, write: true, execute: true };
+    if (userPerms[dsName]) return userPerms[dsName];
+    const lower = dsName.toLowerCase();
+    for (const [k, v] of Object.entries(userPerms)) {
+      const kLower = k.toLowerCase();
+      if (kLower === lower || kLower.replace(/^\/+/, "") === lower.replace(/^\/+/, "") || lower.endsWith(kLower.replace(/^\/+/, ""))) {
+        return v;
+      }
+    }
+    if (userPerms["/"]) return userPerms["/"];
+    if (userPerms["*"]) return userPerms["*"];
+    return { level: "none" as const, read: false, write: false, execute: false };
+  }, [user, userPerms]);
 
   // Determine root dataset name if within a dataset hierarchy
   const currentDatasetName = useMemo<string | null>(() => {
@@ -160,22 +196,31 @@ export function FilesBrowser({
     if (!user) return false;
     if (user.role === "admin") return false;
     if (currentDatasetName) {
-      const perm = userPerms[currentDatasetName] || "none";
-      return perm === "viewer";
+      const perm = getDatasetPerm(currentDatasetName);
+      return !perm.write;
     }
     return false;
-  }, [user, currentDatasetName, userPerms]);
+  }, [user, currentDatasetName, getDatasetPerm]);
 
   // Is current view forbidden?
   const isForbidden = useMemo<boolean>(() => {
     if (!user) return false;
     if (user.role === "admin") return false;
     if (currentDatasetName) {
-      const perm = userPerms[currentDatasetName] || "none";
-      return perm === "none";
+      const perm = getDatasetPerm(currentDatasetName);
+      return !perm.read;
     }
     return false;
-  }, [user, currentDatasetName, userPerms]);
+  }, [user, currentDatasetName, getDatasetPerm]);
+
+  // First dataset with write permissions for this user
+  const defaultTargetDataset = useMemo<string | null>(() => {
+    if (!user || user.role === "admin") return null;
+    for (const [k, v] of Object.entries(userPerms)) {
+      if (v.write) return k;
+    }
+    return null;
+  }, [user, userPerms]);
 
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
@@ -367,7 +412,11 @@ export function FilesBrowser({
         return;
       }
     }
-    const parts = folderId.replace(/^dataset:/, "").split(":");
+    let targetFolderId = folderId;
+    if (!targetFolderId && defaultTargetDataset) {
+      targetFolderId = `dataset:${defaultTargetDataset}`;
+    }
+    const parts = targetFolderId.replace(/^dataset:/, "").split(":");
     const dsName = parts[0];
     const subpath = parts.slice(1).join("/");
 
@@ -484,8 +533,8 @@ export function FilesBrowser({
         }
         const datasetNodes: NodeModel[] = [];
         for (const ds of sysDatasets) {
-          const perm = user?.role === "admin" ? "editor" : (userPerms[ds.name] || "none");
-          if (perm === "none") continue; // Cấm truy cập -> hoàn toàn ẩn!
+          const perm = getDatasetPerm(ds.name);
+          if (!perm.read) continue; // Cấm truy cập -> hoàn toàn ẩn!
           datasetNodes.push({
             id: `dataset:${ds.name}`,
             parent_id: "",
@@ -494,10 +543,10 @@ export function FilesBrowser({
             name: ds.name,
             type: "folder",
             mime_type: "application/x-directory",
-            size_bytes: 0,
+            size_bytes: ds.used_bytes || 0,
             has_thumbnail: false,
             color: ds.pool === "kiyo-pool" ? "grape" : "azure",
-            role: perm,
+            role: perm.write ? "editor" : "viewer",
             created_at: ds.created_at || Date.now() - 86400000 * 10,
             updated_at: ds.updated_at || Date.now() - 3600000,
           });
@@ -1229,7 +1278,7 @@ export function FilesBrowser({
             e.target.value = "";
             return;
           }
-          if (folderId.startsWith("dataset:")) {
+          if (folderId.startsWith("dataset:") || (!folderId && defaultTargetDataset)) {
             handleDatasetUpload(e.target.files);
           } else {
             void upload(e.target.files);

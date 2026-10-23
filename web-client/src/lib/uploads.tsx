@@ -60,6 +60,28 @@ export function useUploader(parentId: string, onDone?: () => void) {
     [user],
   );
 
+  const resolveTargetInto = useCallback(
+    (into: string) => {
+      if (into) return into;
+      if (user && user.role !== "admin") {
+        let userPerms: Record<string, any> = {};
+        try {
+          if (user.dataset_permissions) userPerms = JSON.parse(user.dataset_permissions);
+        } catch {}
+        for (const [dsKey, val] of Object.entries(userPerms)) {
+          if (val && typeof val === "object" && (val.write || val.level === "editor")) {
+            return `dataset:${dsKey}`;
+          }
+          if (typeof val === "string" && (val === "editor" || val === "writer" || val === "owner")) {
+            return `dataset:${dsKey}`;
+          }
+        }
+      }
+      return into;
+    },
+    [user],
+  );
+
   const send = useCallback(
     async (list: File[], into: string, replacing?: Map<File, string>) => {
       if (!list.length) return;
@@ -70,9 +92,10 @@ export function useUploader(parentId: string, onDone?: () => void) {
       }
       const totalSize = list.reduce((acc, f) => acc + (f.size || 0), 0);
       if (!checkQuota(totalSize)) return;
-      await transfers.enqueue(list, into, onDone, replacing);
+      const finalInto = resolveTargetInto(into);
+      await transfers.enqueue(list, finalInto, onDone, replacing);
     },
-    [onDone, checkQuota],
+    [onDone, checkQuota, resolveTargetInto],
   );
 
   const pickFolder = useCallback(
@@ -88,14 +111,15 @@ export function useUploader(parentId: string, onDone?: () => void) {
       const totalSize = list.reduce((acc, f) => acc + (f.size || 0), 0);
       if (!checkQuota(totalSize)) return;
 
+      const finalInto = resolveTargetInto(into);
       const plan = planFromFiles(files);
       await executeFolderUpload({
         plan,
-        destinationParentId: into,
+        destinationParentId: finalInto,
         onDone,
       });
     },
-    [parentId, onDone, checkQuota],
+    [parentId, onDone, checkQuota, resolveTargetInto],
   );
 
   const pick = useCallback(
@@ -113,12 +137,20 @@ export function useUploader(parentId: string, onDone?: () => void) {
       const totalSize = list.reduce((acc, f) => acc + (f.size || 0), 0);
       if (!checkQuota(totalSize)) return;
 
+      const finalInto = resolveTargetInto(into);
+
+      // If destination is a dataset, send directly without node clash check
+      if (finalInto.startsWith("dataset:")) {
+        await send(list, finalInto);
+        return;
+      }
+
       // If any file has relative path, it's a folder upload
       const hasRelativePath = list.some(
         (f) => (f as any).webkitRelativePath && String((f as any).webkitRelativePath).includes("/"),
       );
       if (hasRelativePath) {
-        await pickFolder(list, into);
+        await pickFolder(list, finalInto);
         return;
       }
 
@@ -127,10 +159,10 @@ export function useUploader(parentId: string, onDone?: () => void) {
       // second file rather than a lost one
       let siblings: NodeModel[] = [];
       try {
-        const data = await api.get<{ nodes: NodeModel[] }>(Api.nodes, { parent_id: into });
+        const data = await api.get<{ nodes: NodeModel[] }>(Api.nodes, { parent_id: finalInto });
         siblings = data?.nodes ?? [];
       } catch {
-        await send(list, into);
+        await send(list, finalInto);
         return;
       }
 
@@ -141,12 +173,12 @@ export function useUploader(parentId: string, onDone?: () => void) {
       );
       const clashes = list.filter((f) => existing.has(f.name.toLowerCase()));
       if (!clashes.length) {
-        await send(list, into);
+        await send(list, finalInto);
         return;
       }
-      setClash({ files: list, clashes, existing, into });
+      setClash({ files: list, clashes, existing, into: finalInto });
     },
-    [parentId, send, pickFolder, checkQuota],
+    [parentId, send, pickFolder, checkQuota, resolveTargetInto],
   );
 
   const dropDataTransfer = useCallback(

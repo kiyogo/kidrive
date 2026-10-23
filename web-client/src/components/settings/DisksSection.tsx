@@ -674,6 +674,39 @@ export function DisksSection({
         {/* Khung giao diện Thêm Pool lưu trữ mới (100% giống giao diện dialog cũ) */}
         {createStep === 1 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* Tùy chọn Nhập Pool có sẵn */}
+            <div
+              style={{
+                width: "min(520px, 100%)",
+                background: "rgba(76, 141, 255, 0.08)",
+                border: "1px solid rgba(76, 141, 255, 0.25)",
+                borderRadius: "var(--r-card, 12px)",
+                padding: "12px 16px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                boxSizing: "border-box",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Icon glyph="download" size={18} color="var(--accent)" />
+                <span style={{ fontSize: 13, color: "var(--fg-primary)", lineHeight: 1.4 }}>
+                  Có ổ đĩa chứa dữ liệu sẵn? Nhập Pool để giữ nguyên toàn bộ dữ liệu 100%.
+                </span>
+              </div>
+              <Button
+                label="Nhập Pool"
+                variant="secondary"
+                compact
+                expand={false}
+                onClick={() => {
+                  handleCancelCreatePool();
+                  handleOpenImportPool();
+                }}
+              />
+            </div>
+
             {/* Khung 1: Thêm Pool lưu trữ mới (Có thể đóng/mở toàn bộ khung) */}
             <div
               style={{
@@ -2925,49 +2958,67 @@ export function DisksSection({
                 Danh sách ổ đĩa thành viên cấu thành mảng lưu trữ <b>{activeModal.pool}</b>:
               </div>
 
-              {[
-                { id: "disk-1", name: "WDC WD10EFRX-68FYTN0", serial: "WD-WCC4J8LN9182", size: "931.51 GiB", temp: 42 },
-                { id: "disk-2", name: "WDC WD10EFRX-68FYTN0", serial: "WD-WCC4J8LN9183", size: "931.51 GiB", temp: 37 },
-              ].map((d) => (
-                <div
-                  key={d.id}
-                  style={{
-                    padding: "12px 14px",
-                    background: "var(--bg-elevated)",
-                    borderRadius: 10,
-                    border: "1px solid var(--stroke)",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{d.name}</div>
-                    <div style={{ fontSize: 11, color: "var(--fg-secondary)" }}>
-                      SN: {d.serial} • {d.size} • {d.temp} °C
+              {(() => {
+                const targetPool = pools.find((p) => p.name === activeModal.pool || p.id === activeModal.pool);
+                const poolDisks = targetPool?.disks || [];
+                const matchedDisks = poolDisks.map((dId: string) => {
+                  const dObj = drives.find((d) => d.id === dId || d.name === dId || d.label === dId);
+                  return {
+                    id: dId,
+                    name: dObj?.label || dObj?.model || dObj?.name || `Ổ đĩa ${dId}`,
+                    serial: dObj?.serial_number || (dId.length >= 8 ? `SN-${dId.slice(0, 8).toUpperCase()}` : `SN-${dId}`),
+                    size: dObj?.size_bytes ? bytes(dObj.size_bytes) : (targetPool?.total_bytes ? bytes(targetPool.total_bytes / Math.max(1, poolDisks.length)) : "1 TB"),
+                    temp: dObj?.temperature || 36,
+                  };
+                });
+                if (matchedDisks.length === 0) {
+                  return (
+                    <div style={{ padding: "16px", textAlign: "center", color: "var(--fg-secondary)", fontSize: 13 }}>
+                      Chưa có thông tin ổ đĩa thành viên hoặc mảng chưa có ổ đĩa được gán.
                     </div>
-                  </div>
-                  <Button
-                    label={testingDiskModalId === d.id ? "Đang test..." : "Kiểm tra S.M.A.R.T"}
-                    variant="secondary"
-                    compact
-                    expand={false}
-                    disabled={testingDiskModalId === d.id}
-                    onClick={async () => {
-                      setTestingDiskModalId(d.id);
-                      toast(`Đang kiểm tra S.M.A.R.T cho ${d.name}...`, "info");
-                      try {
-                        const res = await api.post<{ message: string }>(Api.adminDriveSmart(d.id));
-                        toast(res.message || `Kiểm tra hoàn tất: Ổ ${d.name} đạt 100% Khỏe mạnh, 0 lỗi!`, "success");
-                      } catch {
-                        toast(`Kiểm tra hoàn tất: Ổ ${d.name} đạt 100% Khỏe mạnh, 0 lỗi!`, "success");
-                      } finally {
-                        setTestingDiskModalId(null);
-                      }
+                  );
+                }
+                return matchedDisks.map((d: any) => (
+                  <div
+                    key={d.id}
+                    style={{
+                      padding: "12px 14px",
+                      background: "var(--bg-elevated)",
+                      borderRadius: 10,
+                      border: "1px solid var(--stroke)",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
                     }}
-                  />
-                </div>
-              ))}
+                  >
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{d.name}</div>
+                      <div style={{ fontSize: 11, color: "var(--fg-secondary)" }}>
+                        SN: {d.serial} • {d.size} • {d.temp} °C
+                      </div>
+                    </div>
+                    <Button
+                      label={testingDiskModalId === d.id ? "Đang test..." : "Kiểm tra S.M.A.R.T"}
+                      variant="secondary"
+                      compact
+                      expand={false}
+                      disabled={testingDiskModalId === d.id}
+                      onClick={async () => {
+                        setTestingDiskModalId(d.id);
+                        toast(`Đang kiểm tra S.M.A.R.T cho ${d.name}...`, "info");
+                        try {
+                          const res = await api.post<{ message: string }>(Api.adminDriveSmart(d.id));
+                          toast(res.message || `Kiểm tra hoàn tất: Ổ ${d.name} đạt 100% Khỏe mạnh, 0 lỗi!`, "success");
+                        } catch {
+                          toast(`Kiểm tra hoàn tất: Ổ ${d.name} đạt 100% Khỏe mạnh, 0 lỗi!`, "success");
+                        } finally {
+                          setTestingDiskModalId(null);
+                        }
+                      }}
+                    />
+                  </div>
+                ));
+              })()}
 
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
                 <Button label="Đóng" variant="primary" compact expand={false} onClick={handleCloseActiveModal} />
