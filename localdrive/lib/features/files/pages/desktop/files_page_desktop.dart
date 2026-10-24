@@ -41,19 +41,9 @@ class FilesPageDesktop extends HookConsumerWidget {
     );
     final listing = ref.watch(folderProvider(query));
 
-    // exactly one selected item opens the details pane; several means a bulk
-    // action is in progress and a single item's details would be misleading
-    final NodeModel? focused = selection.length == 1
-        ? listing.maybeWhen(
-            data: (nodes) {
-              for (final node in nodes) {
-                if (node.id == selection.first) return node;
-              }
-              return null;
-            },
-            orElse: () => null,
-          )
-        : null;
+    // Details/Preview pane: opens only via context menu "Xem trước",
+    // stays open when switching to another file, and closes only via the close button.
+    final NodeModel? activeDetailsNode = ref.watch(activeDetailsNodeProvider);
 
     final nodes = listing.maybeWhen(
       data: (nodes) => nodes,
@@ -149,7 +139,7 @@ class FilesPageDesktop extends HookConsumerWidget {
                       },
               ),
             ),
-            if (focused != null)
+            if (activeDetailsNode != null)
               Positioned(
                 top: 0,
                 right: 0,
@@ -162,7 +152,7 @@ class FilesPageDesktop extends HookConsumerWidget {
                       left: BorderSide(color: context.surfaces.strokeOutline),
                     ),
                   ),
-                  child: NodeDetailsPane(node: focused),
+                  child: NodeDetailsPane(node: activeDetailsNode),
                 ),
               ),
           ],

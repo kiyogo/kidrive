@@ -389,6 +389,7 @@ void activateNode(
       keys.contains(LogicalKeyboardKey.metaRight);
   if (toggling) {
     selection.toggleAt(node.id);
+    ref.read(activeDetailsNodeProvider.notifier).updateIfOpen(node);
     return;
   }
 
@@ -397,6 +398,7 @@ void activateNode(
       keys.contains(LogicalKeyboardKey.shiftRight);
   if (ranging) {
     selection.selectRange(node.id, <String>[for (final n in ordered) n.id]);
+    ref.read(activeDetailsNodeProvider.notifier).updateIfOpen(node);
     return;
   }
 
@@ -405,6 +407,7 @@ void activateNode(
     return;
   }
   selection.only(node.id);
+  ref.read(activeDetailsNodeProvider.notifier).updateIfOpen(node);
 }
 
 /// Double click, timed by hand rather than with a double tap recogniser.

@@ -10,6 +10,9 @@ import { useL10n } from "@/lib/l10n";
 import { categoryOf, isFolder, type NodeModel } from "@/lib/models";
 import { forget, isKept, keep, readKept } from "@/lib/offline";
 
+// Global in-memory cache of fully loaded image URLs so they display crystal-clear immediately without blur
+const loadedImagesCache = new Set<string>();
+
 /**
  * Immersive full-screen media viewer matching Flutter's PhotoViewerPage and VideoView.
  * Strict flat aesthetic: no drop shadows, 1px borders, smooth scrim transitions.
@@ -35,6 +38,7 @@ export function Preview({
   const [starred, setStarred] = useState<boolean>(Boolean(node.starred));
   const [kept, setKept] = useState<boolean>(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [slideDirection, setSlideDirection] = useState<"next" | "prev" | null>(null);
 
   // Video playback states
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -75,34 +79,60 @@ export function Preview({
   const online = useOnline();
   const unreachable = !online && !local;
 
-  // Intelligent windowed preloading with debounce to prioritize current media
+  // Preload 5 images before and 5 images after immediately to eliminate loading lag
   useEffect(() => {
     if (!nodes || currentIndex < 0) return;
-    const timer = setTimeout(() => {
-      const targets = [currentIndex + 1, currentIndex - 1].filter(
-        (i) => i >= 0 && i < nodes.length
-      );
-      for (const i of targets) {
-        const targetNode = nodes[i];
-        if (!targetNode) continue;
-        const targetCat = categoryOf(targetNode);
-        if (targetCat === "image") {
-          const img = new Image();
-          img.src = api.media(`${Api.download(targetNode.id)}?inline=1`);
-        }
+    const targets: number[] = [];
+    for (let offset = 1; offset <= 5; offset++) {
+      if (currentIndex + offset < nodes.length) {
+        targets.push(currentIndex + offset);
       }
-    }, 350);
-    return () => clearTimeout(timer);
+      if (currentIndex - offset >= 0) {
+        targets.push(currentIndex - offset);
+      }
+    }
+    for (const i of targets) {
+      const targetNode = nodes[i];
+      if (!targetNode) continue;
+      const targetCat = categoryOf(targetNode);
+      if (targetCat === "image") {
+        const fullSrc = api.media(`${Api.download(targetNode.id)}?inline=1`);
+        const img = new Image();
+        img.src = fullSrc;
+        img.onload = () => {
+          loadedImagesCache.add(fullSrc);
+        };
+        const thumb = new Image();
+        thumb.src = api.media(Api.thumbnail(targetNode.id));
+      }
+    }
   }, [nodes, currentIndex]);
+
+  // Eagerly check and mark current image as loaded
+  useEffect(() => {
+    if (category === "image" && src) {
+      const img = new Image();
+      img.src = src;
+      if (img.complete) {
+        loadedImagesCache.add(src);
+      } else {
+        img.onload = () => {
+          loadedImagesCache.add(src);
+        };
+      }
+    }
+  }, [src, category]);
 
   const handlePrev = useCallback(() => {
     if (nodes && currentIndex > 0 && onNavigate) {
+      setSlideDirection("prev");
       onNavigate(nodes[currentIndex - 1]);
     }
   }, [nodes, currentIndex, onNavigate]);
 
   const handleNext = useCallback(() => {
     if (nodes && currentIndex >= 0 && currentIndex < nodes.length - 1 && onNavigate) {
+      setSlideDirection("next");
       onNavigate(nodes[currentIndex + 1]);
     }
   }, [nodes, currentIndex, onNavigate]);
@@ -499,6 +529,7 @@ export function Preview({
             initialWidth={node.image_width}
             initialHeight={node.image_height}
             chrome={chrome}
+            slideDirection={slideDirection}
             onPrev={currentIndex > 0 ? handlePrev : undefined}
             onNext={currentIndex < total - 1 ? handleNext : undefined}
             onTap={() => {
@@ -1253,6 +1284,7 @@ function InteractiveImage({
   initialWidth,
   initialHeight,
   chrome = true,
+  slideDirection,
   onPrev,
   onNext,
   onTap,
@@ -1263,6 +1295,7 @@ function InteractiveImage({
   initialWidth?: number;
   initialHeight?: number;
   chrome?: boolean;
+  slideDirection?: "next" | "prev" | null;
   onPrev?: () => void;
   onNext?: () => void;
   onTap: () => void;
@@ -1272,7 +1305,11 @@ function InteractiveImage({
     width: initialWidth || 0,
     height: initialHeight || 0,
   });
-  const [fullLoaded, setFullLoaded] = useState(false);
+  const isInitiallyCached = loadedImagesCache.has(src);
+  const [fullLoaded, setFullLoaded] = useState(isInitiallyCached);
+  const [slideOffset, setSlideOffset] = useState<number>(0);
+  const [isSliding, setIsSliding] = useState(false);
+  const swipeDeltaX = useRef(0);
 
   // Consolidated view state
   const [view, setView] = useState<{ scale: number; x: number; y: number }>({
@@ -1303,14 +1340,42 @@ function InteractiveImage({
   const lastTapTime = useRef(0);
   const lastTapPos = useRef({ x: 0, y: 0 });
 
-  // Reset zoom and load state when image src changes
+  // Reset zoom, check cache, and trigger smooth horizontal sliding transition when navigating
   useEffect(() => {
     setView({ scale: 1.0, x: 0, y: 0 });
-    setFullLoaded(false);
+    const cached = loadedImagesCache.has(src);
+    setFullLoaded(cached);
     if (initialWidth && initialHeight) {
       setNaturalSize({ width: initialWidth, height: initialHeight });
     }
-  }, [src, initialWidth, initialHeight]);
+
+    if (slideDirection === "next") {
+      setSlideOffset(90);
+      setIsSliding(true);
+      const raf = requestAnimationFrame(() => {
+        setSlideOffset(0);
+      });
+      const timer = setTimeout(() => setIsSliding(false), 320);
+      return () => {
+        cancelAnimationFrame(raf);
+        clearTimeout(timer);
+      };
+    } else if (slideDirection === "prev") {
+      setSlideOffset(-90);
+      setIsSliding(true);
+      const raf = requestAnimationFrame(() => {
+        setSlideOffset(0);
+      });
+      const timer = setTimeout(() => setIsSliding(false), 320);
+      return () => {
+        cancelAnimationFrame(raf);
+        clearTimeout(timer);
+      };
+    } else {
+      setSlideOffset(0);
+      setIsSliding(false);
+    }
+  }, [src, initialWidth, initialHeight, slideDirection]);
 
   // Clean up timer on unmount
   useEffect(() => {
@@ -1544,6 +1609,14 @@ function InteractiveImage({
         viewRef.current.scale,
       );
       setView((v) => ({ ...v, x: clamped.x, y: clamped.y }));
+    } else if (e.touches.length === 1 && viewRef.current.scale <= 1.01) {
+      const dx = e.touches[0].clientX - dragStart.current.x;
+      const dy = e.touches[0].clientY - dragStart.current.y;
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
+        didMove.current = true;
+        swipeDeltaX.current = dx;
+        setSlideOffset(dx * 0.75);
+      }
     }
   };
 
@@ -1562,15 +1635,20 @@ function InteractiveImage({
       const dy = touch.clientY - dragStart.current.y;
 
       // Swipe navigation between photos on mobile when at 100% scale
-      if (viewRef.current.scale <= 1.01 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-        if (dx > 0 && onPrev) {
+      if (viewRef.current.scale <= 1.01 && (Math.abs(dx) > 50 || Math.abs(swipeDeltaX.current) > 50)) {
+        const delta = Math.abs(swipeDeltaX.current) > 50 ? swipeDeltaX.current : dx;
+        swipeDeltaX.current = 0;
+        setSlideOffset(0);
+        if (delta > 0 && onPrev) {
           onPrev();
           return;
-        } else if (dx < 0 && onNext) {
+        } else if (delta < 0 && onNext) {
           onNext();
           return;
         }
       }
+      swipeDeltaX.current = 0;
+      setSlideOffset(0);
 
       if (!didMove.current) {
         const now = Date.now();
@@ -1663,57 +1741,97 @@ function InteractiveImage({
         touchAction: "none",
       }}
     >
-      {thumbSrc && !fullLoaded && (
-        // eslint-disable-next-line @next/next/no-img-element
+      <style>{`
+        @keyframes previewSlideFromRight {
+          0% { transform: translate3d(85px, 0, 0); opacity: 0.85; }
+          100% { transform: translate3d(0, 0, 0); opacity: 1; }
+        }
+        @keyframes previewSlideFromLeft {
+          0% { transform: translate3d(-85px, 0, 0); opacity: 0.85; }
+          100% { transform: translate3d(0, 0, 0); opacity: 1; }
+        }
+      `}</style>
+      <div
+        key={src}
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          animation:
+            slideDirection === "next"
+              ? "previewSlideFromRight 0.3s cubic-bezier(0.16, 1, 0.3, 1)"
+              : slideDirection === "prev"
+              ? "previewSlideFromLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1)"
+              : "none",
+        }}
+      >
+        {thumbSrc && !fullLoaded && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={thumbSrc}
+            alt=""
+            draggable={false}
+            decoding="async"
+            style={{
+              position: "absolute",
+              width: "100%",
+              height: "100%",
+              maxWidth: "100%",
+              maxHeight: "100%",
+              objectFit: "contain",
+              opacity: 0.85,
+              transform: `translate3d(${view.x + slideOffset}px, ${view.y}px, 0) scale(${view.scale})`,
+              transformOrigin: "center center",
+              pointerEvents: "none",
+              transition: isDragging.current || isPinching.current
+                ? "none"
+                : "transform 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
+            }}
+          />
+        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={thumbSrc}
-          alt=""
+          src={src}
+          alt={alt}
           draggable={false}
           decoding="async"
+          ref={(el) => {
+            if (el && el.complete && el.naturalWidth > 0 && !fullLoaded) {
+              setFullLoaded(true);
+              loadedImagesCache.add(src);
+              setNaturalSize({ width: el.naturalWidth, height: el.naturalHeight });
+            }
+          }}
+          onLoad={(e) => {
+            setFullLoaded(true);
+            loadedImagesCache.add(src);
+            const img = e.currentTarget;
+            if (img.naturalWidth && img.naturalHeight) {
+              setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+            }
+          }}
           style={{
-            position: "absolute",
             width: "100%",
             height: "100%",
             maxWidth: "100%",
             maxHeight: "100%",
             objectFit: "contain",
-            filter: "blur(6px)",
-            transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`,
+            transform: `translate3d(${view.x + slideOffset}px, ${view.y}px, 0) scale(${view.scale})`,
             transformOrigin: "center center",
-            pointerEvents: "none",
+            willChange: "transform",
+            backfaceVisibility: "hidden",
+            WebkitBackfaceVisibility: "hidden",
+            opacity: fullLoaded ? 1 : 0,
+            transition: isDragging.current || isPinching.current
+              ? "none"
+              : "transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease-in-out",
+            userSelect: "none",
+            pointerEvents: "auto",
           }}
         />
-      )}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={src}
-        alt={alt}
-        draggable={false}
-        decoding="async"
-        onLoad={(e) => {
-          setFullLoaded(true);
-          const img = e.currentTarget;
-          if (img.naturalWidth && img.naturalHeight) {
-            setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
-          }
-        }}
-        style={{
-          width: "100%",
-          height: "100%",
-          maxWidth: "100%",
-          maxHeight: "100%",
-          objectFit: "contain",
-          transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`,
-          transformOrigin: "center center",
-          willChange: "transform",
-          backfaceVisibility: "hidden",
-          WebkitBackfaceVisibility: "hidden",
-          opacity: fullLoaded ? 1 : 0,
-          transition: isDragging.current || isPinching.current ? "none" : "transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease-in-out",
-          userSelect: "none",
-          pointerEvents: "auto",
-        }}
-      />
+      </div>
 
     </div>
   );

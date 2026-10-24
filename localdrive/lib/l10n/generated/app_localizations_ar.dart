@@ -839,7 +839,10 @@ class L10nAr extends L10n {
       'الأقراص الفعلية ومراقبة S.M.A.R.T وتوفير الطاقة';
 
   @override
-  String get settingsDatasets => 'مجموعات البيانات ومجمعات التخزين';
+  String get settingsStoragePools => 'مجمعات التخزين';
+
+  @override
+  String get settingsDatasets => 'مجموعات البيانات';
 
   @override
   String get settingsUsers => 'المستخدمون';

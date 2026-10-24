@@ -127,7 +127,7 @@ final galleryProvider = FutureProvider.autoDispose<List<NodeModel>>((ref) async 
         filter: NodeFilter.image,
         sortBy: SortBy.fromWire(sort.by.wire),
         descending: sort.descending,
-        limit: 500,
+        limit: 5000,
       );
   final imagesOnly = list
       .where((node) => node.category == FileCategory.image)

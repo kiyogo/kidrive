@@ -1635,10 +1635,16 @@ abstract class L10n {
   /// **'Physical drives, S.M.A.R.T monitoring, and spin-down'**
   String get settingsDiskManagementSubtitle;
 
+  /// No description provided for @settingsStoragePools.
+  ///
+  /// In en, this message translates to:
+  /// **'Storage Pools'**
+  String get settingsStoragePools;
+
   /// No description provided for @settingsDatasets.
   ///
   /// In en, this message translates to:
-  /// **'Datasets & Storage Pools'**
+  /// **'Datasets'**
   String get settingsDatasets;
 
   /// No description provided for @settingsUsers.

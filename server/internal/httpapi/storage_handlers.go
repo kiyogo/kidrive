@@ -926,12 +926,11 @@ type FolderTreeNodeDTO struct {
 
 func isIgnoredFolder(name string) bool {
 	lower := strings.ToLower(name)
-	if strings.HasPrefix(name, "$") || strings.HasPrefix(name, ".") || strings.EqualFold(name, "System Volume Information") {
+	if strings.HasPrefix(name, "$") || strings.EqualFold(name, "System Volume Information") {
 		return true
 	}
 	switch lower {
-	case "source", "node_modules", "build", "dist", "target", "bin", "obj", "vendor",
-		"appdata", "program files", "program files (x86)", "windows", "perflogs", "recovery", "temp", "tmp":
+	case "appdata", "program files", "program files (x86)", "windows", "perflogs", "recovery":
 		return true
 	}
 	return false

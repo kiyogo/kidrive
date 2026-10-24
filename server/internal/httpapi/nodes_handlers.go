@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -25,10 +26,85 @@ import (
 	"github.com/MultiX0/LocalDrive/server/internal/models"
 )
 
+type dirListCacheEntry struct {
+	nodes     []nodeDTO
+	timestamp time.Time
+}
+
+type mediaCacheEntry struct {
+	nodes     []nodeDTO
+	timestamp time.Time
+}
+
 var (
 	datasetThumbGroup singleflight.Group
-	datasetThumbSem   = make(chan struct{}, 3) // max 3 concurrent thumbnail generation jobs
+	datasetThumbSem   = make(chan struct{}, 16) // max 16 concurrent thumbnail jobs
+	mediaScanGroup    singleflight.Group
+
+	dirListCacheMu sync.RWMutex
+	dirListCache   = make(map[string]dirListCacheEntry)
+
+	mediaCacheMu sync.RWMutex
+	mediaCache   = make(map[string]mediaCacheEntry)
 )
+
+func getCachedDirList(key string) ([]nodeDTO, bool) {
+	dirListCacheMu.RLock()
+	defer dirListCacheMu.RUnlock()
+	entry, ok := dirListCache[key]
+	if ok && time.Since(entry.timestamp) < 60*time.Second {
+		res := make([]nodeDTO, len(entry.nodes))
+		copy(res, entry.nodes)
+		return res, true
+	}
+	return nil, false
+}
+
+func setCachedDirList(key string, nodes []nodeDTO) {
+	dirListCacheMu.Lock()
+	defer dirListCacheMu.Unlock()
+	res := make([]nodeDTO, len(nodes))
+	copy(res, nodes)
+	dirListCache[key] = dirListCacheEntry{nodes: res, timestamp: time.Now()}
+}
+
+func getCachedMediaList(key string) ([]nodeDTO, bool) {
+	mediaCacheMu.RLock()
+	defer mediaCacheMu.RUnlock()
+	entry, ok := mediaCache[key]
+	if ok && time.Since(entry.timestamp) < 5*time.Minute {
+		res := make([]nodeDTO, len(entry.nodes))
+		copy(res, entry.nodes)
+		return res, true
+	}
+	return nil, false
+}
+
+func setCachedMediaList(key string, nodes []nodeDTO) {
+	mediaCacheMu.Lock()
+	defer mediaCacheMu.Unlock()
+	res := make([]nodeDTO, len(nodes))
+	copy(res, nodes)
+	mediaCache[key] = mediaCacheEntry{nodes: res, timestamp: time.Now()}
+}
+
+func getCachedMediaScan(key string) ([]nodeDTO, bool) {
+	return getCachedMediaList(key)
+}
+
+func setCachedMediaScan(key string, nodes []nodeDTO) {
+	setCachedMediaList(key, nodes)
+}
+
+func invalidateAllCaches() {
+	dirListCacheMu.Lock()
+	dirListCache = make(map[string]dirListCacheEntry)
+	dirListCacheMu.Unlock()
+
+	mediaCacheMu.Lock()
+	mediaCache = make(map[string]mediaCacheEntry)
+	mediaCacheMu.Unlock()
+}
 
 func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	userID, _ := caller(r)
@@ -36,8 +112,10 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	isAdmin := ok && user.Role == models.RoleAdmin
 
 	limit := intQuery(r, "limit", 50)
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 {
 		limit = 50
+	} else if limit > 100000 {
+		limit = 100000
 	}
 	offset := intQuery(r, "offset", 0)
 	if offset < 0 {
@@ -150,95 +228,135 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		}
 		cleanTarget := filepath.Clean(mountPath)
 
-		var nodes []nodeDTO
-		childDsNames := make(map[string]bool)
+		var allNodes []nodeDTO
+		dirCacheKey := cleanTarget
+		cachedDir, foundDir := getCachedDirList(dirCacheKey)
+		if foundDir {
+			allNodes = cachedDir
+		} else {
+			childDsNames := make(map[string]bool)
 
-		// Thêm các tập dữ liệu con (child datasets) trực thuộc dataset này nếu đang ở thư mục gốc của dataset (subpath == "")
-		if subpath == "" {
-			dRows, err := a.db.Read().QueryContext(r.Context(),
-				`SELECT name, used_bytes, created_at, updated_at FROM datasets WHERE name LIKE ? ORDER BY name ASC`,
-				dsName+"/%")
-			if err == nil {
-				defer dRows.Close()
-				for dRows.Next() {
-					var childFullName string
-					var childUsed, childCreated, childUpdated int64
-					if err := dRows.Scan(&childFullName, &childUsed, &childCreated, &childUpdated); err == nil {
-						rel := strings.TrimPrefix(childFullName, dsName+"/")
-						if !strings.Contains(rel, "/") {
-							cRole, cErr := a.checkDatasetAccess(r, childFullName, false)
-							if cErr == nil {
-								childDsNames[strings.ToLower(rel)] = true
-								nodes = append(nodes, nodeDTO{
-									ID:        fmt.Sprintf("dataset:%s", childFullName),
-									ParentID:  opts.ParentID,
-									Name:      rel,
-									Type:      "folder",
-									Category:  "folder",
-									MimeType:  "application/x-directory",
-									SizeBytes: childUsed,
-									Role:      cRole,
-									CreatedAt: childCreated,
-									UpdatedAt: childUpdated,
-								})
+			// Thêm các tập dữ liệu con (child datasets) trực thuộc dataset này nếu đang ở thư mục gốc của dataset (subpath == "")
+			if subpath == "" {
+				dRows, err := a.db.Read().QueryContext(r.Context(),
+					`SELECT name, used_bytes, created_at, updated_at FROM datasets WHERE name LIKE ? ORDER BY name ASC`,
+					dsName+"/%")
+				if err == nil {
+					defer dRows.Close()
+					for dRows.Next() {
+						var childFullName string
+						var childUsed, childCreated, childUpdated int64
+						if err := dRows.Scan(&childFullName, &childUsed, &childCreated, &childUpdated); err == nil {
+							rel := strings.TrimPrefix(childFullName, dsName+"/")
+							if !strings.Contains(rel, "/") {
+								cRole, cErr := a.checkDatasetAccess(r, childFullName, false)
+								if cErr == nil {
+									childDsNames[strings.ToLower(rel)] = true
+									allNodes = append(allNodes, nodeDTO{
+										ID:        fmt.Sprintf("dataset:%s", childFullName),
+										ParentID:  opts.ParentID,
+										Name:      rel,
+										Type:      "folder",
+										Category:  "folder",
+										MimeType:  "application/x-directory",
+										SizeBytes: childUsed,
+										Role:      cRole,
+										CreatedAt: childCreated,
+										UpdatedAt: childUpdated,
+									})
+								}
 							}
 						}
 					}
 				}
 			}
-		}
 
-		entries, err := os.ReadDir(cleanTarget)
-		if err == nil {
-			qLower := strings.ToLower(opts.Query)
-			isSingleRoot := !hasFullRoot && len(userRoots) == 1 && strings.EqualFold(canonicalPath, userRoots[0])
-			for _, entry := range entries {
-				if childDsNames[strings.ToLower(entry.Name())] || isIgnoredFolder(entry.Name()) {
-					continue
-				}
-				if qLower != "" && !strings.Contains(strings.ToLower(entry.Name()), qLower) {
-					continue
-				}
-				info, err := entry.Info()
-				if err != nil {
-					continue
-				}
-				itemType := "file"
-				mimeType := mime.TypeByExtension(filepath.Ext(entry.Name()))
-				if entry.IsDir() {
-					itemType = "folder"
-					mimeType = "application/x-directory"
-				} else if mimeType == "" {
-					mimeType = "application/octet-stream"
-				}
-				relItemPath := filepath.ToSlash(filepath.Join(canonicalPath, entry.Name()))
-				relItemPath = strings.TrimPrefix(relItemPath, "/")
-				category := string(models.CategoryOf(models.NodeType(itemType), mimeType, entry.Name()))
+			entries, err := os.ReadDir(cleanTarget)
+			if err == nil {
+				isSingleRoot := !hasFullRoot && len(userRoots) == 1 && strings.EqualFold(canonicalPath, userRoots[0])
+				for _, entry := range entries {
+					if childDsNames[strings.ToLower(entry.Name())] || isIgnoredFolder(entry.Name()) {
+						continue
+					}
+					info, err := entry.Info()
+					if err != nil {
+						continue
+					}
+					itemType := "file"
+					mimeType := mime.TypeByExtension(filepath.Ext(entry.Name()))
+					if entry.IsDir() {
+						itemType = "folder"
+						mimeType = "application/x-directory"
+					} else if mimeType == "" {
+						mimeType = "application/octet-stream"
+					}
+					relItemPath := filepath.ToSlash(filepath.Join(canonicalPath, entry.Name()))
+					relItemPath = strings.TrimPrefix(relItemPath, "/")
+					category := string(models.CategoryOf(models.NodeType(itemType), mimeType, entry.Name()))
 
-				parentIDForNode := opts.ParentID
-				if isSingleRoot {
-					parentIDForNode = "" // Đặt rỗng để UI hiểu các tệp này hiển thị ở cấp gốc Tệp của tôi
-				}
+					parentIDForNode := opts.ParentID
+					if isSingleRoot {
+						parentIDForNode = "" // Đặt rỗng để UI hiểu các tệp này hiển thị ở cấp gốc Tệp của tôi
+					}
 
-				hasThumb := category == "image" || category == "video"
-				nodes = append(nodes, nodeDTO{
-					ID:           fmt.Sprintf("dataset:%s", relItemPath),
-					ParentID:     parentIDForNode,
-					Name:         entry.Name(),
-					Type:         itemType,
-					Category:     category,
-					MimeType:     mimeType,
-					SizeBytes:    info.Size(),
-					Role:         role,
-					HasThumbnail: hasThumb,
-					Previewable:  category == "image" || category == "video" || category == "audio",
-					CreatedAt:    info.ModTime().UnixMilli(),
-					UpdatedAt:    info.ModTime().UnixMilli(),
-				})
+					hasThumb := category == "image" || category == "video"
+					allNodes = append(allNodes, nodeDTO{
+						ID:           fmt.Sprintf("dataset:%s", relItemPath),
+						ParentID:     parentIDForNode,
+						Name:         entry.Name(),
+						Type:         itemType,
+						Category:     category,
+						MimeType:     mimeType,
+						SizeBytes:    info.Size(),
+						Role:         role,
+						HasThumbnail: hasThumb,
+						Previewable:  category == "image" || category == "video" || category == "audio",
+						CreatedAt:    info.ModTime().UnixMilli(),
+						UpdatedAt:    info.ModTime().UnixMilli(),
+					})
+				}
 			}
+			setCachedDirList(dirCacheKey, allNodes)
 		}
 
-		total := len(nodes)
+		// Lọc theo tìm kiếm nếu có
+		var filtered []nodeDTO
+		qLower := strings.ToLower(opts.Query)
+		if qLower != "" {
+			for _, item := range allNodes {
+				if strings.Contains(strings.ToLower(item.Name), qLower) {
+					filtered = append(filtered, item)
+				}
+			}
+		} else {
+			filtered = allNodes
+		}
+
+		// Sắp xếp: Thư mục luôn đứng đầu, sau đó theo opts.SortBy ("name", "size", "updated")
+		sort.Slice(filtered, func(i, j int) bool {
+			if filtered[i].Type != filtered[j].Type {
+				return filtered[i].Type == "folder"
+			}
+			switch opts.SortBy {
+			case "name":
+				if opts.SortDesc {
+					return strings.ToLower(filtered[i].Name) > strings.ToLower(filtered[j].Name)
+				}
+				return strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
+			case "size":
+				if opts.SortDesc {
+					return filtered[i].SizeBytes > filtered[j].SizeBytes
+				}
+				return filtered[i].SizeBytes < filtered[j].SizeBytes
+			default:
+				if opts.SortDesc {
+					return filtered[i].UpdatedAt > filtered[j].UpdatedAt
+				}
+				return filtered[i].UpdatedAt < filtered[j].UpdatedAt
+			}
+		})
+
+		total := len(filtered)
 		start := opts.Offset
 		if start > total {
 			start = total
@@ -247,13 +365,14 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		if end > total {
 			end = total
 		}
-		paged := nodes[start:end]
+		paged := filtered[start:end]
 		writeJSON(w, http.StatusOK, map[string]any{
 			"nodes":       paged,
 			"limit":       opts.Limit,
 			"offset":      opts.Offset,
 			"has_more":    end < total,
 			"next_offset": end,
+			"total":       total,
 		})
 		return
 	}
@@ -389,36 +508,105 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		opts.Filter == "video" || opts.Filter == "videos"
 	if isMediaFilter {
 		isImg := opts.Filter == "image" || opts.Filter == "images" || opts.Filter == "gallery"
+		cacheKey := fmt.Sprintf("%s:%s", userID, opts.Filter)
 		var mediaNodes []nodeDTO
 
-		dRows, err := a.db.Read().QueryContext(r.Context(),
-			`SELECT name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY name ASC`)
-		if err == nil {
-			defer dRows.Close()
-			for dRows.Next() {
-				var dName, dPool, dMount string
-				if err := dRows.Scan(&dName, &dPool, &dMount); err == nil {
-					role, accessErr := a.checkDatasetAccess(r, dName, false)
-					if accessErr != nil {
-						continue
-					}
-					realMount := a.resolveRealMountPath(dName, dMount)
-					if realMount == "" {
-						continue
-					}
-					cleanMount := filepath.Clean(realMount)
-					if fi, err := os.Stat(cleanMount); err != nil || !fi.IsDir() {
-						continue
-					}
+		cached, found := getCachedMediaList(cacheKey)
+		if found {
+			mediaNodes = cached
+		} else {
+			res, err, _ := mediaScanGroup.Do(cacheKey, func() (any, error) {
+				if c, ok := getCachedMediaList(cacheKey); ok {
+					return c, nil
+				}
 
+				type scanTarget struct {
+					canonical string
+					mount     string
+					role      string
+				}
+				var targets []scanTarget
+				seenMounts := make(map[string]bool)
+
+				addMountTarget := func(canonical, mount, role string) {
+					cleanMount := filepath.Clean(mount)
+					normMount := strings.ToLower(cleanMount)
+					if seenMounts[normMount] {
+						return
+					}
+					if fi, err := os.Stat(cleanMount); err == nil && fi.IsDir() {
+						seenMounts[normMount] = true
+						targets = append(targets, scanTarget{canonical: canonical, mount: cleanMount, role: role})
+					}
+				}
+
+				if hasFullRoot {
+					dRows, err := a.db.Read().QueryContext(r.Context(),
+						`SELECT name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY name ASC`)
+					if err == nil {
+						defer dRows.Close()
+						for dRows.Next() {
+							var dName, dPool, dMount string
+							if err := dRows.Scan(&dName, &dPool, &dMount); err == nil {
+								role, accessErr := a.checkDatasetAccess(r, dName, false)
+								if accessErr != nil {
+									continue
+								}
+								realMount := a.resolveRealMountPath(dName, dMount)
+								if realMount != "" {
+									addMountTarget(dName, realMount, role)
+								}
+							}
+						}
+					}
+					pRows, err := a.db.Read().QueryContext(r.Context(), `SELECT name FROM storage_pools WHERE status != 'deleted'`)
+					if err == nil {
+						defer pRows.Close()
+						for pRows.Next() {
+							var pName string
+							if err := pRows.Scan(&pName); err == nil {
+								realMount := a.resolveRealMountPath(pName, "/mnt/"+pName)
+								if realMount != "" {
+									addMountTarget(pName, realMount, "owner")
+								}
+							}
+						}
+					}
+				} else {
+					for _, root := range userRoots {
+						role, accessErr := a.checkDatasetAccess(r, root, false)
+						if accessErr != nil {
+							continue
+						}
+						canonical, _, _, mount, err := a.resolveDatasetTarget(r.Context(), "dataset:"+root)
+						if err == nil && mount != "" {
+							addMountTarget(canonical, mount, role)
+						}
+					}
+				}
+
+				var scannedNodes []nodeDTO
+				seenFiles := make(map[string]bool)
+
+				for _, tgt := range targets {
+					cleanMount := filepath.Clean(tgt.mount)
 					_ = filepath.Walk(cleanMount, func(path string, info os.FileInfo, walkErr error) error {
 						if walkErr != nil || info == nil {
 							return nil
 						}
 						if info.IsDir() {
-							if isIgnoredFolder(info.Name()) {
+							lowerName := strings.ToLower(info.Name())
+							if strings.HasPrefix(lowerName, "$") || strings.EqualFold(lowerName, "System Volume Information") {
 								return filepath.SkipDir
 							}
+							switch lowerName {
+							case "node_modules", ".git", ".next", ".cache", "obj", "bin", "dist-inno", "dist-installer", "release-installer", "release_assets", ".dart_tool", ".gradle", "windows-installer", "windows-app":
+								return filepath.SkipDir
+							}
+							return nil
+						}
+						normFilePath := strings.ToLower(filepath.Clean(path))
+						if seenFiles[normFilePath] {
 							return nil
 						}
 						ext := strings.ToLower(filepath.Ext(info.Name()))
@@ -426,7 +614,7 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 						var mimeType string
 						if isImg {
 							switch ext {
-							case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".bmp", ".tiff", ".svg", ".ico":
+							case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".bmp", ".tiff", ".tif", ".svg", ".ico", ".avif", ".raw", ".cr2", ".nef", ".arw", ".dng":
 								matchedCategory = "image"
 								mimeType = mime.TypeByExtension(ext)
 								if mimeType == "" {
@@ -435,7 +623,7 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 							}
 						} else {
 							switch ext {
-							case ".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v", ".3gp", ".ts":
+							case ".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v", ".3gp", ".ts", ".m2ts", ".mts", ".vob", ".ogv":
 								matchedCategory = "video"
 								mimeType = mime.TypeByExtension(ext)
 								if mimeType == "" {
@@ -446,63 +634,77 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 						if matchedCategory == "" {
 							return nil
 						}
-						if opts.Query != "" && !strings.Contains(strings.ToLower(info.Name()), strings.ToLower(opts.Query)) {
-							return nil
-						}
+						seenFiles[normFilePath] = true
 						rel, rErr := filepath.Rel(cleanMount, path)
 						if rErr != nil {
 							return nil
 						}
-						relItemPath := filepath.ToSlash(rel)
-						mediaNodes = append(mediaNodes, nodeDTO{
-							ID:           fmt.Sprintf("dataset:%s:%s", dName, relItemPath),
-							ParentID:     fmt.Sprintf("dataset:%s", dName),
+						relItemPath := filepath.ToSlash(filepath.Join(tgt.canonical, rel))
+						relItemPath = strings.TrimPrefix(relItemPath, "/")
+						scannedNodes = append(scannedNodes, nodeDTO{
+							ID:           fmt.Sprintf("dataset:%s", relItemPath),
+							ParentID:     fmt.Sprintf("dataset:%s", tgt.canonical),
 							Name:         info.Name(),
 							Type:         "file",
 							Category:     matchedCategory,
 							MimeType:     mimeType,
 							SizeBytes:    info.Size(),
-							Role:         role,
+							Role:         tgt.role,
 							HasThumbnail: true,
 							Previewable:  true,
 							CreatedAt:    info.ModTime().UnixMilli(),
 							UpdatedAt:    info.ModTime().UnixMilli(),
 						})
-						if len(mediaNodes) >= 2000 {
-							return fmt.Errorf("limit reached")
-						}
 						return nil
 					})
 				}
+
+				// Kết hợp với các tệp có sẵn trong SQLite database
+				dbList, dbErr := a.files.List(r.Context(), userID, files.ListOptions{
+					Filter: opts.Filter,
+					Limit:  10000,
+				})
+				if dbErr == nil {
+					for _, v := range nodeViews(dbList, userID) {
+						scannedNodes = append(scannedNodes, v)
+					}
+				}
+
+				setCachedMediaList(cacheKey, scannedNodes)
+				return scannedNodes, nil
+			})
+			if err == nil && res != nil {
+				mediaNodes = res.([]nodeDTO)
 			}
 		}
 
-		// Kết hợp với các tệp có sẵn trong SQLite database
-		dbList, dbErr := a.files.List(r.Context(), userID, files.ListOptions{
-			Filter: opts.Filter,
-			Query:  opts.Query,
-			Limit:  500,
-		})
-		if dbErr == nil {
-			for _, v := range nodeViews(dbList, userID) {
-				mediaNodes = append(mediaNodes, v)
+		// Lọc theo tìm kiếm
+		var filtered []nodeDTO
+		qLower := strings.ToLower(opts.Query)
+		if qLower != "" {
+			for _, item := range mediaNodes {
+				if strings.Contains(strings.ToLower(item.Name), qLower) {
+					filtered = append(filtered, item)
+				}
 			}
+		} else {
+			filtered = mediaNodes
 		}
 
-		sort.Slice(mediaNodes, func(i, j int) bool {
+		sort.Slice(filtered, func(i, j int) bool {
 			if opts.SortBy == "name" {
 				if opts.SortDesc {
-					return strings.ToLower(mediaNodes[i].Name) > strings.ToLower(mediaNodes[j].Name)
+					return strings.ToLower(filtered[i].Name) > strings.ToLower(filtered[j].Name)
 				}
-				return strings.ToLower(mediaNodes[i].Name) < strings.ToLower(mediaNodes[j].Name)
+				return strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
 			}
 			if opts.SortDesc {
-				return mediaNodes[i].UpdatedAt > mediaNodes[j].UpdatedAt
+				return filtered[i].UpdatedAt > filtered[j].UpdatedAt
 			}
-			return mediaNodes[i].UpdatedAt < mediaNodes[j].UpdatedAt
+			return filtered[i].UpdatedAt < filtered[j].UpdatedAt
 		})
 
-		total := len(mediaNodes)
+		total := len(filtered)
 		start := opts.Offset
 		if start > total {
 			start = total
@@ -511,13 +713,14 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		if end > total {
 			end = total
 		}
-		paged := mediaNodes[start:end]
+		paged := filtered[start:end]
 		writeJSON(w, http.StatusOK, map[string]any{
 			"nodes":       paged,
 			"limit":       opts.Limit,
 			"offset":      opts.Offset,
 			"has_more":    end < total,
 			"next_offset": end,
+			"total":       total,
 		})
 		return
 	}
@@ -1206,15 +1409,15 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 			defer cf.Close()
 			w.Header().Set("Content-Type", "image/jpeg")
 			w.Header().Set("ETag", `"thumb-`+hash+`"`)
-			w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 			http.ServeContent(w, r, "thumbnail.jpg", cinfo.ModTime(), cf)
 			return
 		}
 	}
 
-	// 4. Graceful fallback for images under 3MB
-	if cat == models.CategoryImage && info.Size() <= 3*1024*1024 {
-		w.Header().Set("Cache-Control", "private, max-age=86400")
+	// 4. Graceful fallback for images: serve original image directly with client cache
+	if cat == models.CategoryImage {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
 		http.ServeFile(w, r, cleanTarget)
 		return
 	}

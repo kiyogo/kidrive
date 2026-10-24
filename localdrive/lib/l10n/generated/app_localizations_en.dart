@@ -847,7 +847,10 @@ class L10nEn extends L10n {
       'Physical drives, S.M.A.R.T monitoring, and spin-down';
 
   @override
-  String get settingsDatasets => 'Datasets & Storage Pools';
+  String get settingsStoragePools => 'Storage Pools';
+
+  @override
+  String get settingsDatasets => 'Datasets';
 
   @override
   String get settingsUsers => 'Users';

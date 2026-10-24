@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { Component, type ReactNode, useEffect, useRef, useState } from "react";
 import { Icon, type Glyph } from "@/components/Icon";
 import { Button, Dialog, Tappable, TextField, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -10,15 +10,71 @@ import { useL10n } from "@/lib/l10n";
 import { categoryOf, isFolder, type NodeModel } from "@/lib/models";
 import { colorForCategory, folderSwatches } from "@/lib/tokens";
 import { forget, isKept, keep } from "@/lib/offline";
+import { FileTileIcon, categoryOfNode } from "./FileTileIcon";
+
+export class DetailsErrorBoundary extends Component<
+  { children: ReactNode; onClose?: () => void },
+  { hasError: boolean }
+> {
+  constructor(props: { children: ReactNode; onClose?: () => void }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error: unknown) {
+    console.error("DetailsPane render error:", error);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <aside
+          role="region"
+          style={{
+            position: "fixed",
+            insetInlineEnd: 0,
+            top: 0,
+            bottom: 0,
+            width: "var(--detail-pane)",
+            maxWidth: "100vw",
+            background: "var(--bg-primary)",
+            borderInlineStart: "1px solid var(--stroke)",
+            zIndex: 120,
+            padding: 24,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            alignItems: "center",
+            gap: 16,
+            boxSizing: "border-box",
+          }}
+        >
+          <span className="t-body-md" style={{ color: "var(--fg-secondary)", textAlign: "center" }}>
+            Không thể hiển thị xem trước tệp này
+          </span>
+          <Button
+            label="Đóng"
+            variant="quiet"
+            compact
+            expand={false}
+            onClick={() => {
+              this.setState({ hasError: false });
+              this.props.onClose?.();
+            }}
+          />
+        </aside>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 /**
  * The details pane, ported from features/files/widgets/desktop/node_details_pane.
  *
- * Opens when exactly one thing is selected. Several means a bulk action is in
- * progress, and one item's details would be describing the wrong thing.
- *
- * It floats over the listing rather than sitting beside it, so opening it never
- * resizes the grid and reflows the tiles under the pointer.
+ * Opens only when explicitly requested via context menu "Xem trước",
+ * stays open while selecting other files, and closes only via the close button.
  */
 export function DetailsPane({
   node,
@@ -35,21 +91,37 @@ export function DetailsPane({
 }) {
   const t = useL10n();
   const toast = useToast();
+  const asideRef = useRef<HTMLElement | null>(null);
+
+  if (!node) return null;
+
   const category = categoryOf(node);
   const tone = colorForCategory(category);
   const [versions, setVersions] = useState<{ id: string; size_bytes: number; created_at: number }[]>([]);
   const [kept, setKept] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
-  const [renameName, setRenameName] = useState(node.name);
+  const [renameName, setRenameName] = useState(node.name || "");
   const [colorOpen, setColorOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => setKept(isKept(node.id)), [node.id]);
-  useEffect(() => setRenameName(node.name), [node.name]);
+  useEffect(() => {
+    if (node?.id) setKept(isKept(node.id));
+  }, [node?.id]);
+
+  useEffect(() => {
+    if (node?.name) setRenameName(node.name);
+  }, [node?.name]);
+
+  // Always reset scroll inside DetailsPane to top when active node changes
+  useEffect(() => {
+    if (asideRef.current) {
+      asideRef.current.scrollTop = 0;
+    }
+  }, [node?.id]);
 
   // versions are a file's own history, so a folder has none to ask about
   useEffect(() => {
-    if (isFolder(node)) {
+    if (!node || isFolder(node)) {
       setVersions([]);
       return;
     }
@@ -65,10 +137,11 @@ export function DetailsPane({
     return () => {
       cancelled = true;
     };
-  }, [node.id]);
+  }, [node?.id]);
 
   return (
     <aside
+      ref={asideRef}
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -76,16 +149,18 @@ export function DetailsPane({
       className="ld-enter menu"
       role="region"
       style={{
-        position: "absolute",
+        position: "fixed",
         insetInlineEnd: 0,
         top: 0,
         bottom: 0,
         width: "var(--detail-pane)",
+        maxWidth: "100vw",
         background: "var(--bg-primary)",
         borderInlineStart: "1px solid var(--stroke)",
-        zIndex: 80,
+        zIndex: 120,
         overflowY: "auto",
         padding: 20,
+        boxSizing: "border-box",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18, minWidth: 0, width: "100%" }}>
@@ -118,29 +193,33 @@ export function DetailsPane({
 
       <div
         style={{
+          position: "relative",
           aspectRatio: "4 / 3",
           borderRadius: "var(--r-tile)",
           border: "1px solid var(--stroke)",
           background: "var(--bg-elevated)",
-          display: "grid",
-          placeItems: "center",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
           overflow: "hidden",
           marginBottom: 18,
         }}
       >
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <FileTileIcon category={categoryOfNode(node)} size={54} folderColor={node.color} />
+        </div>
         {node.has_thumbnail || category === "image" || category === "video" ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
+            key={node.id}
             src={api.media(Api.thumbnail(node.id))}
             alt=""
             onError={(e) => {
               e.currentTarget.style.display = "none";
             }}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
           />
-        ) : (
-          <Icon glyph={isFolder(node) ? "folder" : "file"} size={44} color={tone} />
-        )}
+        ) : null}
       </div>
 
       <Facts node={node} />
@@ -375,11 +454,18 @@ export function DetailsPane({
 
 function Facts({ node }: { node: NodeModel }) {
   const t = useL10n();
+  if (!node) return null;
+
+  const safeName = node.name || "";
+  const safeSize = isFolder(node) ? "—" : bytes(node.size_bytes || 0);
+  const safeModified = node.updated_at ? relative(node.updated_at) : "—";
+  const safeAdded = node.created_at ? dateTime(node.created_at) : "—";
+
   const rows: [string, string][] = [
-    [t.sortName, node.name],
-    [t.sortSize, isFolder(node) ? "—" : bytes(node.size_bytes)],
-    [t.gallerySortModified, relative(node.updated_at)],
-    [t.gallerySortAdded, dateTime(node.created_at)],
+    [t.sortName, safeName],
+    [t.sortSize, safeSize],
+    [t.gallerySortModified, safeModified],
+    [t.gallerySortAdded, safeAdded],
   ];
   if (node.image_width && node.image_height) {
     rows.splice(2, 0, ["", `${node.image_width} × ${node.image_height}`]);

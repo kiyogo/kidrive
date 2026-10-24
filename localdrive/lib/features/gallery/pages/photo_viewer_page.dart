@@ -46,8 +46,8 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
     if (!mounted || nodes.isEmpty) return;
     final db = ref.read(filesDbProvider);
 
-    // Precache 2 next images
-    for (var i = 1; i <= 2; i++) {
+    // Precache 5 next images
+    for (var i = 1; i <= 5; i++) {
       if (index + i < nodes.length) {
         final next = nodes[index + i];
         final local =
@@ -63,8 +63,8 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
       }
     }
 
-    // Precache 2 previous images
-    for (var i = 1; i <= 2; i++) {
+    // Precache 5 previous images
+    for (var i = 1; i <= 5; i++) {
       if (index - i >= 0) {
         final prev = nodes[index - i];
         final local =

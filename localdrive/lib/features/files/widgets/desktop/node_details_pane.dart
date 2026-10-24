@@ -23,7 +23,7 @@ class NodeDetailsPane extends ConsumerWidget {
 
     return LdDetailPane(
       title: node.name,
-      onClose: () => ref.read(selectionProvider.notifier).clear(),
+      onClose: () => ref.read(activeDetailsNodeProvider.notifier).close(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -130,6 +130,7 @@ class NodeDetailsPane extends ConsumerWidget {
                 if (!confirmed) return;
                 await ref.read(filesControllerProvider.notifier).trash(node);
                 ref.read(selectionProvider.notifier).clear();
+                ref.read(activeDetailsNodeProvider.notifier).close();
               },
             ),
         ],

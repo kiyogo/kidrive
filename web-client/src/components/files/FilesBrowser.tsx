@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon, type Glyph } from "@/components/Icon";
 import {
   Avatar,
@@ -28,7 +28,7 @@ import { colorForCategory, folderSwatches, wash } from "@/lib/tokens";
 import { useKeptIds } from "@/lib/offline";
 import { useUploader, checkStorageReadiness } from "@/lib/uploads";
 import { ShareSheet } from "@/components/share/ShareSheet";
-import { DetailsPane } from "./DetailsPane";
+import { DetailsPane, DetailsErrorBoundary } from "./DetailsPane";
 import { bandStyle, hasPointer, rangeBetween, useFileKeys, useMarquee, useNodeDrag } from "./desktop";
 import { useL10n, type Strings } from "@/lib/l10n";
 import { FileTileIcon, categoryOfNode } from "./FileTileIcon";
@@ -80,6 +80,10 @@ export function FilesBrowser({
   const t = useL10n();
   const [view, setView] = useState<ViewMode>("grid");
   const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsNode, setDetailsNode] = useState<NodeModel | null>(null);
+  const detailsOpenRef = useRef(false);
+  detailsOpenRef.current = detailsOpen;
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState<{
     x?: number;
@@ -689,7 +693,7 @@ export function FilesBrowser({
     });
   }, [nodes, query, sortBy, sortDir]);
 
-  const toggle = (id: string, additive: boolean, range = false) => {
+  const toggle = useCallback((id: string, additive: boolean, range = false) => {
     if (range) {
       // shift extends from the last thing clicked, the way a file list has
       // behaved since long before any of this
@@ -704,12 +708,29 @@ export function FilesBrowser({
       else next.add(id);
       return next;
     });
-  };
+    // If the details pane is currently open, selecting another file updates the details pane
+    if (detailsOpenRef.current) {
+      const found = visible.find((n) => n.id === id);
+      if (found) {
+        setDetailsNode(found);
+      }
+    }
+  }, [visible]);
 
-  const activate = (node: NodeModel) => {
+  // Keep detailsNode in sync when visible nodes are refreshed or modified
+  useEffect(() => {
+    if (detailsOpen && detailsNode) {
+      const updated = visible.find((n) => n.id === detailsNode.id);
+      if (updated) {
+        setDetailsNode(updated);
+      }
+    }
+  }, [visible, detailsOpen, detailsNode?.id]);
+
+  const activate = useCallback((node: NodeModel) => {
     if (isFolder(node)) onOpenFolder(node);
     else onPreview(node, nodes ? nodes.filter((n) => !isFolder(n)) : undefined);
-  };
+  }, [onOpenFolder, onPreview, nodes]);
 
   const effectiveUploaderFolderId =
     !folderId && user && user.role !== "admin" && defaultSingleDataset
@@ -788,6 +809,9 @@ export function FilesBrowser({
     enabled: !layered,
   });
 
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+
   const { over, dragProps, folderProps } = useNodeDrag(
     useCallback(
       async (ids: string[], intoFolderId: string) => {
@@ -812,6 +836,7 @@ export function FilesBrowser({
       },
       [dropDataTransfer],
     ),
+    useCallback(() => selectionRef.current, []),
   );
 
   const subtitle =
@@ -1501,16 +1526,21 @@ export function FilesBrowser({
         )}
       </div>
 
-      {/* exactly one selected opens the pane; several means a bulk action is
-          in progress and one item's details would describe the wrong thing */}
-      {isDesktop && chosen.length === 1 && (
-        <DetailsPane
-          node={chosen[0]}
-          onClose={() => setSelection(new Set())}
-          onOpen={activate}
-          onChanged={() => void load()}
-          onShare={(n) => setSharing(n)}
-        />
+      {/* Details/Preview pane: opens ONLY when user right-clicks and chooses 'Xem trước',
+          stays open when switching to another file, and closes ONLY when user clicks 'x' */}
+      {isDesktop && detailsOpen && detailsNode && (
+        <DetailsErrorBoundary onClose={() => { setDetailsOpen(false); setDetailsNode(null); }}>
+          <DetailsPane
+            node={detailsNode}
+            onClose={() => {
+              setDetailsOpen(false);
+              setDetailsNode(null);
+            }}
+            onOpen={activate}
+            onChanged={() => void load()}
+            onShare={(n) => setSharing(n)}
+          />
+        </DetailsErrorBoundary>
       )}
 
       {sharing && <ShareSheet node={sharing} onClose={() => setSharing(null)} />}
@@ -1708,8 +1738,17 @@ export function FilesBrowser({
                 ]
               : [
                   {
+                    label: "Xem trước",
+                    glyph: "eye" as Glyph,
+                    onClick: () => {
+                      setDetailsNode(menu.node);
+                      setDetailsOpen(true);
+                      setSelection(new Set([menu.node.id]));
+                    },
+                  },
+                  {
                     label: t.actionOpen,
-                    glyph: (isFolder(menu.node) ? "folder" : "eye") as Glyph,
+                    glyph: (isFolder(menu.node) ? "folder" : "folder-open") as Glyph,
                     onClick: () => activate(menu.node),
                   },
                   {
@@ -2119,13 +2158,14 @@ function Grid({
     node: NodeModel;
     isBulk?: boolean;
   }) => void;
-  dragProps: (id: string, sel: Set<string>) => Record<string, unknown>;
+  dragProps: (id: string, sel?: Set<string>) => Record<string, unknown>;
   folderProps: (id: string) => Record<string, unknown>;
   over: string;
   isMobile?: boolean;
   Sentinel?: React.ComponentType;
 }) {
   const kept = useKeptIds();
+  const hasSelection = selection.size > 0;
 
   return (
     <div style={{ padding: isMobile ? "10px 10px 120px" : "13px 13px 120px" }}>
@@ -2141,13 +2181,14 @@ function Grid({
             key={node.id}
             node={node}
             selected={selection.has(node.id)}
+            isSelectingMultiple={selection.size > 1 && selection.has(node.id)}
+            hasSelection={hasSelection}
             onToggle={onToggle}
             onActivate={onActivate}
             onMenu={onMenu}
             dragProps={dragProps}
             folderProps={folderProps}
-            over={over}
-            selection={selection}
+            isOver={over === node.id}
             kept={kept.has(node.id)}
             isMobile={isMobile}
           />
@@ -2158,21 +2199,24 @@ function Grid({
   );
 }
 
-function Tile({
+const Tile = React.memo(function Tile({
   node,
   selected,
+  isSelectingMultiple,
+  hasSelection,
   onToggle,
   onActivate,
   onMenu,
   dragProps,
   folderProps,
-  over,
-  selection,
+  isOver,
   kept,
   isMobile,
 }: {
   node: NodeModel;
   selected: boolean;
+  isSelectingMultiple: boolean;
+  hasSelection: boolean;
   onToggle: (id: string, additive: boolean, range?: boolean) => void;
   onActivate: (n: NodeModel) => void;
   onMenu: (m: {
@@ -2182,10 +2226,9 @@ function Tile({
     node: NodeModel;
     isBulk?: boolean;
   }) => void;
-  dragProps: (id: string, sel: Set<string>) => Record<string, unknown>;
+  dragProps: (id: string, sel?: Set<string>) => Record<string, unknown>;
   folderProps: (id: string) => Record<string, unknown>;
-  over: string;
-  selection: Set<string>;
+  isOver: boolean;
   kept: boolean;
   isMobile?: boolean;
 }) {
@@ -2195,12 +2238,12 @@ function Tile({
   return (
     <div
       data-node-id={node.id}
-      {...dragProps(node.id, selection)}
+      {...dragProps(node.id)}
       {...(isFolder(node) ? folderProps(node.id) : {})}
       onClick={(e) => {
         e.stopPropagation();
         if (isMobile) {
-          if (selection.size > 0) {
+          if (hasSelection) {
             onToggle(node.id, true, false);
           } else {
             onActivate(node);
@@ -2214,10 +2257,10 @@ function Tile({
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (selection.size > 1 && selection.has(node.id)) {
+        if (isSelectingMultiple) {
           onMenu({ x: e.clientX, y: e.clientY, node, isBulk: true });
         } else {
-          if (!selection.has(node.id)) {
+          if (!selected) {
             onToggle(node.id, false, false);
           }
           onMenu({ x: e.clientX, y: e.clientY, node, isBulk: false });
@@ -2230,8 +2273,8 @@ function Tile({
           position: "relative",
           aspectRatio: "1 / 1",
           borderRadius: "var(--r-tile)",
-          border: `1px solid ${over === node.id || selected ? "var(--accent)" : "var(--stroke)"}`,
-          background: over === node.id ? "rgba(76,141,255,0.12)" : "var(--bg-elevated)",
+          border: `1px solid ${isOver || selected ? "var(--accent)" : "var(--stroke)"}`,
+          background: isOver ? "rgba(76,141,255,0.12)" : "var(--bg-elevated)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -2240,6 +2283,9 @@ function Tile({
       >
         {node.has_thumbnail || cat === "image" || cat === "video" ? (
           <>
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <FileTileIcon category={cat} size={54} folderColor={node.color} />
+            </div>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={api.media(Api.thumbnail(node.id))}
@@ -2249,7 +2295,7 @@ function Tile({
               onError={(e) => {
                 e.currentTarget.style.display = "none";
               }}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              style={{ position: "relative", width: "100%", height: "100%", objectFit: "cover" }}
             />
             {cat === "video" && (
               <div
@@ -2431,7 +2477,7 @@ function Tile({
       </div>
     </div>
   );
-}
+});
 
 /* ------------------------------------------------------------------- list */
 
@@ -2476,7 +2522,7 @@ function List({
     node: NodeModel;
     isBulk?: boolean;
   }) => void;
-  dragProps: (id: string, sel: Set<string>) => Record<string, unknown>;
+  dragProps: (id: string, sel?: Set<string>) => Record<string, unknown>;
   folderProps: (id: string) => Record<string, unknown>;
   over: string;
   isTrash?: boolean;
@@ -2485,213 +2531,270 @@ function List({
   isMobile?: boolean;
   Sentinel?: React.ComponentType;
 }) {
-  const t = useL10n();
   const kept = useKeptIds();
+  const hasSelection = selection.size > 0;
 
   return (
     <div style={{ padding: isMobile ? "8px 10px 120px" : "13px 13px 120px" }}>
-      {nodes.map((node) => {
-        const cat = categoryOfNode(node);
-        const selected = !isTrash && selection.has(node.id);
-        const selecting = !isTrash && selection.size > 0;
-        return (
-          <div
-            key={node.id}
-            data-node-id={node.id}
-            {...(isTrash ? {} : dragProps(node.id, selection))}
-            {...(!isTrash && isFolder(node) ? folderProps(node.id) : {})}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (isTrash) return;
-              if (isMobile) {
-                if (selection.size > 0) {
-                  onToggle(node.id, true, false);
-                } else {
-                  onActivate(node);
-                }
-                return;
-              }
-              if (e.detail >= 2) onActivate(node);
-              else onToggle(node.id, e.ctrlKey || e.metaKey, e.shiftKey);
-            }}
-            onDoubleClick={() => {
-              if (!isTrash) onActivate(node);
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (selection.size > 1 && selection.has(node.id)) {
-                onMenu({ x: e.clientX, y: e.clientY, node, isBulk: true });
-              } else {
-                if (!selection.has(node.id)) {
-                  onToggle(node.id, false, false);
-                }
-                onMenu({ x: e.clientX, y: e.clientY, node, isBulk: false });
-              }
-            }}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              margin: "2px 0",
-              padding: "9px 10px",
-              borderRadius: "var(--r-tile)",
-              border: `1px solid ${over === node.id || selected ? "var(--accent)" : "transparent"}`,
-              background: over === node.id || selected ? "rgba(76, 141, 255, 0.1)" : "transparent",
-              cursor: isTrash ? "default" : "pointer",
-            }}
-          >
-            {selecting && (
-              <span
-                style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: 999,
-                  border: `1.6px solid ${selected ? "var(--accent)" : "var(--stroke)"}`,
-                  background: selected ? "var(--accent)" : "transparent",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flex: "none",
-                }}
-              >
-                {selected && <Icon glyph="check" size={14} color="#FFFFFF" strokeWidth={2.6} />}
-              </span>
-            )}
-            <span
-              style={{
-                width: 42,
-                height: 42,
-                flex: "none",
-                borderRadius: 10,
-                background: "var(--bg-elevated)",
-                border: "1px solid var(--stroke)",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                overflow: "hidden",
-                position: "relative",
-              }}
-            >
-              {node.has_thumbnail || cat === "image" || cat === "video" ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={api.media(Api.thumbnail(node.id))}
-                  alt=""
-                  loading="lazy"
-                  decoding="async"
-                  onError={(e) => {
-                    e.currentTarget.style.display = "none";
-                  }}
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              ) : (
-                <FileTileIcon category={cat} size={36} folderColor={node.color} />
-              )}
-              {node.owner && (
-                <span style={{ position: "absolute", top: -2, left: -2 }}>
-                  <Avatar name={node.owner.name} seed={node.owner.avatar_seed} size={18} showBorder />
-                </span>
-              )}
-            </span>
-            <span style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span
-                  className="t-body-lg"
-                  style={{
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    color: "var(--fg-primary)",
-                  }}
-                >
-                  {node.name}
-                </span>
-                {!isTrash && node.role === "viewer" && (
-                  <span
-                    style={{
-                      fontSize: 10,
-                      padding: "1px 5px",
-                      borderRadius: 4,
-                      background: "rgba(234, 179, 8, 0.15)",
-                      color: "#ca8a04",
-                      fontWeight: 600,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 2,
-                      flexShrink: 0,
-                    }}
-                    title="Chỉ đọc (Không có quyền chỉnh sửa)"
-                  >
-                    <Icon glyph="lock" size={9} color="#ca8a04" />
-                    Chỉ đọc
-                  </span>
-                )}
-
-                {!isTrash && node.starred && (
-                  <Icon glyph="star-filled" size={13} color="#E8935C" />
-                )}
-                {!isTrash && node.shared && (
-                  <Icon glyph="link" size={13} color="var(--accent)" />
-                )}
-                {!isTrash && kept.has(node.id) && (
-                  <Icon glyph="offline" size={13} color="var(--accent)" />
-                )}
-              </span>
-              <span className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 2, display: "block" }}>
-                {subtitleFor(node)}
-              </span>
-            </span>
-            {isTrash ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                <Tappable
-                  radius={18}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRestore?.(node);
-                  }}
-                  style={{ padding: 8, color: "var(--fg-secondary)" }}
-                  title={t.restore}
-                >
-                  <Icon glyph="restore" size={18} />
-                </Tappable>
-                <Tappable
-                  radius={18}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteForever?.(node);
-                  }}
-                  style={{ padding: 8, color: "var(--warning)" }}
-                  title={t.permanentlyDelete}
-                >
-                  <Icon glyph="trash" size={18} color="var(--warning)" />
-                </Tappable>
-              </div>
-            ) : (
-              !selecting && (
-                <Tappable
-                  radius={18}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    onMenu({
-                      anchorRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
-                      x: rect.right,
-                      y: rect.bottom,
-                      node,
-                    });
-                  }}
-                  style={{ padding: 8, color: "var(--fg-secondary)" }}
-                  title={t.moreActions}
-                >
-                  <Icon glyph="more" size={18} />
-                </Tappable>
-              )
-            )}
-          </div>
-        );
-      })}
+      {nodes.map((node) => (
+        <Row
+          key={node.id}
+          node={node}
+          selected={!isTrash && selection.has(node.id)}
+          selecting={!isTrash && hasSelection}
+          isSelectingMultiple={selection.size > 1 && selection.has(node.id)}
+          isOver={over === node.id}
+          isTrash={isTrash}
+          onToggle={onToggle}
+          onActivate={onActivate}
+          onMenu={onMenu}
+          onRestore={onRestore}
+          onDeleteForever={onDeleteForever}
+          dragProps={dragProps}
+          folderProps={folderProps}
+          isMobile={isMobile}
+          kept={kept.has(node.id)}
+        />
+      ))}
       {Sentinel && <Sentinel />}
     </div>
   );
 }
+
+const Row = React.memo(function Row({
+  node,
+  selected,
+  selecting,
+  isSelectingMultiple,
+  isOver,
+  isTrash,
+  onToggle,
+  onActivate,
+  onMenu,
+  onRestore,
+  onDeleteForever,
+  dragProps,
+  folderProps,
+  isMobile,
+  kept,
+}: {
+  node: NodeModel;
+  selected: boolean;
+  selecting: boolean;
+  isSelectingMultiple: boolean;
+  isOver: boolean;
+  isTrash: boolean;
+  onToggle: (id: string, additive: boolean, range?: boolean) => void;
+  onActivate: (n: NodeModel) => void;
+  onMenu: (m: {
+    x?: number;
+    y?: number;
+    anchorRect?: { left: number; right: number; top: number; bottom: number };
+    node: NodeModel;
+    isBulk?: boolean;
+  }) => void;
+  onRestore?: (n: NodeModel) => void;
+  onDeleteForever?: (n: NodeModel) => void;
+  dragProps: (id: string, sel?: Set<string>) => Record<string, unknown>;
+  folderProps: (id: string) => Record<string, unknown>;
+  isMobile?: boolean;
+  kept: boolean;
+}) {
+  const t = useL10n();
+  const cat = categoryOfNode(node);
+
+  return (
+    <div
+      data-node-id={node.id}
+      {...(isTrash ? {} : dragProps(node.id))}
+      {...(!isTrash && isFolder(node) ? folderProps(node.id) : {})}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (isTrash) return;
+        if (isMobile) {
+          if (selecting) {
+            onToggle(node.id, true, false);
+          } else {
+            onActivate(node);
+          }
+          return;
+        }
+        if (e.detail >= 2) onActivate(node);
+        else onToggle(node.id, e.ctrlKey || e.metaKey, e.shiftKey);
+      }}
+      onDoubleClick={() => {
+        if (!isTrash) onActivate(node);
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isSelectingMultiple) {
+          onMenu({ x: e.clientX, y: e.clientY, node, isBulk: true });
+        } else {
+          if (!selected) {
+            onToggle(node.id, false, false);
+          }
+          onMenu({ x: e.clientX, y: e.clientY, node, isBulk: false });
+        }
+      }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        margin: "2px 0",
+        padding: "9px 10px",
+        borderRadius: "var(--r-tile)",
+        border: `1px solid ${isOver || selected ? "var(--accent)" : "transparent"}`,
+        background: isOver || selected ? "rgba(76, 141, 255, 0.1)" : "transparent",
+        cursor: isTrash ? "default" : "pointer",
+      }}
+    >
+      {selecting && (
+        <span
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: 999,
+            border: `1.6px solid ${selected ? "var(--accent)" : "var(--stroke)"}`,
+            background: selected ? "var(--accent)" : "transparent",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flex: "none",
+          }}
+        >
+          {selected && <Icon glyph="check" size={14} color="#FFFFFF" strokeWidth={2.6} />}
+        </span>
+      )}
+      <span
+        style={{
+          width: 42,
+          height: 42,
+          flex: "none",
+          borderRadius: 10,
+          background: "var(--bg-elevated)",
+          border: "1px solid var(--stroke)",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          overflow: "hidden",
+          position: "relative",
+        }}
+      >
+        <FileTileIcon category={cat} size={36} folderColor={node.color} />
+        {(node.has_thumbnail || cat === "image" || cat === "video") && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={api.media(Api.thumbnail(node.id))}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            onError={(e) => {
+              e.currentTarget.style.display = "none";
+            }}
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        )}
+        {node.owner && (
+          <span style={{ position: "absolute", top: -2, left: -2 }}>
+            <Avatar name={node.owner.name} seed={node.owner.avatar_seed} size={18} showBorder />
+          </span>
+        )}
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span
+            className="t-body-lg"
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              color: "var(--fg-primary)",
+            }}
+          >
+            {node.name}
+          </span>
+          {!isTrash && node.role === "viewer" && (
+            <span
+              style={{
+                fontSize: 10,
+                padding: "1px 5px",
+                borderRadius: 4,
+                background: "rgba(234, 179, 8, 0.15)",
+                color: "#ca8a04",
+                fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 2,
+                flexShrink: 0,
+              }}
+              title="Chỉ đọc (Không có quyền chỉnh sửa)"
+            >
+              <Icon glyph="lock" size={9} color="#ca8a04" />
+              Chỉ đọc
+            </span>
+          )}
+
+          {!isTrash && node.starred && (
+            <Icon glyph="star-filled" size={13} color="#E8935C" />
+          )}
+          {!isTrash && node.shared && (
+            <Icon glyph="link" size={13} color="var(--accent)" />
+          )}
+          {!isTrash && kept && (
+            <Icon glyph="offline" size={13} color="var(--accent)" />
+          )}
+        </span>
+        <span className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 2, display: "block" }}>
+          {subtitleFor(node)}
+        </span>
+      </span>
+      {isTrash ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+          <Tappable
+            radius={18}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRestore?.(node);
+            }}
+            style={{ padding: 8, color: "var(--fg-secondary)" }}
+            title={t.restore}
+          >
+            <Icon glyph="restore" size={18} />
+          </Tappable>
+          <Tappable
+            radius={18}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDeleteForever?.(node);
+            }}
+            style={{ padding: 8, color: "var(--warning)" }}
+            title={t.permanentlyDelete}
+          >
+            <Icon glyph="trash" size={18} color="var(--warning)" />
+          </Tappable>
+        </div>
+      ) : (
+        !selecting && (
+          <Tappable
+            radius={18}
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              onMenu({
+                anchorRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+                x: rect.right,
+                y: rect.bottom,
+                node,
+              });
+            }}
+            style={{ padding: 8, color: "var(--fg-secondary)" }}
+            title={t.moreActions}
+          >
+            <Icon glyph="more" size={18} />
+          </Tappable>
+        )
+      )}
+    </div>
+  );
+});

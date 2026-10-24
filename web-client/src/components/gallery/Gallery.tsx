@@ -19,7 +19,7 @@ import {
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { bytes } from "@/lib/format";
-import type { NodeModel } from "@/lib/models";
+import { categoryOf, type NodeModel } from "@/lib/models";
 import { transfers, type Transfer } from "@/lib/upload";
 import { useUploader } from "@/lib/uploads";
 import { ShareSheet } from "@/components/share/ShareSheet";
@@ -75,7 +75,9 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
         },
         { signal }
       );
-      const imagesOnly = (data?.nodes ?? []).filter((n) => n.mime_type?.startsWith("image/"));
+      const imagesOnly = (data?.nodes ?? []).filter(
+        (n) => categoryOf(n) === "image" || n.mime_type?.startsWith("image/")
+      );
       return {
         items: imagesOnly,
         hasMore: Boolean(data?.has_more ?? (data?.nodes?.length ? data.nodes.length >= limit : false)),

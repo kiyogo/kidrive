@@ -219,20 +219,22 @@ export function useNodeDrag(
   onMove: (ids: string[], intoFolderId: string) => void,
   /** files and folders dragged in from the desktop, dropped onto a specific folder */
   onDropFiles?: (dataTransfer: DataTransfer, intoFolderId: string) => void,
+  getSelection?: () => Set<string>,
 ) {
   const [over, setOver] = useState<string>("");
 
   const dragProps = useCallback(
-    (nodeId: string, selection: Set<string>) => ({
+    (nodeId: string, selection?: Set<string>) => ({
       draggable: true,
       onDragStart: (e: React.DragEvent) => {
         // dragging an unselected tile drags that one, not the selection
-        const ids = selection.has(nodeId) ? [...selection] : [nodeId];
+        const sel = selection ?? (getSelection ? getSelection() : new Set<string>());
+        const ids = sel.has(nodeId) ? [...sel] : [nodeId];
         e.dataTransfer.setData(NODE_DRAG_TYPE, JSON.stringify(ids));
         e.dataTransfer.effectAllowed = "move";
       },
     }),
-    [],
+    [getSelection],
   );
 
   const folderProps = useCallback(

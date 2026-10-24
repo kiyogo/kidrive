@@ -28,11 +28,16 @@ Future<void> showNodeActions(
 
   final actions = <LdMenuAction>[
     ...?extraActions,
+    LdMenuAction(
+      id: 'details_pane',
+      label: 'Xem trước',
+      glyph: LdGlyph.eye,
+    ),
     if (!alreadyOpen)
       LdMenuAction(
         id: 'open',
         label: l10n.actionOpen,
-        glyph: node.isFolder ? LdGlyph.folder : LdGlyph.eye,
+        glyph: node.isFolder ? LdGlyph.folder : LdGlyph.file,
       ),
     LdMenuAction(
       id: 'star',
@@ -115,6 +120,11 @@ Future<void> showNodeActions(
   final controller = ref.read(filesControllerProvider.notifier);
 
   switch (choice) {
+    case 'details_pane':
+      ref.read(activeDetailsNodeProvider.notifier).show(node);
+      ref.read(selectionProvider.notifier).only(node.id);
+      break;
+
     case 'open':
       if (node.isFolder) {
         context.go(Routes.folder(node.id));

@@ -847,7 +847,10 @@ class L10nVi extends L10n {
       'Ổ đĩa vật lý, S.M.A.R.T và Storage Pool';
 
   @override
-  String get settingsDatasets => 'Dataset & Storage Pool';
+  String get settingsStoragePools => 'Nhóm lưu trữ';
+
+  @override
+  String get settingsDatasets => 'Tập dữ liệu';
 
   @override
   String get settingsUsers => 'Người dùng';

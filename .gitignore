@@ -56,6 +56,7 @@ dist-*/
 windows-app/
 windows-inno-pkg/
 windows-installer/
+release-installer/
 scratch/
 g/
 LocalDrive.iss

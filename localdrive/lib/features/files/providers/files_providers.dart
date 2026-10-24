@@ -280,6 +280,33 @@ class SelectionController extends Notifier<Set<String>> {
 final selectionProvider =
     NotifierProvider<SelectionController, Set<String>>(SelectionController.new);
 
+/// The node currently shown in the desktop Details/Preview pane.
+/// Opens only via context menu "Xem trước", updates when clicking another file,
+/// and closes only when explicitly closed with the close button.
+class ActiveDetailsNodeController extends Notifier<NodeModel?> {
+  @override
+  NodeModel? build() => null;
+
+  void show(NodeModel node) {
+    state = node;
+  }
+
+  void updateIfOpen(NodeModel node) {
+    if (state != null) {
+      state = node;
+    }
+  }
+
+  void close() {
+    state = null;
+  }
+}
+
+final activeDetailsNodeProvider =
+    NotifierProvider<ActiveDetailsNodeController, NodeModel?>(
+  ActiveDetailsNodeController.new,
+);
+
 /// Whether the multi select action bar is showing at all.
 final isSelectingProvider = Provider<bool>((ref) {
   return ref.watch(selectionProvider).isNotEmpty;
