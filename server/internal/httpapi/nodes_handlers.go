@@ -40,7 +40,7 @@ type mediaCacheEntry struct {
 
 var (
 	datasetThumbGroup singleflight.Group
-	datasetThumbSem   = make(chan struct{}, 64) // max 64 concurrent thumbnail jobs
+	datasetThumbSem   = make(chan struct{}, 8) // max 8 concurrent thumbnail jobs to prevent CPU starvation
 	mediaScanGroup    singleflight.Group
 
 	dirListCacheMu sync.RWMutex
@@ -1001,12 +1001,20 @@ func (a *API) handleDownload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		filename := filepath.Base(cleanTarget)
+		ext := strings.ToLower(filepath.Ext(cleanTarget))
+		if (ext == ".heic" || ext == ".heif") && boolQuery(r, "inline") {
+			a.serveDatasetThumbnail(w, r, cleanTarget)
+			return
+		}
 		mimeType := models.MimeFromName(filename)
 		if mimeType == "" {
-			mimeType = mime.TypeByExtension(filepath.Ext(filename))
+			mimeType = mime.TypeByExtension(ext)
 		}
 		if mimeType == "" {
 			mimeType = "application/octet-stream"
+		}
+		if ext == ".mov" || ext == ".m4v" {
+			mimeType = "video/mp4"
 		}
 		disposition := "attachment"
 		if boolQuery(r, "inline") || models.Previewable(models.CategoryOf(models.NodeFile, mimeType, filename)) {
@@ -1016,7 +1024,9 @@ func (a *API) handleDownload(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"; filename*=UTF-8''%s`,
 			disposition, sanitizeFilename(filename), url.PathEscape(filename)))
 		w.Header().Set("Accept-Ranges", "bytes")
-		if disposition == "inline" {
+		if strings.HasPrefix(mimeType, "video/") || strings.HasPrefix(mimeType, "audio/") {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		} else if disposition == "inline" {
 			w.Header().Set("Cache-Control", "private, max-age=86400")
 		}
 		http.ServeContent(w, r, filename, info.ModTime(), f)
@@ -1031,6 +1041,11 @@ func (a *API) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
+	if (strings.HasSuffix(strings.ToLower(node.Name), ".heic") || strings.HasSuffix(strings.ToLower(node.Name), ".heif")) && boolQuery(r, "inline") {
+		a.handleThumbnail(w, r)
+		return
+	}
+
 	a.audit.Record(r.Context(), audit.Entry{
 		UserID: userID, NodeID: node.ID, Action: audit.ActionNodeDownloaded, IP: ip,
 		Metadata: map[string]any{"name": node.Name},
@@ -1041,9 +1056,13 @@ func (a *API) handleDownload(w http.ResponseWriter, r *http.Request) {
 // serveNode is the one place a file's bytes reach the network, shared by the
 // authenticated download and the public share download.
 func serveNode(w http.ResponseWriter, r *http.Request, node models.Node, f *os.File, info os.FileInfo, inline bool) {
+	ext := strings.ToLower(filepath.Ext(node.Name))
 	contentType := node.MimeType
 	if contentType == "" {
 		contentType = "application/octet-stream"
+	}
+	if ext == ".mov" || ext == ".m4v" {
+		contentType = "video/mp4"
 	}
 	disposition := "attachment"
 	if inline && models.Previewable(models.CategoryOf(node.Type, node.MimeType, node.Name)) {
@@ -1054,9 +1073,9 @@ func serveNode(w http.ResponseWriter, r *http.Request, node models.Node, f *os.F
 		disposition, sanitizeFilename(node.Name), url.PathEscape(node.Name)))
 	w.Header().Set("Accept-Ranges", "bytes")
 
-	// the path is the content hash, so the bytes behind this url can never
-	// change; that makes an immutable cache entry correct rather than risky
-	if node.ChecksumSHA256 != "" {
+	if strings.HasPrefix(contentType, "video/") || strings.HasPrefix(contentType, "audio/") {
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+	} else if node.ChecksumSHA256 != "" {
 		w.Header().Set("ETag", `"`+node.ChecksumSHA256+`"`)
 		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	}
@@ -1482,6 +1501,11 @@ func (a *API) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 	// Fallback for image node if thumbnail file is missing: serve original content
 	if n, f, info, oErr := a.files.OpenForDownload(r.Context(), userID, nodeID); oErr == nil && strings.HasPrefix(n.MimeType, "image/") {
 		defer f.Close()
+		ext := strings.ToLower(filepath.Ext(n.Name))
+		if ext == ".heic" || ext == ".heif" {
+			writeError(w, http.StatusNotFound, "no_thumbnail", "cannot decode heic")
+			return
+		}
 		w.Header().Set("Content-Type", n.MimeType)
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		http.ServeContent(w, r, n.Name, info.ModTime(), f)
@@ -1564,7 +1588,7 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 			return nil, fmt.Errorf("thumbnail queue timeout")
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
 
 		thumbBytes, err := a.thumbs.Generate(ctx, cleanTarget, mimeType)
@@ -1597,6 +1621,10 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 
 	// 4. Graceful fallback for images: serve original image directly with client cache
 	if cat == models.CategoryImage {
+		if ext == ".heic" || ext == ".heif" {
+			writeError(w, http.StatusNotFound, "no_thumbnail", "cannot decode heic")
+			return
+		}
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		http.ServeFile(w, r, cleanTarget)
 		return

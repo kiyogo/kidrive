@@ -119,6 +119,7 @@ export function useInfiniteList<T>({
       isFetchingRef.current = true;
       const controller = new AbortController();
       abortControllerRef.current = controller;
+      let fetchedCount = -1;
 
       try {
         const currentOffset = offsetRef.current;
@@ -131,7 +132,8 @@ export function useInfiniteList<T>({
         if (controller.signal.aborted) return;
 
         const fetchedItems = result.items || [];
-        const nextHasMore = Boolean(result.hasMore && fetchedItems.length > 0);
+        fetchedCount = fetchedItems.length;
+        const nextHasMore = Boolean(result.hasMore);
         const nextOffset =
           typeof result.nextOffset === "number"
             ? result.nextOffset
@@ -179,7 +181,13 @@ export function useInfiniteList<T>({
           } else {
             setLoadingMore(false);
           }
-          if (autoLoadUntilComplete && hasMoreRef.current && !controller.signal.aborted) {
+          if (hasMoreRef.current && fetchedCount === 0 && !controller.signal.aborted) {
+            setTimeout(() => {
+              if (hasMoreRef.current && !isFetchingRef.current && !controller.signal.aborted) {
+                void loadBatch(false);
+              }
+            }, 30);
+          } else if (autoLoadUntilComplete && hasMoreRef.current && !controller.signal.aborted) {
             setTimeout(() => {
               if (hasMoreRef.current && !isFetchingRef.current && !controller.signal.aborted) {
                 void loadBatch(false);

@@ -243,7 +243,23 @@ func kind(mimeType string) mediaKind {
 func (g *Generator) Generate(ctx context.Context, sourcePath, mimeType string) ([]byte, error) {
 	switch kind(mimeType) {
 	case kindImage:
-		return g.fromImage(sourcePath)
+		ext := strings.ToLower(filepath.Ext(sourcePath))
+		if ext == ".heic" || ext == ".heif" || strings.Contains(mimeType, "heic") || strings.Contains(mimeType, "heif") {
+			if g.Caps().FFmpeg {
+				return g.fromFFmpegImage(ctx, sourcePath)
+			}
+		}
+		data, err := g.fromImage(sourcePath)
+		if err == nil {
+			return data, nil
+		}
+		// If standard image decode failed (e.g. HEIC, unsupported RAW/TIFF) and ffmpeg is available, try ffmpeg
+		if g.Caps().FFmpeg {
+			if fbData, fbErr := g.fromFFmpegImage(ctx, sourcePath); fbErr == nil {
+				return fbData, nil
+			}
+		}
+		return nil, err
 	case kindVideo:
 		if !g.Caps().FFmpeg {
 			return nil, ErrUnsupported
@@ -257,6 +273,37 @@ func (g *Generator) Generate(ctx context.Context, sourcePath, mimeType string) (
 	default:
 		return nil, ErrUnsupported
 	}
+}
+
+func (g *Generator) fromFFmpegImage(ctx context.Context, path string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, generatorTimeout)
+	defer cancel()
+	out, err := g.tempFile("img-*.jpg")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(out)
+
+	cmd := exec.CommandContext(ctx, g.Caps().FFmpegPath,
+		"-hide_banner", "-loglevel", "error", "-y",
+		"-i", path,
+		"-frames:v", "1",
+		"-vf", fmt.Sprintf("scale='min(%d,iw)':-2", MaxEdge),
+		out,
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("thumbnails: ffmpeg image decode: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, errors.New("thumbnails: ffmpeg produced empty image")
+	}
+	return data, nil
 }
 
 func (g *Generator) fromImage(path string) ([]byte, error) {

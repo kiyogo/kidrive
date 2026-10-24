@@ -363,8 +363,10 @@ function LazyGalleryTile({
     return () => observer.disconnect();
   }, []);
 
+  const isHeic = /\.(heic|heif)$/i.test(node.name);
   const thumbUrl = api.media(Api.thumbnail(node.id));
-  const fallbackUrl = api.media(Api.download(node.id));
+  const canFallback = !isHeic && (node.size_bytes || 0) <= 1024 * 1024;
+  const fallbackUrl = canFallback ? api.media(Api.download(node.id)) : "";
 
   return (
     <div
@@ -386,25 +388,37 @@ function LazyGalleryTile({
       }}
     >
       {isVisible ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={imgError ? fallbackUrl : thumbUrl}
-          alt={node.name}
-          loading="lazy"
-          decoding="async"
-          onError={() => {
-            if (!imgError) {
+        imgError && !canFallback ? (
+          <span
+            style={{
+              display: "grid",
+              placeItems: "center",
+              height: "100%",
+              color: "var(--fg-muted)",
+              opacity: 0.3,
+            }}
+          >
+            <Icon glyph="image" size={24} />
+          </span>
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={imgError && canFallback ? fallbackUrl : thumbUrl}
+            alt={node.name}
+            loading="lazy"
+            decoding="async"
+            onError={() => {
               setImgError(true);
-            }
-          }}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            display: "block",
-            transition: "opacity 0.15s ease",
-          }}
-        />
+            }}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              display: "block",
+              transition: "opacity 0.15s ease",
+            }}
+          />
+        )
       ) : (
         <span
           style={{

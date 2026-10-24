@@ -284,7 +284,10 @@ class Client {
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
         signal: options.signal,
       });
-    } catch (cause) {
+    } catch (cause: any) {
+      if (options.signal?.aborted || cause?.name === "AbortError") {
+        throw cause;
+      }
       // a browser gives no detail on a failed connection, on purpose, so this
       // says the useful thing rather than repeating "failed to fetch"
       throw new ApiError(

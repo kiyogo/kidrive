@@ -286,11 +286,27 @@ export function CanvasOverlayScrollbar({
         return;
       }
 
-      // Clicked on track -> page up or page down (matching native behavior)
-      const isAbove = pointerY < state.thumbY;
-      const direction = isAbove ? -1 : 1;
-      const pageSize = target.clientHeight * 0.9;
-      target.scrollBy({ top: direction * pageSize, behavior: "instant" });
+      // Clicked on track -> jump immediately in one shot directly to clicked mouse cursor position!
+      const topMargin = 3;
+      const targetThumbY = pointerY - state.thumbH / 2;
+      const clampedThumbY = Math.max(topMargin, Math.min(topMargin + state.maxThumbY, targetThumbY));
+      const progress = state.maxThumbY > 0 ? (clampedThumbY - topMargin) / state.maxThumbY : 0;
+      const newScrollTop = Math.round(progress * state.maxScrollTop);
+      target.scrollTop = newScrollTop;
+
+      // Start dragging immediately so user can continue dragging fluidly from the clicked position
+      state.isDragging = true;
+      state.dragStartY = e.clientY;
+      state.dragStartScrollTop = newScrollTop;
+      window.addEventListener("pointermove", handleWindowPointerMove);
+      window.addEventListener("pointerup", handleWindowPointerUp);
+      window.addEventListener("pointercancel", handleWindowPointerUp);
+
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
       scheduleRender();
       e.preventDefault();
     };

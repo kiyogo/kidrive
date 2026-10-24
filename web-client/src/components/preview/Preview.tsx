@@ -44,6 +44,9 @@ export function Preview({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const stallTimer = useRef<NodeJS.Timeout | null>(null);
   const idleTimer = useRef<NodeJS.Timeout | null>(null);
   const actionScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -240,11 +243,22 @@ export function Preview({
 
   // Video controls helpers
   const togglePlay = () => {
-    if (!videoRef.current) return;
-    if (videoRef.current.paused) {
-      void videoRef.current.play();
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) {
+      const p = v.play();
+      if (p !== undefined) {
+        p.then(() => {
+          setPlaying(true);
+        }).catch((err) => {
+          console.warn("video play interrupted, retrying muted:", err);
+          v.muted = true;
+          v.play().then(() => setPlaying(true)).catch(() => {});
+        });
+      }
     } else {
-      videoRef.current.pause();
+      v.pause();
+      setPlaying(false);
     }
     wakeVideoControls();
   };
@@ -587,12 +601,53 @@ export function Preview({
               preload="auto"
               playsInline
               autoPlay
+              onWaiting={() => {
+                setIsBuffering(true);
+                if (stallTimer.current) clearTimeout(stallTimer.current);
+                stallTimer.current = setTimeout(() => {
+                  const v = videoRef.current;
+                  if (v && !v.paused) {
+                    v.currentTime = Math.min(v.duration || 0, v.currentTime + 0.05);
+                    void v.play().catch(() => {});
+                  }
+                }, 3500);
+              }}
+              onStalled={() => {
+                setIsBuffering(true);
+                if (stallTimer.current) clearTimeout(stallTimer.current);
+                stallTimer.current = setTimeout(() => {
+                  const v = videoRef.current;
+                  if (v && !v.paused) {
+                    v.currentTime = Math.min(v.duration || 0, v.currentTime + 0.05);
+                    void v.play().catch(() => {});
+                  }
+                }, 3500);
+              }}
+              onCanPlay={() => {
+                setIsBuffering(false);
+                setHasError(false);
+                if (stallTimer.current) clearTimeout(stallTimer.current);
+              }}
+              onPlaying={() => {
+                setIsBuffering(false);
+                setPlaying(true);
+                setHasError(false);
+                if (stallTimer.current) clearTimeout(stallTimer.current);
+                wakeVideoControls();
+              }}
+              onError={() => {
+                setIsBuffering(false);
+                setHasError(true);
+                if (stallTimer.current) clearTimeout(stallTimer.current);
+              }}
               onPlay={() => {
                 setPlaying(true);
                 wakeVideoControls();
               }}
               onPause={() => {
                 setPlaying(false);
+                setIsBuffering(false);
+                if (stallTimer.current) clearTimeout(stallTimer.current);
                 wakeVideoControls();
               }}
               style={{
@@ -601,8 +656,102 @@ export function Preview({
                 maxWidth: "100%",
                 maxHeight: "100%",
                 objectFit: "contain",
+                transform: "translateZ(0)",
+                willChange: "transform",
               }}
             />
+            {/* Buffering Spinner */}
+            {isBuffering && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  pointerEvents: "none",
+                  zIndex: 20,
+                }}
+              >
+                <div
+                  style={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: "50%",
+                    border: "3px solid rgba(255,255,255,0.2)",
+                    borderTopColor: "var(--accent, #007aff)",
+                    animation: "ld_spin 0.8s linear infinite",
+                  }}
+                />
+              </div>
+            )}
+            {/* Play Button Overlay when paused */}
+            {!playing && !isBuffering && !hasError && (
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  togglePlay();
+                }}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 15,
+                  cursor: "pointer",
+                }}
+              >
+                <div
+                  style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: "50%",
+                    background: "rgba(0,0,0,0.6)",
+                    backdropFilter: "blur(4px)",
+                    display: "grid",
+                    placeItems: "center",
+                    border: "1px solid rgba(255,255,255,0.2)",
+                    transition: "transform 0.15s ease",
+                  }}
+                >
+                  <Icon glyph="play" size={28} color="#FFFFFF" />
+                </div>
+              </div>
+            )}
+            {/* Error Overlay with Retry */}
+            {hasError && (
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setHasError(false);
+                  setIsBuffering(true);
+                  const v = videoRef.current;
+                  if (v) {
+                    const ct = v.currentTime;
+                    v.load();
+                    v.currentTime = ct;
+                    void v.play().catch(() => {});
+                  }
+                }}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "rgba(0,0,0,0.7)",
+                  zIndex: 25,
+                  cursor: "pointer",
+                  color: "#fff",
+                  gap: 12,
+                }}
+              >
+                <Icon glyph="refresh" size={32} color="#fff" />
+                <span style={{ fontSize: 14 }}>Nhấn để thử lại</span>
+              </div>
+            )}
           </div>
         ) : category === "audio" ? (
           <div
@@ -911,22 +1060,55 @@ function VideoScrubberBar({
     };
   }, [videoRef, syncStatic]);
 
+  const lastSeekTimeRef = useRef(0);
+  const seekThrottleRef = useRef<NodeJS.Timeout | null>(null);
+
+  const updateVisualTime = useCallback((targetTime: number, dur: number) => {
+    const pct = dur > 0 ? Math.min(100, Math.max(0, (targetTime / dur) * 100)) : 0;
+    if (playedBarRef.current) playedBarRef.current.style.width = `${pct}%`;
+    if (thumbRef.current) thumbRef.current.style.left = `${pct}%`;
+    if (elapsedRef.current) elapsedRef.current.textContent = formatClock(targetTime);
+    if (leftRef.current) leftRef.current.textContent = `-${formatClock(Math.max(0, dur - targetTime))}`;
+  }, []);
+
+  const commitSeek = useCallback((targetTime: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    if ((v as any).fastSeek) {
+      (v as any).fastSeek(targetTime);
+    } else {
+      v.currentTime = targetTime;
+    }
+  }, [videoRef]);
+
   const seek = useCallback(
-    (clientX: number) => {
+    (clientX: number, commitImmediately = false) => {
       const el = trackRef.current;
       const v = videoRef.current;
       if (!el || !v || !v.duration) return;
       const rect = el.getBoundingClientRect();
       const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       const targetTime = fraction * v.duration;
-      v.currentTime = targetTime;
-      const pct = fraction * 100;
-      if (playedBarRef.current) playedBarRef.current.style.width = `${pct}%`;
-      if (thumbRef.current) thumbRef.current.style.left = `${pct}%`;
-      if (elapsedRef.current) elapsedRef.current.textContent = formatClock(targetTime);
-      if (leftRef.current) leftRef.current.textContent = `-${formatClock(Math.max(0, v.duration - targetTime))}`;
+      updateVisualTime(targetTime, v.duration);
+
+      if (commitImmediately) {
+        if (seekThrottleRef.current) clearTimeout(seekThrottleRef.current);
+        commitSeek(targetTime);
+        lastSeekTimeRef.current = Date.now();
+      } else {
+        const now = Date.now();
+        if (now - lastSeekTimeRef.current > 100) {
+          lastSeekTimeRef.current = now;
+          commitSeek(targetTime);
+        } else {
+          if (seekThrottleRef.current) clearTimeout(seekThrottleRef.current);
+          seekThrottleRef.current = setTimeout(() => {
+            commitSeek(targetTime);
+          }, 80);
+        }
+      }
     },
-    [videoRef],
+    [videoRef, updateVisualTime, commitSeek],
   );
 
   const updateHover = useCallback((clientX: number) => {
@@ -958,7 +1140,9 @@ function VideoScrubberBar({
         ref={trackRef}
         style={{
           position: "relative",
-          height: 24,
+          height: 38,
+          padding: "10px 0",
+          margin: "-10px 0",
           display: "flex",
           alignItems: "center",
           cursor: "pointer",
@@ -978,7 +1162,7 @@ function VideoScrubberBar({
           wakeControls();
           updateHover(e.clientX);
           if (isDraggingRef.current) {
-            seek(e.clientX);
+            seek(e.clientX, false);
           }
         }}
         onPointerDown={(e) => {
@@ -986,7 +1170,7 @@ function VideoScrubberBar({
           e.currentTarget.setPointerCapture(e.pointerId);
           isDraggingRef.current = true;
           setIsScrubbing(true);
-          seek(e.clientX);
+          seek(e.clientX, true);
         }}
         onPointerUp={(e) => {
           if (isDraggingRef.current) {
@@ -995,7 +1179,7 @@ function VideoScrubberBar({
             } catch {}
             isDraggingRef.current = false;
             setIsScrubbing(false);
-            seek(e.clientX);
+            seek(e.clientX, true);
           }
         }}
       >

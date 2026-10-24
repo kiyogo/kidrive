@@ -128,7 +128,7 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
       });
       return {
         items: vNodes,
-        hasMore: Boolean(data?.has_more ?? (vNodes.length >= limit)),
+        hasMore: Boolean(data?.has_more ?? ((data?.nodes?.length ?? 0) >= limit)),
         nextOffset: data?.next_offset ?? offset + (data?.nodes?.length ?? 0),
       };
     },
