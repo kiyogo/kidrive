@@ -75,22 +75,24 @@ export function Preview({
   const online = useOnline();
   const unreachable = !online && !local;
 
-  // Windowed preloading: only load/preload 2 items ahead and 2 items behind
+  // Intelligent windowed preloading with debounce to prioritize current media
   useEffect(() => {
     if (!nodes || currentIndex < 0) return;
-    const start = Math.max(0, currentIndex - 2);
-    const end = Math.min(nodes.length - 1, currentIndex + 2);
-
-    for (let i = start; i <= end; i++) {
-      if (i === currentIndex) continue;
-      const targetNode = nodes[i];
-      if (!targetNode) continue;
-      const targetCat = categoryOf(targetNode);
-      if (targetCat === "image") {
-        const img = new Image();
-        img.src = api.media(`${Api.download(targetNode.id)}?inline=1`);
+    const timer = setTimeout(() => {
+      const targets = [currentIndex + 1, currentIndex - 1].filter(
+        (i) => i >= 0 && i < nodes.length
+      );
+      for (const i of targets) {
+        const targetNode = nodes[i];
+        if (!targetNode) continue;
+        const targetCat = categoryOf(targetNode);
+        if (targetCat === "image") {
+          const img = new Image();
+          img.src = api.media(`${Api.download(targetNode.id)}?inline=1`);
+        }
       }
-    }
+    }, 350);
+    return () => clearTimeout(timer);
   }, [nodes, currentIndex]);
 
   const handlePrev = useCallback(() => {
@@ -492,6 +494,7 @@ export function Preview({
         ) : category === "image" ? (
           <InteractiveImage
             src={src}
+            thumbSrc={api.media(Api.thumbnail(node.id))}
             alt={node.name}
             initialWidth={node.image_width}
             initialHeight={node.image_height}
@@ -525,6 +528,8 @@ export function Preview({
             <video
               ref={videoRef}
               src={src}
+              poster={api.media(Api.thumbnail(node.id))}
+              preload="metadata"
               playsInline
               autoPlay
               onPlay={() => {
@@ -1243,6 +1248,7 @@ function ActionRow({
  */
 function InteractiveImage({
   src,
+  thumbSrc,
   alt,
   initialWidth,
   initialHeight,
@@ -1252,6 +1258,7 @@ function InteractiveImage({
   onTap,
 }: {
   src: string;
+  thumbSrc?: string;
   alt: string;
   initialWidth?: number;
   initialHeight?: number;
@@ -1265,6 +1272,7 @@ function InteractiveImage({
     width: initialWidth || 0,
     height: initialHeight || 0,
   });
+  const [fullLoaded, setFullLoaded] = useState(false);
 
   // Consolidated view state
   const [view, setView] = useState<{ scale: number; x: number; y: number }>({
@@ -1295,9 +1303,10 @@ function InteractiveImage({
   const lastTapTime = useRef(0);
   const lastTapPos = useRef({ x: 0, y: 0 });
 
-  // Reset zoom when image src changes
+  // Reset zoom and load state when image src changes
   useEffect(() => {
     setView({ scale: 1.0, x: 0, y: 0 });
+    setFullLoaded(false);
     if (initialWidth && initialHeight) {
       setNaturalSize({ width: initialWidth, height: initialHeight });
     }
@@ -1654,12 +1663,35 @@ function InteractiveImage({
         touchAction: "none",
       }}
     >
+      {thumbSrc && !fullLoaded && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={thumbSrc}
+          alt=""
+          draggable={false}
+          decoding="async"
+          style={{
+            position: "absolute",
+            width: "100%",
+            height: "100%",
+            maxWidth: "100%",
+            maxHeight: "100%",
+            objectFit: "contain",
+            filter: "blur(6px)",
+            transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`,
+            transformOrigin: "center center",
+            pointerEvents: "none",
+          }}
+        />
+      )}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
         alt={alt}
         draggable={false}
+        decoding="async"
         onLoad={(e) => {
+          setFullLoaded(true);
           const img = e.currentTarget;
           if (img.naturalWidth && img.naturalHeight) {
             setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
@@ -1676,7 +1708,8 @@ function InteractiveImage({
           willChange: "transform",
           backfaceVisibility: "hidden",
           WebkitBackfaceVisibility: "hidden",
-          transition: isDragging.current || isPinching.current ? "none" : "transform 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
+          opacity: fullLoaded ? 1 : 0,
+          transition: isDragging.current || isPinching.current ? "none" : "transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease-in-out",
           userSelect: "none",
           pointerEvents: "auto",
         }}

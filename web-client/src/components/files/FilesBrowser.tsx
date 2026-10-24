@@ -2245,6 +2245,7 @@ function Tile({
               src={api.media(Api.thumbnail(node.id))}
               alt=""
               loading="lazy"
+              decoding="async"
               onError={(e) => {
                 e.currentTarget.style.display = "none";
               }}
@@ -2578,6 +2579,7 @@ function List({
                   src={api.media(Api.thumbnail(node.id))}
                   alt=""
                   loading="lazy"
+                  decoding="async"
                   onError={(e) => {
                     e.currentTarget.style.display = "none";
                   }}

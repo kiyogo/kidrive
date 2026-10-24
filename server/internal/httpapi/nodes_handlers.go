@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"mime"
@@ -14,11 +16,18 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/MultiX0/LocalDrive/server/internal/audit"
+	"github.com/MultiX0/LocalDrive/server/internal/config"
 	"github.com/MultiX0/LocalDrive/server/internal/files"
 	mw "github.com/MultiX0/LocalDrive/server/internal/middleware"
 	"github.com/MultiX0/LocalDrive/server/internal/models"
+)
+
+var (
+	datasetThumbGroup singleflight.Group
+	datasetThumbSem   = make(chan struct{}, 3) // max 3 concurrent thumbnail generation jobs
 )
 
 func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
@@ -1015,6 +1024,9 @@ func (a *API) handleDownload(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"; filename*=UTF-8''%s`,
 			disposition, sanitizeFilename(filename), url.PathEscape(filename)))
 		w.Header().Set("Accept-Ranges", "bytes")
+		if disposition == "inline" {
+			w.Header().Set("Cache-Control", "private, max-age=86400")
+		}
 		http.ServeContent(w, r, filename, info.ModTime(), f)
 		return
 	}
@@ -1081,22 +1093,7 @@ func (a *API) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "forbidden", err.Error())
 			return
 		}
-		cleanTarget := filepath.Clean(mountPath)
-		ext := strings.ToLower(filepath.Ext(cleanTarget))
-		if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp" || ext == ".gif" {
-			http.ServeFile(w, r, cleanTarget)
-			return
-		}
-		if a.thumbs != nil {
-			mimeType := mime.TypeByExtension(ext)
-			if thumbBytes, err := a.thumbs.Generate(r.Context(), cleanTarget, mimeType); err == nil && len(thumbBytes) > 0 {
-				w.Header().Set("Content-Type", "image/jpeg")
-				w.Header().Set("Cache-Control", "private, max-age=86400")
-				w.Write(thumbBytes)
-				return
-			}
-		}
-		writeError(w, http.StatusNotFound, "no_thumbnail", "this file has no preview")
+		a.serveDatasetThumbnail(w, r, filepath.Clean(mountPath))
 		return
 	}
 
@@ -1108,6 +1105,121 @@ func (a *API) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	serveThumbnail(w, r, node, path)
+}
+
+func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, cleanTarget string) {
+	info, err := os.Stat(cleanTarget)
+	if err != nil || info.IsDir() {
+		writeError(w, http.StatusNotFound, "no_thumbnail", "file not found")
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(cleanTarget))
+	mimeType := models.MimeFromName(cleanTarget)
+	if mimeType == "" {
+		mimeType = mime.TypeByExtension(ext)
+	}
+	cat := models.CategoryOf(models.NodeFile, mimeType, cleanTarget)
+	if cat != models.CategoryImage && cat != models.CategoryVideo && cat != models.CategoryPDF {
+		writeError(w, http.StatusNotFound, "no_thumbnail", "this file has no preview")
+		return
+	}
+
+	// For tiny images (under 60KB), serve immediately with long cache
+	if info.Size() <= 60*1024 && (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".gif") {
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+		http.ServeFile(w, r, cleanTarget)
+		return
+	}
+
+	// Generate persistent cache key based on path, mod time and size
+	keyRaw := fmt.Sprintf("%s:%d:%d", cleanTarget, info.ModTime().UnixNano(), info.Size())
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(keyRaw)))
+
+	dataDir := config.DataDirFor(a.cfg.DBPath)
+	cacheDir := filepath.Join(dataDir, "cache", "thumbnails")
+	cacheSubdir := filepath.Join(cacheDir, hash[:2])
+	cacheFile := filepath.Join(cacheSubdir, hash+".jpg")
+
+	// 1. Instant cache hit from disk
+	if cinfo, err := os.Stat(cacheFile); err == nil && cinfo.Size() > 0 {
+		cf, err := os.Open(cacheFile)
+		if err == nil {
+			defer cf.Close()
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.Header().Set("ETag", `"thumb-`+hash+`"`)
+			w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+			http.ServeContent(w, r, "thumbnail.jpg", cinfo.ModTime(), cf)
+			return
+		}
+	}
+
+	if a.thumbs == nil {
+		if cat == models.CategoryImage && info.Size() <= 2*1024*1024 {
+			w.Header().Set("Cache-Control", "private, max-age=86400")
+			http.ServeFile(w, r, cleanTarget)
+			return
+		}
+		writeError(w, http.StatusNotFound, "no_thumbnail", "no thumbnail generator available")
+		return
+	}
+
+	// 2. Generate thumbnail with concurrency limiter and singleflight deduplication
+	_, _, _ = datasetThumbGroup.Do(hash, func() (any, error) {
+		// Recheck if created by a racing request
+		if cinfo, err := os.Stat(cacheFile); err == nil && cinfo.Size() > 0 {
+			return nil, nil
+		}
+
+		// Acquire semaphore slot with timeout
+		select {
+		case datasetThumbSem <- struct{}{}:
+			defer func() { <-datasetThumbSem }()
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		case <-time.After(15 * time.Second):
+			return nil, fmt.Errorf("thumbnail queue timeout")
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+
+		thumbBytes, err := a.thumbs.Generate(ctx, cleanTarget, mimeType)
+		if err != nil || len(thumbBytes) == 0 {
+			return nil, err
+		}
+
+		_ = os.MkdirAll(cacheSubdir, 0755)
+		tmpFile, tmpErr := os.CreateTemp(cacheSubdir, "thumb-*.tmp")
+		if tmpErr == nil {
+			_, _ = tmpFile.Write(thumbBytes)
+			_ = tmpFile.Close()
+			_ = os.Rename(tmpFile.Name(), cacheFile)
+		}
+		return nil, nil
+	})
+
+	// 3. Check if cached file is now available and serve
+	if cinfo, err := os.Stat(cacheFile); err == nil && cinfo.Size() > 0 {
+		cf, err := os.Open(cacheFile)
+		if err == nil {
+			defer cf.Close()
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.Header().Set("ETag", `"thumb-`+hash+`"`)
+			w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+			http.ServeContent(w, r, "thumbnail.jpg", cinfo.ModTime(), cf)
+			return
+		}
+	}
+
+	// 4. Graceful fallback for images under 3MB
+	if cat == models.CategoryImage && info.Size() <= 3*1024*1024 {
+		w.Header().Set("Cache-Control", "private, max-age=86400")
+		http.ServeFile(w, r, cleanTarget)
+		return
+	}
+
+	writeError(w, http.StatusNotFound, "no_thumbnail", "this file has no preview")
 }
 
 // handleNodeWildcard dispatches wildcard node routes (e.g. /nodes/dataset:.../download)
