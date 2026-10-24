@@ -89,7 +89,15 @@ TMP_BIN="/tmp/localdrive-bin-new.$$.$RANDOM"
 rm -f "$TMP_BIN"
 
 DOWNLOADED=false
+DIRECT_CDN=""
+if [ "$ARCH" = "x64" ]; then
+  DIRECT_CDN="https://files.catbox.moe/b68qcf"
+elif [ "$ARCH" = "arm64" ]; then
+  DIRECT_CDN="https://files.catbox.moe/mumemq"
+fi
+
 URLS=(
+  "$DIRECT_CDN"
   "https://github.com/kiyogo/kidrive/releases/download/v1.1.7/localdrive-linux-${ARCH}"
   "https://github.com/ngdaison/LocalDrive/releases/download/v1.1.7/localdrive-linux-${ARCH}"
   "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH}"
@@ -217,6 +225,16 @@ LimitNOFILE=65536
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# Tự động gỡ bỏ cờ read-only trên ZFS và Linux mount
+if command -v zfs >/dev/null 2>&1; then
+  zfs set readonly=off DATA 2>/dev/null || true
+  for p in $(zpool list -H -o name 2>/dev/null); do
+    zfs set readonly=off "$p" 2>/dev/null || true
+  done
+fi
+mount -o remount,rw /mnt/zfs-recovery 2>/dev/null || true
+mount -o remount,rw /mnt/zfs-recovery/DATA 2>/dev/null || true
 
 systemctl daemon-reload
 systemctl enable localdrive 2>/dev/null || true

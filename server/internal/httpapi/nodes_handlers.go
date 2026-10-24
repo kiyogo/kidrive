@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -666,19 +667,40 @@ func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := os.MkdirAll(targetPath, 0755); err != nil {
-			// Nếu bị read-only file system hoặc mount chứa zfs-recovery, tự động chuyển sang mount point ghi được
+			// Nếu bị read-only file system hoặc mount chứa zfs-recovery, tự động bỏ cờ readonly hoặc chuyển sang mount point ghi được
 			if strings.Contains(strings.ToLower(err.Error()), "read-only") || strings.Contains(mount, "zfs-recovery") {
-				altMount := a.resolveRealMountPath(dsName, "")
-				if altMount != "" && altMount != mount && !strings.Contains(altMount, "zfs-recovery") {
-					altTarget := filepath.Clean(filepath.Join(altMount, cleanedSub, folderName))
-					if retryErr := os.MkdirAll(altTarget, 0755); retryErr == nil {
-						mount = altMount
-						targetPath = altTarget
-						_ = a.db.Write(r.Context(), func(c context.Context, tx *sql.Tx) error {
-							_, _ = tx.ExecContext(c, `UPDATE datasets SET mount = ? WHERE name = ?`, altMount, dsName)
-							return nil
-						})
-						err = nil
+				poolName := strings.Split(strings.Trim(dsName, "/"), "/")[0]
+				_ = exec.Command("zfs", "set", "readonly=off", dsName).Run()
+				_ = exec.Command("zfs", "set", "readonly=off", poolName).Run()
+				_ = exec.Command("mount", "-o", "remount,rw", cleanMount).Run()
+				_ = exec.Command("mount", "-o", "remount,rw", mount).Run()
+				_ = exec.Command("mount", "-o", "remount,rw", filepath.Dir(mount)).Run()
+				_ = exec.Command("mount", "-o", "remount,rw", "/mnt/zfs-recovery").Run()
+				if retryErr := os.MkdirAll(targetPath, 0755); retryErr == nil {
+					err = nil
+				} else {
+					candidates := []string{
+						a.resolveRealMountPath(dsName, ""),
+						filepath.Join("/mnt", poolName),
+						filepath.Join("/mnt", strings.Trim(dsName, "/")),
+						"/" + strings.Trim(dsName, "/"),
+						strings.ReplaceAll(mount, "/mnt/zfs-recovery/", "/mnt/"),
+						strings.ReplaceAll(mount, "/mnt/zfs-recovery/", "/"),
+					}
+					for _, altMount := range candidates {
+						if altMount != "" && altMount != mount && !strings.Contains(altMount, "zfs-recovery") {
+							altTarget := filepath.Clean(filepath.Join(altMount, cleanedSub, folderName))
+							if retryErr2 := os.MkdirAll(altTarget, 0755); retryErr2 == nil {
+								mount = altMount
+								targetPath = altTarget
+								_ = a.db.Write(r.Context(), func(c context.Context, tx *sql.Tx) error {
+									_, _ = tx.ExecContext(c, `UPDATE datasets SET mount = ? WHERE name = ?`, altMount, dsName)
+									return nil
+								})
+								err = nil
+								break
+							}
+						}
 					}
 				}
 			}
