@@ -1483,9 +1483,9 @@ export function StorageScreen() {
       }
     } catch {
       // Fallback from session user
-      const quota = user?.quota_bytes && user.quota_bytes > 0 ? user.quota_bytes : 10 * 1024 * 1024 * 1024;
+      const quota = user?.quota_bytes && user.quota_bytes > 0 ? user.quota_bytes : 0;
       const used = user?.quota_bytes_used ?? 0;
-      const free = Math.max(0, quota - used);
+      const free = quota > 0 ? Math.max(0, quota - used) : -1;
       setData({
         quota_bytes: quota,
         used_bytes: used,
@@ -1517,10 +1517,11 @@ export function StorageScreen() {
     );
   }
 
-  const quota = data?.quota_bytes ?? (10 * 1024 * 1024 * 1024);
+  const quota = data?.quota_bytes ?? (user?.quota_bytes ?? 0);
+  const isUnlimited = !quota || quota <= 0;
   const used = data?.used_bytes ?? 0;
-  const free = data?.free_bytes ?? Math.max(0, quota - used);
-  const percentUsed = quota > 0 ? Math.min(100, Math.max(0, (used / quota) * 100)) : 0;
+  const free = isUnlimited ? -1 : (data?.free_bytes ?? Math.max(0, quota - used));
+  const percentUsed = !isUnlimited && quota > 0 ? Math.min(100, Math.max(0, (used / quota) * 100)) : 0;
   const isWarn = percentUsed >= 95;
 
   const categories = data?.categories ?? {
@@ -1655,7 +1656,7 @@ export function StorageScreen() {
               </span>
             </div>
             <span style={{ fontSize: 13, color: "var(--fg-secondary)", fontWeight: 500 }}>
-              Gói tiêu chuẩn {bytes(quota)}
+              {isUnlimited ? "Gói Không giới hạn" : `Gói tiêu chuẩn ${bytes(quota)}`}
             </span>
           </div>
 
@@ -1664,7 +1665,7 @@ export function StorageScreen() {
               {bytes(used)}
             </span>
             <span style={{ fontSize: 16, color: "var(--fg-secondary)", fontWeight: 500 }}>
-              / {bytes(quota)}
+              / {isUnlimited ? "Không giới hạn" : bytes(quota)}
             </span>
           </div>
 
@@ -1683,7 +1684,7 @@ export function StorageScreen() {
             <div
               style={{
                 height: "100%",
-                width: `${percentUsed}%`,
+                width: isUnlimited ? (used > 0 ? "100%" : "0%") : `${percentUsed}%`,
                 minWidth: used > 0 ? 4 : 0,
                 background: isWarn ? "var(--warning)" : "var(--accent)",
                 borderRadius: 999,
@@ -1697,7 +1698,7 @@ export function StorageScreen() {
               Đã dùng {bytes(used)}
             </span>
             <span className="t-body-sm" style={{ color: "var(--fg-secondary)", fontWeight: 500 }}>
-              Còn {bytes(free)}
+              Còn {isUnlimited ? "Không giới hạn" : bytes(free)}
             </span>
           </div>
         </div>

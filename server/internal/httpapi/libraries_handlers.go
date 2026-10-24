@@ -56,16 +56,13 @@ func (a *API) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 
 	user, _ := mw.UserFrom(r.Context())
 	quota := user.QuotaBytes
-	if quota <= 0 {
-		quota = a.cfg.DefaultQuotaBytes
-		if quota <= 0 {
-			quota = 10 * 1024 * 1024 * 1024 // 10 GB default
-		}
-	}
 	totalUsed := user.QuotaBytesUsed
-	totalFree := quota - totalUsed
-	if totalFree < 0 {
-		totalFree = 0
+	var totalFree int64 = -1
+	if quota > 0 {
+		totalFree = quota - totalUsed
+		if totalFree < 0 {
+			totalFree = 0
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -84,16 +81,13 @@ type categoryStatDTO struct {
 func (a *API) handleAccountStorageBreakdown(w http.ResponseWriter, r *http.Request) {
 	user, _ := mw.UserFrom(r.Context())
 	quota := user.QuotaBytes
-	if quota <= 0 {
-		quota = a.cfg.DefaultQuotaBytes
-		if quota <= 0 {
-			quota = 10 * 1024 * 1024 * 1024
-		}
-	}
 	used := user.QuotaBytesUsed
-	free := quota - used
-	if free < 0 {
-		free = 0
+	var free int64 = -1
+	if quota > 0 {
+		free = quota - used
+		if free < 0 {
+			free = 0
+		}
 	}
 
 	stats := map[string]categoryStatDTO{

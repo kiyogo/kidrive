@@ -197,9 +197,16 @@ export function FilesBrowser({
     return { level: "none" as const, read: false, write: false, execute: false };
   }, [user, userPerms]);
 
-  // Danh mục gốc được phân quyền cho người dùng này (nếu là user thường)
+  // Danh mục gốc được phân quyền cho người dùng này
   const userRootDatasets = useMemo<string[]>(() => {
-    if (!user || user.role === "admin" || !user.dataset_permissions) return [];
+    if (!user || !user.dataset_permissions) return [];
+    if (userPerms["/"] || userPerms["*"]) {
+      const rootPerm = userPerms["/"] || userPerms["*"];
+      const canReadRoot = typeof rootPerm === "object" ? rootPerm.read : rootPerm !== "none";
+      if (canReadRoot && user.role === "admin") {
+        return [];
+      }
+    }
     const keys = Object.keys(userPerms)
       .map((k) => k.trim().replace(/^\/+|\/+$/g, ""))
       .filter((k) => k && k !== "*" && k !== "/");
@@ -588,7 +595,7 @@ export function FilesBrowser({
       }
 
       let effectiveParentId = filter === "none" ? folderId : "";
-      if (filter === "none" && !folderId && user && user.role !== "admin" && defaultSingleDataset) {
+      if (filter === "none" && !folderId && defaultSingleDataset) {
         effectiveParentId = `dataset:${defaultSingleDataset}`;
       }
 
@@ -2231,13 +2238,16 @@ function Tile({
           overflow: "hidden",
         }}
       >
-        {node.has_thumbnail ? (
+        {node.has_thumbnail || cat === "image" || cat === "video" ? (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={api.media(Api.thumbnail(node.id))}
               alt=""
               loading="lazy"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
               style={{ width: "100%", height: "100%", objectFit: "cover" }}
             />
             {cat === "video" && (
@@ -2562,12 +2572,15 @@ function List({
                 position: "relative",
               }}
             >
-              {node.has_thumbnail ? (
+              {node.has_thumbnail || cat === "image" || cat === "video" ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={api.media(Api.thumbnail(node.id))}
                   alt=""
                   loading="lazy"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                  }}
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
               ) : (

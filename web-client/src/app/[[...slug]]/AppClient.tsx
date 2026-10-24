@@ -209,11 +209,18 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
   const t = useL10n();
   const { user } = useSession();
 
-  // If user is non-admin with a single assigned dataset:
+  // If user has a single assigned dataset/category (not full root "/" or "*"):
   const defaultSingleDataset = useMemo<string | null>(() => {
-    if (!user || user.role === "admin" || !user.dataset_permissions) return null;
+    if (!user || !user.dataset_permissions) return null;
     try {
       const perms = JSON.parse(user.dataset_permissions);
+      if (perms["/"] || perms["*"]) {
+        const rootPerm = perms["/"] || perms["*"];
+        const canReadRoot = typeof rootPerm === "object" ? rootPerm.read : rootPerm !== "none";
+        if (canReadRoot && user.role === "admin") {
+          return null; // Admin with full root access
+        }
+      }
       const keys = Object.keys(perms)
         .map((k) => k.trim().replace(/^\/+|\/+$/g, ""))
         .filter((k) => k && k !== "*" && k !== "/");

@@ -369,6 +369,9 @@ function GalleryGridContent({
                   src={api.media(Api.thumbnail(n.id))}
                   alt={n.name}
                   loading="lazy"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                  }}
                   style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                 />
               ) : (

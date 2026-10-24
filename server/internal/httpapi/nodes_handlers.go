@@ -44,56 +44,71 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		SortDesc: strings.EqualFold(r.URL.Query().Get("order"), "desc"),
 	}
 
-	// 1. Nếu tài khoản không phải admin và CHƯA được chọn danh mục lưu trữ -> Không hiện dữ liệu và không tải được gì luôn!
-	// 1. Phân tích danh mục được cấp quyền (userRoots) đối với tài khoản không phải admin
+	// 1. Phân tích danh mục được cấp quyền (userRoots)
 	var userRoots []string
-	if !isAdmin {
-		if ok && user.DatasetPermissions != "" && user.DatasetPermissions != "{}" {
-			var perms map[string]any
-			if err := json.Unmarshal([]byte(user.DatasetPermissions), &perms); err == nil {
-				var rawKeys []string
-				for k, v := range perms {
-					if v == nil || v == "none" {
+	hasFullRoot := isAdmin
+	if ok && user.DatasetPermissions != "" && user.DatasetPermissions != "{}" {
+		var perms map[string]any
+		if err := json.Unmarshal([]byte(user.DatasetPermissions), &perms); err == nil {
+			hasSlashOrStar := false
+			if rootPerm, exists := perms["/"]; exists && rootPerm != nil && rootPerm != "none" {
+				hasSlashOrStar = true
+			}
+			if starPerm, exists := perms["*"]; exists && starPerm != nil && starPerm != "none" {
+				hasSlashOrStar = true
+			}
+
+			var rawKeys []string
+			for k, v := range perms {
+				if v == nil || v == "none" {
+					continue
+				}
+				if s, ok := v.(string); ok && s == "none" {
+					continue
+				}
+				if m, ok := v.(map[string]any); ok {
+					if rVal, _ := m["read"].(bool); !rVal {
 						continue
-					}
-					if s, ok := v.(string); ok && s == "none" {
-						continue
-					}
-					if m, ok := v.(map[string]any); ok {
-						if rVal, _ := m["read"].(bool); !rVal {
-							continue
-						}
-					}
-					kClean := strings.Trim(filepath.ToSlash(filepath.Clean("/"+k)), "/")
-					if kClean != "" && kClean != "*" && kClean != "/" {
-						rawKeys = append(rawKeys, kClean)
 					}
 				}
-				for _, k := range rawKeys {
-					isChild := false
-					kLower := strings.ToLower(k)
-					for _, other := range rawKeys {
-						oLower := strings.ToLower(other)
-						if oLower != kLower && strings.HasPrefix(kLower, oLower+"/") {
-							isChild = true
+				kClean := strings.Trim(filepath.ToSlash(filepath.Clean("/"+k)), "/")
+				if kClean != "" && kClean != "*" && kClean != "/" {
+					rawKeys = append(rawKeys, kClean)
+				}
+			}
+
+			// Nếu được chỉ định danh mục cụ thể và không phải là cấp quyền toàn cục "/" hoặc "*":
+			if len(rawKeys) > 0 && !hasSlashOrStar {
+				hasFullRoot = false
+			}
+
+			for _, k := range rawKeys {
+				isChild := false
+				kLower := strings.ToLower(k)
+				for _, other := range rawKeys {
+					oLower := strings.ToLower(other)
+					if oLower != kLower && strings.HasPrefix(kLower, oLower+"/") {
+						isChild = true
+						break
+					}
+				}
+				if !isChild {
+					exists := false
+					for _, ur := range userRoots {
+						if strings.EqualFold(ur, k) {
+							exists = true
 							break
 						}
 					}
-					if !isChild {
-						exists := false
-						for _, ur := range userRoots {
-							if strings.EqualFold(ur, k) {
-								exists = true
-								break
-							}
-						}
-						if !exists {
-							userRoots = append(userRoots, k)
-						}
+					if !exists {
+						userRoots = append(userRoots, k)
 					}
 				}
 			}
 		}
+	}
+
+	if !hasFullRoot {
 		if len(userRoots) == 0 {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"nodes":       []nodeDTO{},
@@ -167,7 +182,7 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		entries, err := os.ReadDir(cleanTarget)
 		if err == nil {
 			qLower := strings.ToLower(opts.Query)
-			isSingleRoot := !isAdmin && len(userRoots) == 1 && strings.EqualFold(canonicalPath, userRoots[0])
+			isSingleRoot := !hasFullRoot && len(userRoots) == 1 && strings.EqualFold(canonicalPath, userRoots[0])
 			for _, entry := range entries {
 				if childDsNames[strings.ToLower(entry.Name())] || isIgnoredFolder(entry.Name()) {
 					continue
@@ -196,17 +211,20 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 					parentIDForNode = "" // Đặt rỗng để UI hiểu các tệp này hiển thị ở cấp gốc Tệp của tôi
 				}
 
+				hasThumb := category == "image" || category == "video"
 				nodes = append(nodes, nodeDTO{
-					ID:        fmt.Sprintf("dataset:%s", relItemPath),
-					ParentID:  parentIDForNode,
-					Name:      entry.Name(),
-					Type:      itemType,
-					Category:  category,
-					MimeType:  mimeType,
-					SizeBytes: info.Size(),
-					Role:      role,
-					CreatedAt: info.ModTime().UnixMilli(),
-					UpdatedAt: info.ModTime().UnixMilli(),
+					ID:           fmt.Sprintf("dataset:%s", relItemPath),
+					ParentID:     parentIDForNode,
+					Name:         entry.Name(),
+					Type:         itemType,
+					Category:     category,
+					MimeType:     mimeType,
+					SizeBytes:    info.Size(),
+					Role:         role,
+					HasThumbnail: hasThumb,
+					Previewable:  category == "image" || category == "video" || category == "audio",
+					CreatedAt:    info.ModTime().UnixMilli(),
+					UpdatedAt:    info.ModTime().UnixMilli(),
 				})
 			}
 		}
@@ -233,7 +251,7 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Ở thư mục gốc (Root)
 	if (opts.ParentID == "" || opts.ParentID == "root") && (opts.Filter == "" || opts.Filter == "none") {
-		if !isAdmin {
+		if !hasFullRoot {
 			// Hiển thị chính xác các danh mục gốc được phân quyền cho người dùng (nếu có nhiều hơn 1)
 			var rootNodes []nodeDTO
 			for _, ur := range userRoots {
@@ -428,16 +446,18 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 						}
 						relItemPath := filepath.ToSlash(rel)
 						mediaNodes = append(mediaNodes, nodeDTO{
-							ID:        fmt.Sprintf("dataset:%s:%s", dName, relItemPath),
-							ParentID:  fmt.Sprintf("dataset:%s", dName),
-							Name:      info.Name(),
-							Type:      "file",
-							Category:  matchedCategory,
-							MimeType:  mimeType,
-							SizeBytes: info.Size(),
-							Role:      role,
-							CreatedAt: info.ModTime().UnixMilli(),
-							UpdatedAt: info.ModTime().UnixMilli(),
+							ID:           fmt.Sprintf("dataset:%s:%s", dName, relItemPath),
+							ParentID:     fmt.Sprintf("dataset:%s", dName),
+							Name:         info.Name(),
+							Type:         "file",
+							Category:     matchedCategory,
+							MimeType:     mimeType,
+							SizeBytes:    info.Size(),
+							Role:         role,
+							HasThumbnail: true,
+							Previewable:  true,
+							CreatedAt:    info.ModTime().UnixMilli(),
+							UpdatedAt:    info.ModTime().UnixMilli(),
 						})
 						if len(mediaNodes) >= 2000 {
 							return fmt.Errorf("limit reached")
@@ -685,16 +705,18 @@ func (a *API) handleGetNode(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeJSON(w, http.StatusOK, nodeDTO{
-			ID:        fmt.Sprintf("dataset:%s", canonicalPath),
-			ParentID:  parentID,
-			Name:      info.Name(),
-			Type:      itemType,
-			Category:  category,
-			MimeType:  mimeType,
-			SizeBytes: info.Size(),
-			Role:      role,
-			CreatedAt: info.ModTime().UnixMilli(),
-			UpdatedAt: info.ModTime().UnixMilli(),
+			ID:           fmt.Sprintf("dataset:%s", canonicalPath),
+			ParentID:     parentID,
+			Name:         info.Name(),
+			Type:         itemType,
+			Category:     category,
+			MimeType:     mimeType,
+			SizeBytes:    info.Size(),
+			Role:         role,
+			HasThumbnail: category == "image" || category == "video",
+			Previewable:  category == "image" || category == "video" || category == "audio",
+			CreatedAt:    info.ModTime().UnixMilli(),
+			UpdatedAt:    info.ModTime().UnixMilli(),
 		})
 		return
 	}

@@ -128,11 +128,14 @@ export function DetailsPane({
           marginBottom: 18,
         }}
       >
-        {node.has_thumbnail ? (
+        {node.has_thumbnail || category === "image" || category === "video" ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={api.media(Api.thumbnail(node.id))}
             alt=""
+            onError={(e) => {
+              e.currentTarget.style.display = "none";
+            }}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
         ) : (
