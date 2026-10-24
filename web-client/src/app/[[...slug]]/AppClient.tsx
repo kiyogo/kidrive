@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, use } from "react";
+import { useEffect, useState, useMemo, useCallback, use } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BootScreen,
@@ -194,7 +194,13 @@ function parsePathToSection(
   if (first === "transfers") return { section: "transfers" };
   if (first === "search") return { section: "search" };
   if (first === "settings") return { section: "settings", subSection: parts[1] };
-  if (first === "files") return { section: "files", folderId: parts[1] };
+  if (first === "files") {
+    let rawRest = parts.slice(1).join("/");
+    if (rawRest.startsWith("dataset:")) {
+      rawRest = rawRest.replace(/^dataset:/, "");
+    }
+    return { section: "files", folderId: rawRest || undefined };
+  }
 
   return { section: "files" };
 }
@@ -225,6 +231,63 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
     }
   }, [user]);
 
+  const getCleanUrl = useCallback(
+    (folderId?: string) => {
+      if (!folderId) return "/files";
+      let clean = folderId.replace(/^dataset:/, "").replace(/\\/g, "/").replace(/:/g, "/");
+      clean = clean.replace(/^\/+|\/+$/g, "");
+      if (defaultSingleDataset) {
+        const dsClean = defaultSingleDataset.replace(/^\/+|\/+$/g, "");
+        if (clean.toLowerCase() === dsClean.toLowerCase()) {
+          return "/files";
+        }
+        if (clean.toLowerCase().startsWith(dsClean.toLowerCase() + "/")) {
+          clean = clean.slice(dsClean.length + 1);
+        }
+      }
+      return clean ? `/files/${clean}` : "/files";
+    },
+    [defaultSingleDataset],
+  );
+
+  const resolveFolderFromUrl = useCallback(
+    (urlFolderId?: string) => {
+      if (!urlFolderId) return [];
+      let clean = urlFolderId.replace(/^dataset:/, "").replace(/\\/g, "/").replace(/:/g, "/");
+      clean = clean.replace(/^\/+|\/+$/g, "");
+      if (!clean) return [];
+
+      if (defaultSingleDataset) {
+        const dsClean = defaultSingleDataset.replace(/^\/+|\/+$/g, "");
+        if (clean.toLowerCase() === dsClean.toLowerCase()) {
+          return [];
+        }
+        let sub = clean;
+        if (clean.toLowerCase().startsWith(dsClean.toLowerCase() + "/")) {
+          sub = clean.slice(dsClean.length + 1);
+        }
+        const segments = sub.split("/").filter(Boolean);
+        const trail: { id: string; name: string }[] = [];
+        let acc = dsClean;
+        for (const seg of segments) {
+          acc = `${acc}/${seg}`;
+          trail.push({ id: `dataset:${acc}`, name: seg });
+        }
+        return trail;
+      } else {
+        const segments = clean.split("/").filter(Boolean);
+        const trail: { id: string; name: string }[] = [];
+        let acc = "";
+        for (const seg of segments) {
+          acc = acc ? `${acc}/${seg}` : seg;
+          trail.push({ id: `dataset:${acc}`, name: seg });
+        }
+        return trail;
+      }
+    },
+    [defaultSingleDataset],
+  );
+
   const initial =
     typeof window !== "undefined"
       ? parsePathToSection(window.location.pathname, initialSlug)
@@ -233,17 +296,7 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
   const [section, setSection] = useState<Section>(initial.section);
   const [settingsSub, setSettingsSub] = useState<string | undefined>(initial.subSection);
   const [folder, setFolder] = useState<{ id: string; name: string }[]>(() => {
-    if (!initial.folderId) return [];
-    if (defaultSingleDataset && initial.folderId === `dataset:${defaultSingleDataset}`) {
-      return [];
-    }
-    let name = initial.folderId;
-    if (name.includes(":")) {
-      name = name.substring(name.lastIndexOf(":") + 1);
-    } else if (name.includes("/")) {
-      name = name.substring(name.lastIndexOf("/") + 1);
-    }
-    return [{ id: initial.folderId, name }];
+    return resolveFolderFromUrl(initial.folderId);
   });
   const [preview, setPreview] = useState<{ node: NodeModel; nodes?: NodeModel[] } | null>(null);
   const [refresh, setRefresh] = useState(0);
@@ -254,25 +307,13 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
       const parsed = parsePathToSection(window.location.pathname);
       setSection(parsed.section);
       if (parsed.subSection) setSettingsSub(parsed.subSection);
-      if (parsed.section === "files" && !parsed.folderId) {
-        setFolder([]);
-      } else if (parsed.folderId) {
-        if (defaultSingleDataset && parsed.folderId === `dataset:${defaultSingleDataset}`) {
-          setFolder([]);
-        } else {
-          let name = parsed.folderId;
-          if (name.includes(":")) {
-            name = name.substring(name.lastIndexOf(":") + 1);
-          } else if (name.includes("/")) {
-            name = name.substring(name.lastIndexOf("/") + 1);
-          }
-          setFolder([{ id: parsed.folderId, name }]);
-        }
+      if (parsed.section === "files") {
+        setFolder(resolveFolderFromUrl(parsed.folderId));
       }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [defaultSingleDataset]);
+  }, [resolveFolderFromUrl]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -280,9 +321,19 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
         window.history.replaceState(null, "", "/files");
       } else if (window.location.pathname === "/gallery") {
         window.history.replaceState(null, "", "/image");
+      } else {
+        const parsed = parsePathToSection(window.location.pathname);
+        if (parsed.section === "files") {
+          const trail = resolveFolderFromUrl(parsed.folderId);
+          setFolder(trail);
+          const cleanUrl = getCleanUrl(trail.length > 0 ? trail[trail.length - 1].id : undefined);
+          if (window.location.pathname !== cleanUrl) {
+            window.history.replaceState(null, "", cleanUrl);
+          }
+        }
       }
     }
-  }, []);
+  }, [defaultSingleDataset, resolveFolderFromUrl, getCleanUrl]);
 
   const navigateTo = (s: Section) => {
     setSection(s);
@@ -376,9 +427,10 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
         <SearchScreen
           onBack={() => navigateTo("files")}
           onOpenFolder={(node) => {
-            setFolder([{ id: node.id, name: node.name }]);
+            const trail = resolveFolderFromUrl(node.id);
+            setFolder(trail.length > 0 ? trail : [{ id: node.id, name: node.name }]);
             setSection("files");
-            window.history.pushState(null, "", `/files/${node.id}`);
+            window.history.pushState(null, "", getCleanUrl(node.id));
           }}
           onPreview={(n) => openPreview(n)}
         />
@@ -393,7 +445,7 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
             const next = folder.slice(0, i + 1);
             setFolder(next);
             const target = next[next.length - 1];
-            window.history.pushState(null, "", target ? `/files/${target.id}` : "/files");
+            window.history.pushState(null, "", getCleanUrl(target?.id));
           }}
           onRoot={() => {
             setFolder([]);
@@ -402,7 +454,7 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
           createFolderTrigger={newFolderTrigger}
           onOpenFolder={(node) => {
             setFolder((t) => [...t, { id: node.id, name: node.name }]);
-            window.history.pushState(null, "", `/files/${node.id}`);
+            window.history.pushState(null, "", getCleanUrl(node.id));
           }}
           onPreview={(n, list) => openPreview(n, list)}
           onSearch={() => {

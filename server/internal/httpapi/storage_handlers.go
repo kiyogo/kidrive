@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2083,43 +2084,43 @@ func (a *API) checkDatasetAccess(r *http.Request, datasetName string, needEditor
 	var matchedVal any
 	// 1. Direct, ancestor inheritance, or suffix match
 	for k, v := range rawPerms {
+		if v == nil || v == "none" {
+			continue
+		}
 		kNorm := strings.ToLower(strings.TrimSpace(k))
 		kClean := strings.Trim(kNorm, "/")
 		if kClean == "" {
 			continue
 		}
-		// Khớp chính xác
+		// 1. Khớp chính xác
 		if kClean == cleanName || kNorm == normName {
 			matchedVal = v
 			break
 		}
-		// Thừa hưởng quyền từ dataset cha (ví dụ cấp quyền DATA/KiyoVN thì tự động có quyền trên DATA/KiyoVN/1DATA)
+		// 2. Thừa hưởng quyền từ dataset cha (ví dụ cấp quyền DATA/KiyoVN thì tự động có quyền trên DATA/KiyoVN/1DATA)
 		if strings.HasPrefix(cleanName, kClean+"/") {
 			matchedVal = v
 			break
 		}
-		// Kiểm tra thành phần trong đường dẫn
-		if strings.Contains("/"+cleanName+"/", "/"+kClean+"/") {
-			matchedVal = v
-			break
-		}
-		// Khớp hậu tố hoặc tiền tố đối xứng
-		if (kClean != "" && strings.HasSuffix(cleanName, "/"+kClean)) || (cleanName != "" && strings.HasSuffix(kClean, "/"+cleanName)) || strings.HasSuffix(cleanName, kClean) {
-			matchedVal = v
-			break
+		// 3. Nếu kClean không có tên pool (ví dụ kClean là "kiyovn" còn cleanName là "data/kiyovn" hoặc "data/kiyovn/sub")
+		if !strings.Contains(kClean, "/") {
+			if cleanName == kClean || strings.HasSuffix(cleanName, "/"+kClean) || strings.Contains(cleanName, "/"+kClean+"/") {
+				matchedVal = v
+				break
+			}
 		}
 	}
 	// 2. Wildcard match
 	if matchedVal == nil {
-		if v, ok := rawPerms["/"]; ok {
+		if v, ok := rawPerms["/"]; ok && v != nil && v != "none" {
 			matchedVal = v
-		} else if v, ok := rawPerms["*"]; ok {
+		} else if v, ok := rawPerms["*"]; ok && v != nil && v != "none" {
 			matchedVal = v
 		}
 	}
 
 	if matchedVal == nil {
-		return "", fmt.Errorf("forbidden: bạn không có quyền truy cập vào tập dữ liệu %s", datasetName)
+		return "", fmt.Errorf("forbidden: bạn không có quyền truy cập vào %s", datasetName)
 	}
 
 	canRead := false
@@ -2309,6 +2310,18 @@ func (a *API) getDatasetMount(ctx context.Context, nameOrID string) (string, str
 			err = nil
 		}
 	}
+	if err != nil && strings.Contains(clean, "/") {
+		parts := strings.Split(clean, "/")
+		for i := len(parts) - 1; i >= 1; i-- {
+			parent := strings.Join(parts[:i], "/")
+			sub := strings.Join(parts[i:], "/")
+			_, pMount, pErr := a.getDatasetMount(ctx, parent)
+			if pErr == nil && pMount != "" {
+				subMount := filepath.Clean(filepath.Join(pMount, sub))
+				return clean, subMount, nil
+			}
+		}
+	}
 	if err != nil {
 		// Thử tìm đường dẫn mount trực tiếp trên hệ thống
 		realM := a.resolveRealMountPath(clean, "/mnt/"+clean)
@@ -2334,6 +2347,66 @@ func (a *API) getDatasetMount(ctx context.Context, nameOrID string) (string, str
 	}
 
 	return name, mount, nil
+}
+
+func (a *API) resolveDatasetTarget(ctx context.Context, rawID string) (canonicalPath string, dsName string, subpath string, mountPath string, err error) {
+	raw := strings.TrimSpace(rawID)
+	raw = strings.TrimPrefix(raw, "dataset:")
+	raw = strings.ReplaceAll(raw, "\\", "/")
+	raw = strings.ReplaceAll(raw, ":", "/")
+	clean := filepath.ToSlash(filepath.Clean("/" + raw))
+	clean = strings.TrimPrefix(clean, "/")
+	clean = strings.TrimSuffix(clean, "/")
+	if clean == "" || clean == "." {
+		return "", "", "", "", fmt.Errorf("đường dẫn rỗng")
+	}
+
+	if unescaped, uErr := url.PathUnescape(clean); uErr == nil {
+		clean = unescaped
+	}
+
+	// 1. Thử tìm dataset khớp dài nhất trong bảng datasets
+	parts := strings.Split(clean, "/")
+	for i := len(parts); i >= 1; i-- {
+		testDs := strings.Join(parts[:i], "/")
+		var foundName, foundMount string
+		if qErr := a.db.Read().QueryRowContext(ctx,
+			`SELECT name, mount FROM datasets WHERE name = ? OR mount = ? OR name = ? LIMIT 1`,
+			testDs, testDs, "/"+testDs).Scan(&foundName, &foundMount); qErr == nil {
+			dsName = foundName
+			subpath = strings.Join(parts[i:], "/")
+			realMount := a.resolveRealMountPath(foundName, foundMount)
+			mountPath = filepath.Clean(filepath.Join(realMount, subpath))
+			canonicalPath = clean
+			return canonicalPath, dsName, subpath, mountPath, nil
+		}
+	}
+
+	// 2. Thử tìm pool trong storage_pools
+	for i := len(parts); i >= 1; i-- {
+		testPool := strings.Join(parts[:i], "/")
+		var poolName string
+		if pErr := a.db.Read().QueryRowContext(ctx, `SELECT name FROM storage_pools WHERE name = ? LIMIT 1`, testPool).Scan(&poolName); pErr == nil {
+			dsName = poolName
+			subpath = strings.Join(parts[i:], "/")
+			realMount := a.resolveRealMountPath(poolName, "/mnt/"+poolName)
+			mountPath = filepath.Clean(filepath.Join(realMount, subpath))
+			canonicalPath = clean
+			return canonicalPath, dsName, subpath, mountPath, nil
+		}
+	}
+
+	// 3. Fallback: sử dụng getDatasetMount
+	dName, dMount, dErr := a.getDatasetMount(ctx, parts[0])
+	if dErr == nil && dMount != "" {
+		dsName = dName
+		subpath = strings.Join(parts[1:], "/")
+		mountPath = filepath.Clean(filepath.Join(dMount, subpath))
+		canonicalPath = clean
+		return canonicalPath, dsName, subpath, mountPath, nil
+	}
+
+	return clean, clean, "", filepath.Join("/mnt", clean), nil
 }
 
 func (a *API) handleListDatasetItems(w http.ResponseWriter, r *http.Request) {
@@ -2540,62 +2613,44 @@ func (a *API) handleCreateDatasetFolder(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *API) handleDeleteDatasetItem(w http.ResponseWriter, r *http.Request) {
-	nameOrID := r.URL.Query().Get("dataset")
-	if nameOrID == "" {
-		nameOrID = r.URL.Query().Get("name")
-	}
-	if nameOrID == "" {
-		nameOrID = chi.URLParam(r, "name")
-	}
-	itemPath := r.URL.Query().Get("path")
-	if nameOrID == "" || itemPath == "" {
-		nodeID := a.extractNodeID(r, "")
-		if strings.HasPrefix(nodeID, "dataset:") {
-			parts := strings.SplitN(strings.TrimPrefix(nodeID, "dataset:"), ":", 2)
-			if nameOrID == "" {
-				nameOrID = parts[0]
+	nodeID := a.extractNodeID(r, "")
+	canonicalPath, _, subpath, mountPath, err := a.resolveDatasetTarget(r.Context(), nodeID)
+	if err != nil {
+		nameOrID := r.URL.Query().Get("dataset")
+		if nameOrID == "" {
+			nameOrID = r.URL.Query().Get("name")
+		}
+		if nameOrID == "" {
+			nameOrID = chi.URLParam(r, "name")
+		}
+		itemPath := r.URL.Query().Get("path")
+		if itemPath == "" {
+			itemPath = r.URL.Query().Get("subpath")
+		}
+		if nameOrID != "" {
+			full := strings.Trim(nameOrID, "/")
+			if itemPath != "" {
+				full = full + "/" + strings.Trim(itemPath, "/")
 			}
-			if itemPath == "" && len(parts) > 1 {
-				itemPath = parts[1]
-			}
+			canonicalPath, _, subpath, mountPath, err = a.resolveDatasetTarget(r.Context(), full)
 		}
 	}
-	if nameOrID == "" {
-		a.fail(w, r, errors.New("tên dataset không hợp lệ"))
-		return
-	}
-	if itemPath == "" {
-		a.fail(w, r, errors.New("vui lòng cung cấp đường dẫn cần xóa"))
-		return
-	}
-
-	dsName, mount, err := a.getDatasetMount(r.Context(), nameOrID)
 	if err != nil {
-		a.fail(w, r, err)
+		a.fail(w, r, errors.New("đường dẫn không hợp lệ"))
+		return
+	}
+	if subpath == "" && !strings.Contains(canonicalPath, "/") {
+		a.fail(w, r, errors.New("không thể xóa thư mục gốc của dataset"))
 		return
 	}
 
-	_, err = a.checkDatasetAccess(r, dsName, true)
+	_, err = a.checkDatasetAccess(r, canonicalPath, true)
 	if err != nil {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
 		return
 	}
 
-	subpath := filepath.Clean("/" + itemPath)
-	subpath = strings.TrimPrefix(subpath, "/")
-	subpath = strings.TrimPrefix(subpath, "\\")
-	if subpath == "" || subpath == "." {
-		a.fail(w, r, errors.New("không thể xóa thư mục gốc của dataset"))
-		return
-	}
-
-	cleanTarget := filepath.Clean(filepath.Join(mount, subpath))
-	cleanMount := filepath.Clean(mount)
-	if !strings.HasPrefix(cleanTarget, cleanMount) || cleanTarget == cleanMount {
-		a.fail(w, r, errors.New("đường dẫn xóa không hợp lệ"))
-		return
-	}
-
+	cleanTarget := filepath.Clean(mountPath)
 	var deletedBytes int64 = 0
 	_ = filepath.Walk(cleanTarget, func(_ string, fi os.FileInfo, err error) error {
 		if err == nil && fi != nil && !fi.IsDir() {
@@ -2618,9 +2673,10 @@ func (a *API) handleDeleteDatasetItem(w http.ResponseWriter, r *http.Request) {
 					`UPDATE users SET quota_bytes_used = MAX(0, quota_bytes_used - ?), updated_at = ? WHERE id = ?`,
 					deletedBytes, now, user.ID)
 			}
+			dsRoot := strings.Split(canonicalPath, "/")[0]
 			_, _ = tx.ExecContext(ctx,
 				`UPDATE datasets SET used_bytes = MAX(0, used_bytes - ?), updated_at = ? WHERE name = ? OR id = ?`,
-				deletedBytes, now, dsName, dsName)
+				deletedBytes, now, dsRoot, dsRoot)
 			return nil
 		})
 	}

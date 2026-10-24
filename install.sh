@@ -89,18 +89,11 @@ TMP_BIN="/tmp/localdrive-bin-new.$$.$RANDOM"
 rm -f "$TMP_BIN"
 
 DOWNLOADED=false
-DIRECT_CDN=""
-if [ "$ARCH" = "x64" ]; then
-  DIRECT_CDN="https://files.catbox.moe/b68qcf"
-elif [ "$ARCH" = "arm64" ]; then
-  DIRECT_CDN="https://files.catbox.moe/mumemq"
-fi
-
 URLS=(
-  "https://github.com/kiyogo/kidrive/releases/download/v1.1.7/localdrive-linux-${ARCH}"
+  "https://github.com/kiyogo/kidrive/releases/download/v1.1.8/localdrive-linux-${ARCH}"
   "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH}"
   "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH_LEGACY}"
-  "$DIRECT_CDN"
+  "https://github.com/kiyogo/kidrive/releases/download/v1.1.7/localdrive-linux-${ARCH}"
 )
 
 for URL in "${URLS[@]}"; do

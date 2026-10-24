@@ -1,8 +1,6 @@
 package httpapi
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"mime"
@@ -47,29 +45,56 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Nếu tài khoản không phải admin và CHƯA được chọn danh mục lưu trữ -> Không hiện dữ liệu và không tải được gì luôn!
+	// 1. Phân tích danh mục được cấp quyền (userRoots) đối với tài khoản không phải admin
+	var userRoots []string
 	if !isAdmin {
-		hasPerms := false
 		if ok && user.DatasetPermissions != "" && user.DatasetPermissions != "{}" {
 			var perms map[string]any
 			if err := json.Unmarshal([]byte(user.DatasetPermissions), &perms); err == nil {
-				for _, v := range perms {
+				var rawKeys []string
+				for k, v := range perms {
 					if v == nil || v == "none" {
 						continue
 					}
-					if s, ok := v.(string); ok && s != "none" {
-						hasPerms = true
-						break
+					if s, ok := v.(string); ok && s == "none" {
+						continue
 					}
 					if m, ok := v.(map[string]any); ok {
-						if rVal, _ := m["read"].(bool); rVal {
-							hasPerms = true
+						if rVal, _ := m["read"].(bool); !rVal {
+							continue
+						}
+					}
+					kClean := strings.Trim(filepath.ToSlash(filepath.Clean("/"+k)), "/")
+					if kClean != "" && kClean != "*" && kClean != "/" {
+						rawKeys = append(rawKeys, kClean)
+					}
+				}
+				for _, k := range rawKeys {
+					isChild := false
+					kLower := strings.ToLower(k)
+					for _, other := range rawKeys {
+						oLower := strings.ToLower(other)
+						if oLower != kLower && strings.HasPrefix(kLower, oLower+"/") {
+							isChild = true
 							break
+						}
+					}
+					if !isChild {
+						exists := false
+						for _, ur := range userRoots {
+							if strings.EqualFold(ur, k) {
+								exists = true
+								break
+							}
+						}
+						if !exists {
+							userRoots = append(userRoots, k)
 						}
 					}
 				}
 			}
 		}
-		if !hasPerms {
+		if len(userRoots) == 0 {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"nodes":       []nodeDTO{},
 				"limit":       opts.Limit,
@@ -79,47 +104,33 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+
+		// Nếu người dùng chỉ được phân quyền duy nhất 1 danh mục (ví dụ DATA/KiyoVN) và đang vào gốc ("Tệp của tôi")
+		// thì trỏ thẳng ParentID vào danh mục đó để hiển thị các tệp con bên trong!
+		if (opts.ParentID == "" || opts.ParentID == "root") && (opts.Filter == "" || opts.Filter == "none") && len(userRoots) == 1 {
+			opts.ParentID = "dataset:" + userRoots[0]
+		}
 	}
 
 	// 2. Nếu đang xem trong một dataset hoặc thư mục con của dataset
 	if strings.HasPrefix(opts.ParentID, "dataset:") {
-		parts := strings.SplitN(strings.TrimPrefix(opts.ParentID, "dataset:"), ":", 2)
-		dsName := parts[0]
-		subpath := ""
-		if len(parts) > 1 {
-			subpath = parts[1]
-		}
-		if unescaped, err := url.PathUnescape(dsName); err == nil {
-			dsName = unescaped
-		}
-		if unescaped, err := url.PathUnescape(subpath); err == nil {
-			subpath = unescaped
-		}
-		dsName, mount, err := a.getDatasetMount(r.Context(), dsName)
+		canonicalPath, dsName, subpath, mountPath, err := a.resolveDatasetTarget(r.Context(), opts.ParentID)
 		if err != nil {
 			a.fail(w, r, err)
 			return
 		}
-		role, err := a.checkDatasetAccess(r, dsName, false)
+		role, err := a.checkDatasetAccess(r, canonicalPath, false)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
 			return
 		}
-		cleanedSub := filepath.Clean("/" + subpath)
-		cleanedSub = strings.TrimPrefix(cleanedSub, "/")
-		cleanedSub = strings.TrimPrefix(cleanedSub, "\\")
-		cleanTarget := filepath.Clean(filepath.Join(mount, cleanedSub))
-		cleanMount := filepath.Clean(mount)
-		if !strings.HasPrefix(strings.ToLower(cleanTarget), strings.ToLower(cleanMount)) {
-			a.fail(w, r, fmt.Errorf("đường dẫn không hợp lệ"))
-			return
-		}
+		cleanTarget := filepath.Clean(mountPath)
 
 		var nodes []nodeDTO
 		childDsNames := make(map[string]bool)
 
 		// Thêm các tập dữ liệu con (child datasets) trực thuộc dataset này nếu đang ở thư mục gốc của dataset (subpath == "")
-		if cleanedSub == "" || cleanedSub == "." {
+		if subpath == "" {
 			dRows, err := a.db.Read().QueryContext(r.Context(),
 				`SELECT name, used_bytes, created_at, updated_at FROM datasets WHERE name LIKE ? ORDER BY name ASC`,
 				dsName+"/%")
@@ -156,8 +167,9 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		entries, err := os.ReadDir(cleanTarget)
 		if err == nil {
 			qLower := strings.ToLower(opts.Query)
+			isSingleRoot := !isAdmin && len(userRoots) == 1 && strings.EqualFold(canonicalPath, userRoots[0])
 			for _, entry := range entries {
-				if childDsNames[strings.ToLower(entry.Name())] {
+				if childDsNames[strings.ToLower(entry.Name())] || isIgnoredFolder(entry.Name()) {
 					continue
 				}
 				if qLower != "" && !strings.Contains(strings.ToLower(entry.Name()), qLower) {
@@ -175,13 +187,18 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 				} else if mimeType == "" {
 					mimeType = "application/octet-stream"
 				}
-				relItemPath := filepath.Join(cleanedSub, entry.Name())
-				relItemPath = strings.ReplaceAll(relItemPath, "\\", "/")
+				relItemPath := filepath.ToSlash(filepath.Join(canonicalPath, entry.Name()))
 				relItemPath = strings.TrimPrefix(relItemPath, "/")
 				category := string(models.CategoryOf(models.NodeType(itemType), mimeType, entry.Name()))
+
+				parentIDForNode := opts.ParentID
+				if isSingleRoot {
+					parentIDForNode = "" // Đặt rỗng để UI hiểu các tệp này hiển thị ở cấp gốc Tệp của tôi
+				}
+
 				nodes = append(nodes, nodeDTO{
-					ID:        fmt.Sprintf("dataset:%s:%s", dsName, relItemPath),
-					ParentID:  opts.ParentID,
+					ID:        fmt.Sprintf("dataset:%s", relItemPath),
+					ParentID:  parentIDForNode,
 					Name:      entry.Name(),
 					Type:      itemType,
 					Category:  category,
@@ -216,6 +233,39 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Ở thư mục gốc (Root)
 	if (opts.ParentID == "" || opts.ParentID == "root") && (opts.Filter == "" || opts.Filter == "none") {
+		if !isAdmin {
+			// Hiển thị chính xác các danh mục gốc được phân quyền cho người dùng (nếu có nhiều hơn 1)
+			var rootNodes []nodeDTO
+			for _, ur := range userRoots {
+				role, accessErr := a.checkDatasetAccess(r, ur, false)
+				if accessErr != nil {
+					continue
+				}
+				slashParts := strings.Split(ur, "/")
+				displayName := slashParts[len(slashParts)-1]
+				rootNodes = append(rootNodes, nodeDTO{
+					ID:        fmt.Sprintf("dataset:%s", ur),
+					ParentID:  "",
+					Name:      displayName,
+					Type:      "folder",
+					Category:  "folder",
+					MimeType:  "application/x-directory",
+					SizeBytes: 0,
+					Role:      role,
+					CreatedAt: time.Now().UnixMilli(),
+					UpdatedAt: time.Now().UnixMilli(),
+				})
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"nodes":       rootNodes,
+				"limit":       opts.Limit,
+				"offset":      opts.Offset,
+				"has_more":    false,
+				"next_offset": len(rootNodes),
+			})
+			return
+		}
+
 		rows, err := a.db.Read().QueryContext(r.Context(), `SELECT name, pool, used_bytes, created_at, updated_at FROM datasets ORDER BY name ASC`)
 		if err == nil {
 			defer rows.Close()
@@ -278,107 +328,6 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 						CreatedAt: d.createdAt,
 						UpdatedAt: d.updatedAt,
 					})
-				}
-			}
-
-			// Nếu là user thường và chỉ được phân quyền đúng 1 dataset (e.g. DATA/KiyoVN)
-			// thì hiển thị thẳng các tệp tin & thư mục con bên trong dataset đó!
-			if !isAdmin && len(rootDsNodes) == 1 {
-				singleDsName := strings.TrimPrefix(rootDsNodes[0].ID, "dataset:")
-				dsName, mount, err := a.getDatasetMount(r.Context(), singleDsName)
-				if err == nil {
-					role := rootDsNodes[0].Role
-					var nodes []nodeDTO
-					childDsNames := make(map[string]bool)
-					dRows, err := a.db.Read().QueryContext(r.Context(),
-						`SELECT name, used_bytes, created_at, updated_at FROM datasets WHERE name LIKE ? ORDER BY name ASC`,
-						dsName+"/%")
-					if err == nil {
-						defer dRows.Close()
-						for dRows.Next() {
-							var childFullName string
-							var childUsed, childCreated, childUpdated int64
-							if err := dRows.Scan(&childFullName, &childUsed, &childCreated, &childUpdated); err == nil {
-								rel := strings.TrimPrefix(childFullName, dsName+"/")
-								if !strings.Contains(rel, "/") {
-									cRole, cErr := a.checkDatasetAccess(r, childFullName, false)
-									if cErr == nil {
-										childDsNames[strings.ToLower(rel)] = true
-										nodes = append(nodes, nodeDTO{
-											ID:        fmt.Sprintf("dataset:%s", childFullName),
-											ParentID:  "",
-											Name:      rel,
-											Type:      "folder",
-											Category:  "folder",
-											MimeType:  "application/x-directory",
-											SizeBytes: childUsed,
-											Role:      cRole,
-											CreatedAt: childCreated,
-											UpdatedAt: childUpdated,
-										})
-									}
-								}
-							}
-						}
-					}
-
-					cleanMount := filepath.Clean(mount)
-					entries, err := os.ReadDir(cleanMount)
-					if err == nil {
-						qLower := strings.ToLower(opts.Query)
-						for _, entry := range entries {
-							if childDsNames[strings.ToLower(entry.Name())] || isIgnoredFolder(entry.Name()) {
-								continue
-							}
-							if qLower != "" && !strings.Contains(strings.ToLower(entry.Name()), qLower) {
-								continue
-							}
-							info, err := entry.Info()
-							if err != nil {
-								continue
-							}
-							itemType := "file"
-							mimeType := mime.TypeByExtension(filepath.Ext(entry.Name()))
-							if entry.IsDir() {
-								itemType = "folder"
-								mimeType = "application/x-directory"
-							} else if mimeType == "" {
-								mimeType = "application/octet-stream"
-							}
-							category := string(models.CategoryOf(models.NodeType(itemType), mimeType, entry.Name()))
-							nodes = append(nodes, nodeDTO{
-								ID:        fmt.Sprintf("dataset:%s:%s", dsName, entry.Name()),
-								ParentID:  "",
-								Name:      entry.Name(),
-								Type:      itemType,
-								Category:  category,
-								MimeType:  mimeType,
-								SizeBytes: info.Size(),
-								Role:      role,
-								CreatedAt: info.ModTime().UnixMilli(),
-								UpdatedAt: info.ModTime().UnixMilli(),
-							})
-						}
-					}
-
-					total := len(nodes)
-					start := opts.Offset
-					if start > total {
-						start = total
-					}
-					end := start + opts.Limit
-					if end > total {
-						end = total
-					}
-					paged := nodes[start:end]
-					writeJSON(w, http.StatusOK, map[string]any{
-						"nodes":       paged,
-						"limit":       opts.Limit,
-						"offset":      opts.Offset,
-						"has_more":    end < total,
-						"next_offset": end,
-					})
-					return
 				}
 			}
 
@@ -630,24 +579,12 @@ func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.HasPrefix(req.ParentID, "dataset:") {
-		parts := strings.SplitN(strings.TrimPrefix(req.ParentID, "dataset:"), ":", 2)
-		dsName := parts[0]
-		subpath := ""
-		if len(parts) > 1 {
-			subpath = parts[1]
-		}
-		if unescaped, err := url.PathUnescape(dsName); err == nil {
-			dsName = unescaped
-		}
-		if unescaped, err := url.PathUnescape(subpath); err == nil {
-			subpath = unescaped
-		}
-		dsName, mount, err := a.getDatasetMount(r.Context(), dsName)
+		canonicalPath, dsName, _, mountPath, err := a.resolveDatasetTarget(r.Context(), req.ParentID)
 		if err != nil {
 			a.fail(w, r, err)
 			return
 		}
-		role, err := a.checkDatasetAccess(r, dsName, true)
+		role, err := a.checkDatasetAccess(r, canonicalPath, true)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
 			return
@@ -657,63 +594,30 @@ func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, r, fmt.Errorf("tên thư mục không hợp lệ"))
 			return
 		}
-		cleanedSub := filepath.Clean("/" + subpath)
-		cleanedSub = strings.TrimPrefix(cleanedSub, "/")
-		cleanedSub = strings.TrimPrefix(cleanedSub, "\\")
-		targetPath := filepath.Clean(filepath.Join(mount, cleanedSub, folderName))
-		cleanMount := filepath.Clean(mount)
+		targetPath := filepath.Clean(filepath.Join(mountPath, folderName))
+		cleanMount := filepath.Clean(mountPath)
 		if !strings.HasPrefix(strings.ToLower(targetPath), strings.ToLower(cleanMount)) {
 			a.fail(w, r, fmt.Errorf("đường dẫn không hợp lệ"))
 			return
 		}
 		if err := os.MkdirAll(targetPath, 0755); err != nil {
-			// Nếu bị read-only file system hoặc mount chứa zfs-recovery, tự động bỏ cờ readonly hoặc chuyển sang mount point ghi được
-			if strings.Contains(strings.ToLower(err.Error()), "read-only") || strings.Contains(mount, "zfs-recovery") {
-				poolName := strings.Split(strings.Trim(dsName, "/"), "/")[0]
-				_ = exec.Command("zfs", "set", "readonly=off", dsName).Run()
-				_ = exec.Command("zfs", "set", "readonly=off", poolName).Run()
-				_ = exec.Command("mount", "-o", "remount,rw", cleanMount).Run()
-				_ = exec.Command("mount", "-o", "remount,rw", mount).Run()
-				_ = exec.Command("mount", "-o", "remount,rw", filepath.Dir(mount)).Run()
-				_ = exec.Command("mount", "-o", "remount,rw", "/mnt/zfs-recovery").Run()
-				if retryErr := os.MkdirAll(targetPath, 0755); retryErr == nil {
-					err = nil
-				} else {
-					candidates := []string{
-						a.resolveRealMountPath(dsName, ""),
-						filepath.Join("/mnt", poolName),
-						filepath.Join("/mnt", strings.Trim(dsName, "/")),
-						"/" + strings.Trim(dsName, "/"),
-						strings.ReplaceAll(mount, "/mnt/zfs-recovery/", "/mnt/"),
-						strings.ReplaceAll(mount, "/mnt/zfs-recovery/", "/"),
-					}
-					for _, altMount := range candidates {
-						if altMount != "" && altMount != mount && !strings.Contains(altMount, "zfs-recovery") {
-							altTarget := filepath.Clean(filepath.Join(altMount, cleanedSub, folderName))
-							if retryErr2 := os.MkdirAll(altTarget, 0755); retryErr2 == nil {
-								mount = altMount
-								targetPath = altTarget
-								_ = a.db.Write(r.Context(), func(c context.Context, tx *sql.Tx) error {
-									_, _ = tx.ExecContext(c, `UPDATE datasets SET mount = ? WHERE name = ?`, altMount, dsName)
-									return nil
-								})
-								err = nil
-								break
-							}
-						}
-					}
-				}
-			}
-			if err != nil {
-				a.log.Error("mkdir failed", "path", targetPath, "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("Không thể tạo thư mục vật lý (%s): %v", folderName, err)})
+			// Nếu bị read-only file system hoặc mount chứa zfs-recovery, tự động bỏ cờ readonly
+			poolName := strings.Split(strings.Trim(dsName, "/"), "/")[0]
+			_ = exec.Command("zfs", "set", "readonly=off", dsName).Run()
+			_ = exec.Command("zfs", "set", "readonly=off", poolName).Run()
+			_ = exec.Command("mount", "-o", "remount,rw", cleanMount).Run()
+			_ = exec.Command("mount", "-o", "remount,rw", targetPath).Run()
+			_ = exec.Command("mount", "-o", "remount,rw", filepath.Dir(targetPath)).Run()
+			_ = exec.Command("mount", "-o", "remount,rw", "/mnt/zfs-recovery").Run()
+			if retryErr := os.MkdirAll(targetPath, 0755); retryErr != nil {
+				a.log.Error("mkdir failed", "path", targetPath, "error", retryErr)
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("Không thể tạo thư mục vật lý (%s): %v", folderName, retryErr)})
 				return
 			}
 		}
-		relPath := filepath.ToSlash(filepath.Join(cleanedSub, folderName))
-		relPath = strings.TrimPrefix(relPath, "/")
+		relPath := filepath.ToSlash(filepath.Join(canonicalPath, folderName))
 		body := nodeDTO{
-			ID:        fmt.Sprintf("dataset:%s:%s", dsName, relPath),
+			ID:        fmt.Sprintf("dataset:%s", relPath),
 			ParentID:  req.ParentID,
 			Name:      folderName,
 			Type:      "folder",
@@ -748,37 +652,17 @@ func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleGetNode(w http.ResponseWriter, r *http.Request) {
 	nodeID := a.extractNodeID(r, "")
 	if strings.HasPrefix(nodeID, "dataset:") {
-		parts := strings.SplitN(strings.TrimPrefix(nodeID, "dataset:"), ":", 2)
-		dsName := parts[0]
-		subpath := ""
-		if len(parts) > 1 {
-			subpath = parts[1]
-		}
-		if unescaped, err := url.PathUnescape(dsName); err == nil {
-			dsName = unescaped
-		}
-		if unescaped, err := url.PathUnescape(subpath); err == nil {
-			subpath = unescaped
-		}
-		dsName, mount, err := a.getDatasetMount(r.Context(), dsName)
+		canonicalPath, _, _, mountPath, err := a.resolveDatasetTarget(r.Context(), nodeID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "not_found", "dataset not found")
 			return
 		}
-		role, err := a.checkDatasetAccess(r, dsName, false)
+		role, err := a.checkDatasetAccess(r, canonicalPath, false)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
 			return
 		}
-		cleanedSub := filepath.Clean("/" + subpath)
-		cleanedSub = strings.TrimPrefix(cleanedSub, "/")
-		cleanedSub = strings.TrimPrefix(cleanedSub, "\\")
-		cleanTarget := filepath.Clean(filepath.Join(mount, cleanedSub))
-		cleanMount := filepath.Clean(mount)
-		if !strings.HasPrefix(strings.ToLower(cleanTarget), strings.ToLower(cleanMount)) {
-			writeError(w, http.StatusForbidden, "forbidden", "đường dẫn không hợp lệ")
-			return
-		}
+		cleanTarget := filepath.Clean(mountPath)
 		info, err := os.Stat(cleanTarget)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "not_found", "that item does not exist")
@@ -794,16 +678,14 @@ func (a *API) handleGetNode(w http.ResponseWriter, r *http.Request) {
 		}
 		category := string(models.CategoryOf(models.NodeType(itemType), mimeType, info.Name()))
 		parentID := ""
-		if subpath != "" {
-			parentSub := filepath.ToSlash(filepath.Dir(subpath))
+		if strings.Contains(canonicalPath, "/") {
+			parentSub := filepath.ToSlash(filepath.Dir(canonicalPath))
 			if parentSub != "." && parentSub != "/" && parentSub != "" {
-				parentID = fmt.Sprintf("dataset:%s:%s", dsName, parentSub)
-			} else {
-				parentID = fmt.Sprintf("dataset:%s", dsName)
+				parentID = fmt.Sprintf("dataset:%s", parentSub)
 			}
 		}
 		writeJSON(w, http.StatusOK, nodeDTO{
-			ID:        nodeID,
+			ID:        fmt.Sprintf("dataset:%s", canonicalPath),
 			ParentID:  parentID,
 			Name:      info.Name(),
 			Type:      itemType,
@@ -828,58 +710,33 @@ func (a *API) handleGetNode(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleNodePath(w http.ResponseWriter, r *http.Request) {
 	nodeID := a.extractNodeID(r, "path")
 	if strings.HasPrefix(nodeID, "dataset:") {
-		parts := strings.SplitN(strings.TrimPrefix(nodeID, "dataset:"), ":", 2)
-		dsName := parts[0]
-		subpath := ""
-		if len(parts) > 1 {
-			subpath = parts[1]
-		}
-		if unescaped, err := url.PathUnescape(dsName); err == nil {
-			dsName = unescaped
-		}
-		if unescaped, err := url.PathUnescape(subpath); err == nil {
-			subpath = unescaped
-		}
-		dsName, _, err := a.getDatasetMount(r.Context(), dsName)
+		canonicalPath, _, _, _, err := a.resolveDatasetTarget(r.Context(), nodeID)
 		if err != nil {
 			a.fail(w, r, err)
 			return
 		}
-		role, err := a.checkDatasetAccess(r, dsName, false)
-		if err != nil {
-			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
-			return
-		}
 		var chain []nodeDTO
-		chain = append(chain, nodeDTO{
-			ID:       fmt.Sprintf("dataset:%s", dsName),
-			ParentID: "",
-			Name:     dsName,
-			Type:     "folder",
-			Category: "folder",
-			MimeType: "application/x-directory",
-			Role:     role,
-		})
-		if subpath != "" {
-			subSegments := strings.Split(filepath.ToSlash(subpath), "/")
-			accum := ""
-			for _, seg := range subSegments {
-				if seg == "" {
-					continue
-				}
-				if accum == "" {
-					accum = seg
-				} else {
-					accum = accum + "/" + seg
-				}
+		segments := strings.Split(canonicalPath, "/")
+		accum := ""
+		for _, seg := range segments {
+			if seg == "" {
+				continue
+			}
+			if accum == "" {
+				accum = seg
+			} else {
+				accum = accum + "/" + seg
+			}
+			cRole, cErr := a.checkDatasetAccess(r, accum, false)
+			if cErr == nil {
 				chain = append(chain, nodeDTO{
-					ID:       fmt.Sprintf("dataset:%s:%s", dsName, accum),
-					ParentID: fmt.Sprintf("dataset:%s", dsName),
+					ID:       fmt.Sprintf("dataset:%s", accum),
+					ParentID: "",
 					Name:     seg,
 					Type:     "folder",
 					Category: "folder",
 					MimeType: "application/x-directory",
-					Role:     role,
+					Role:     cRole,
 				})
 			}
 		}
@@ -916,24 +773,12 @@ func (a *API) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 	nodeID := a.extractNodeID(r, "")
 
 	if strings.HasPrefix(nodeID, "dataset:") {
-		parts := strings.SplitN(strings.TrimPrefix(nodeID, "dataset:"), ":", 2)
-		dsName := parts[0]
-		subpath := ""
-		if len(parts) > 1 {
-			subpath = parts[1]
-		}
-		if unescaped, err := url.PathUnescape(dsName); err == nil {
-			dsName = unescaped
-		}
-		if unescaped, err := url.PathUnescape(subpath); err == nil {
-			subpath = unescaped
-		}
-		dsName, mount, err := a.getDatasetMount(r.Context(), dsName)
+		canonicalPath, _, _, mountPath, err := a.resolveDatasetTarget(r.Context(), nodeID)
 		if err != nil {
 			a.fail(w, r, err)
 			return
 		}
-		role, err := a.checkDatasetAccess(r, dsName, true)
+		role, err := a.checkDatasetAccess(r, canonicalPath, true)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
 			return
@@ -944,29 +789,17 @@ func (a *API) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 				a.fail(w, r, fmt.Errorf("tên mới không hợp lệ"))
 				return
 			}
-			cleanSub := filepath.Clean("/" + subpath)
-			cleanSub = strings.TrimPrefix(cleanSub, "/")
-			cleanSub = strings.TrimPrefix(cleanSub, "\\")
-			oldTarget := filepath.Clean(filepath.Join(mount, cleanSub))
+			oldTarget := filepath.Clean(mountPath)
 			newTarget := filepath.Clean(filepath.Join(filepath.Dir(oldTarget), newName))
-			cleanMount := filepath.Clean(mount)
-			if !strings.HasPrefix(strings.ToLower(oldTarget), strings.ToLower(cleanMount)) ||
-				!strings.HasPrefix(strings.ToLower(newTarget), strings.ToLower(cleanMount)) {
-				a.fail(w, r, fmt.Errorf("đường dẫn không hợp lệ"))
-				return
-			}
 			if err := os.Rename(oldTarget, newTarget); err != nil {
 				a.fail(w, r, err)
 				return
 			}
-			parentSub := filepath.ToSlash(filepath.Dir(cleanSub))
-			newSub := newName
-			if parentSub != "." && parentSub != "/" && parentSub != "" {
-				newSub = parentSub + "/" + newName
-			}
+			newCanonical := filepath.ToSlash(filepath.Join(filepath.Dir(canonicalPath), newName))
+			newCanonical = strings.TrimPrefix(newCanonical, "/")
 			writeJSON(w, http.StatusOK, nodeDTO{
-				ID:        fmt.Sprintf("dataset:%s:%s", dsName, newSub),
-				ParentID:  fmt.Sprintf("dataset:%s", dsName),
+				ID:        fmt.Sprintf("dataset:%s", newCanonical),
+				ParentID:  "",
 				Name:      newName,
 				Role:      role,
 				UpdatedAt: time.Now().UnixMilli(),
@@ -1122,37 +955,17 @@ func (a *API) handleFolderPreview(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleDownload(w http.ResponseWriter, r *http.Request) {
 	nodeID := a.extractNodeID(r, "download")
 	if strings.HasPrefix(nodeID, "dataset:") {
-		parts := strings.SplitN(strings.TrimPrefix(nodeID, "dataset:"), ":", 2)
-		dsName := parts[0]
-		subpath := ""
-		if len(parts) > 1 {
-			subpath = parts[1]
-		}
-		if unescaped, err := url.PathUnescape(dsName); err == nil {
-			dsName = unescaped
-		}
-		if unescaped, err := url.PathUnescape(subpath); err == nil {
-			subpath = unescaped
-		}
-		dsName, mount, err := a.getDatasetMount(r.Context(), dsName)
+		canonicalPath, _, _, mountPath, err := a.resolveDatasetTarget(r.Context(), nodeID)
 		if err != nil {
 			a.fail(w, r, err)
 			return
 		}
-		_, err = a.checkDatasetAccess(r, dsName, false)
+		_, err = a.checkDatasetAccess(r, canonicalPath, false)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
 			return
 		}
-		cleanedSub := filepath.Clean("/" + subpath)
-		cleanedSub = strings.TrimPrefix(cleanedSub, "/")
-		cleanedSub = strings.TrimPrefix(cleanedSub, "\\")
-		cleanTarget := filepath.Clean(filepath.Join(mount, cleanedSub))
-		cleanMount := filepath.Clean(mount)
-		if !strings.HasPrefix(strings.ToLower(cleanTarget), strings.ToLower(cleanMount)) {
-			a.fail(w, r, fmt.Errorf("đường dẫn không hợp lệ"))
-			return
-		}
+		cleanTarget := filepath.Clean(mountPath)
 		f, err := os.Open(cleanTarget)
 		if err != nil {
 			a.fail(w, r, err)
@@ -1236,33 +1049,17 @@ func sanitizeFilename(name string) string {
 func (a *API) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 	nodeID := a.extractNodeID(r, "thumbnail")
 	if strings.HasPrefix(nodeID, "dataset:") {
-		parts := strings.SplitN(strings.TrimPrefix(nodeID, "dataset:"), ":", 2)
-		dsName := parts[0]
-		subpath := ""
-		if len(parts) > 1 {
-			subpath = parts[1]
-		}
-		if unescaped, err := url.PathUnescape(dsName); err == nil {
-			dsName = unescaped
-		}
-		if unescaped, err := url.PathUnescape(subpath); err == nil {
-			subpath = unescaped
-		}
-		dsName, mount, err := a.getDatasetMount(r.Context(), dsName)
+		canonicalPath, _, _, mountPath, err := a.resolveDatasetTarget(r.Context(), nodeID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "no_thumbnail", "dataset not found")
 			return
 		}
-		_, err = a.checkDatasetAccess(r, dsName, false)
+		_, err = a.checkDatasetAccess(r, canonicalPath, false)
 		if err != nil {
 			writeError(w, http.StatusForbidden, "forbidden", err.Error())
 			return
 		}
-		cleanTarget := filepath.Clean(filepath.Join(mount, filepath.Clean("/"+subpath)))
-		if !strings.HasPrefix(strings.ToLower(cleanTarget), strings.ToLower(filepath.Clean(mount))) {
-			writeError(w, http.StatusForbidden, "forbidden", "đường dẫn không hợp lệ")
-			return
-		}
+		cleanTarget := filepath.Clean(mountPath)
 		ext := strings.ToLower(filepath.Ext(cleanTarget))
 		if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp" || ext == ".gif" {
 			http.ServeFile(w, r, cleanTarget)

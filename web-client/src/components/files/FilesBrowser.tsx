@@ -187,7 +187,7 @@ export function FilesBrowser({
     // 3. Khớp nếu kClean không có tên pool (ví dụ kClean là "kiyovn" còn cleanName là "data/kiyovn" hoặc "data/kiyovn/sub")
     for (const [k, v] of Object.entries(userPerms)) {
       const kClean = k.toLowerCase().trim().replace(/^\/+|\/+$/g, "");
-      if (kClean && (cleanName.endsWith("/" + kClean) || cleanName.includes("/" + kClean + "/"))) {
+      if (kClean && !kClean.includes("/") && (cleanName === kClean || cleanName.endsWith("/" + kClean) || cleanName.includes("/" + kClean + "/"))) {
         return v;
       }
     }
@@ -228,19 +228,16 @@ export function FilesBrowser({
   // Determine root dataset name if within a dataset hierarchy
   const currentDatasetName = useMemo<string | null>(() => {
     if (folderId.startsWith("dataset:")) {
-      const stripped = folderId.replace(/^dataset:/, "");
-      const colonIdx = stripped.indexOf(":");
-      return colonIdx !== -1 ? decodeURIComponent(stripped.slice(0, colonIdx)) : decodeURIComponent(stripped);
+      const stripped = folderId.replace(/^dataset:/, "").replace(/\\/g, "/").replace(/:/g, "/");
+      return stripped;
     }
     if (trail && trail.length > 0) {
       const last = trail[trail.length - 1];
       if (last?.id && last.id.startsWith("dataset:")) {
-        const stripped = last.id.replace(/^dataset:/, "");
-        const colonIdx = stripped.indexOf(":");
-        return colonIdx !== -1 ? decodeURIComponent(stripped.slice(0, colonIdx)) : decodeURIComponent(stripped);
+        return last.id.replace(/^dataset:/, "").replace(/\\/g, "/").replace(/:/g, "/");
       }
       if (trail[0]?.id && trail[0].id.startsWith("dataset:")) {
-        return trail[0].name;
+        return trail[0].id.replace(/^dataset:/, "").replace(/\\/g, "/").replace(/:/g, "/");
       }
     }
     if (user && user.role !== "admin" && defaultSingleDataset) {
@@ -609,71 +606,6 @@ export function FilesBrowser({
         { signal }
       );
       let fetched = data?.nodes ?? [];
-
-      // If at root level on the first batch, inject root-level datasets (only if not directly viewing a single dataset):
-      if (filter === "none" && !folderId && (!user || user.role === "admin" || !defaultSingleDataset) && offset === 0) {
-        let sysDatasets: any[] = [];
-        try {
-          const dsRes = await api.get<{ datasets: any[] }>(Api.datasets, undefined, { signal });
-          if (dsRes?.datasets) {
-            sysDatasets = dsRes.datasets;
-          }
-        } catch {
-          sysDatasets = [];
-        }
-
-        const accessible = sysDatasets.filter((ds) => getDatasetPerm(ds.name).read);
-        // Chỉ hiển thị dataset ở cấp cao nhất (Root), loại bỏ hoàn toàn các dataset con
-        const rootDatasets = accessible.filter((ds) => {
-          const dsNorm = (ds.name || "").toLowerCase().trim().replace(/^\/+|\/+$/g, "");
-          const slashParts = dsNorm.split("/").filter(Boolean);
-          if (user && user.role === "admin" && slashParts.length > 1) {
-            const poolPrefix = slashParts[0];
-            const hasAncestor = accessible.some((other) => {
-              const otherNorm = (other.name || "").toLowerCase().trim().replace(/^\/+|\/+$/g, "");
-              const otherPool = (other.pool || "").toLowerCase().trim();
-              if (otherNorm === dsNorm) return false;
-              if (dsNorm.startsWith(otherNorm + "/")) return true;
-              if (otherNorm === poolPrefix || otherPool === poolPrefix) return true;
-              return false;
-            });
-            if (hasAncestor) return false;
-          }
-          return !accessible.some((other) => {
-            const otherNorm = (other.name || "").toLowerCase().trim().replace(/^\/+|\/+$/g, "");
-            return otherNorm !== dsNorm && dsNorm.startsWith(otherNorm + "/");
-          });
-        });
-
-        const datasetNodes: NodeModel[] = [];
-        for (const ds of rootDatasets) {
-          const perm = getDatasetPerm(ds.name);
-          let displayName = ds.name;
-          if (displayName.includes("/")) {
-            displayName = displayName.substring(displayName.lastIndexOf("/") + 1);
-          }
-          datasetNodes.push({
-            id: `dataset:${ds.name}`,
-            parent_id: "",
-            owner_id: "system",
-            library_id: "",
-            name: displayName,
-            type: "folder",
-            mime_type: "application/x-directory",
-            size_bytes: ds.used_bytes || 0,
-            has_thumbnail: false,
-            color: ds.pool === "kiyo-pool" ? "grape" : "azure",
-            role: perm.write ? "editor" : "viewer",
-            created_at: ds.created_at || Date.now() - 86400000 * 10,
-            updated_at: ds.updated_at || Date.now() - 3600000,
-          });
-        }
-        if (datasetNodes.length > 0) {
-          fetched = datasetNodes;
-        } else if (sysDatasets.length > 0) {
-          fetched = [];
-        }
-      }
 
       return {
         items: fetched,
