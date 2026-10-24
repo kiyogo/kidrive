@@ -25,6 +25,9 @@ import { useUploader } from "@/lib/uploads";
 import { ShareSheet } from "@/components/share/ShareSheet";
 import { useInfiniteList } from "@/lib/useInfiniteList";
 
+// In-memory module cache so navigating back to Gallery instantly displays all loaded photos
+let memoryGalleryCache: NodeModel[] | null = null;
+
 /**
  * The image gallery: strictly photos/images only in one timeline.
  * Calls `/api/v1/nodes?filter=image` and strictly renders images.
@@ -60,7 +63,11 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
     reload: load,
     Sentinel,
   } = useInfiniteList<NodeModel>({
-    pageSize: 100,
+    pageSize: 1000,
+    initialItems: memoryGalleryCache ?? undefined,
+    onItemsUpdated: (items) => {
+      memoryGalleryCache = items;
+    },
     getItemKey: (node) => node.id,
     deps: [sortBy, sortDesc],
     fetchPage: async ({ offset, limit, signal }) => {
@@ -86,7 +93,7 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
     },
   });
 
-  const nodes = loading ? null : rawNodes;
+  const nodes = loading && !memoryGalleryCache?.length ? null : rawNodes;
   const upload = useUploader("", () => void load());
 
   useEffect(() => {
@@ -152,7 +159,7 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {isDesktop && (
-            <SizeSlider columns={columns} onChanged={setColumns} steps={[3, 4, 5, 6, 8]} />
+            <SizeSlider columns={columns} onChanged={setColumns} steps={[3, 4, 5, 6, 8, 10, 12]} />
           )}
           <Button
             label={sortLabel}
@@ -303,6 +310,111 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
   );
 }
 
+function LazyGalleryTile({
+  node,
+  nodes,
+  ratio,
+  isDesktop,
+  onOpen,
+  onContextMenu,
+}: {
+  node: NodeModel;
+  nodes: NodeModel[];
+  ratio: number;
+  isDesktop: boolean;
+  onOpen: (n: NodeModel, list?: NodeModel[]) => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
+  const [imgError, setImgError] = useState(false);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    // Viewport-only loading: only load thumbnail when within 400px of visible area.
+    // Unmount when scrolled far away (>800px) to reclaim RAM and texture memory.
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setIsVisible(true);
+          } else {
+            const rect = entry.boundingClientRect;
+            const viewH = window.innerHeight || 800;
+            if (rect.bottom < -800 || rect.top > viewH + 800) {
+              setIsVisible(false);
+            }
+          }
+        }
+      },
+      { rootMargin: "400px 0px 400px 0px" }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const thumbUrl = api.media(Api.thumbnail(node.id));
+  const fallbackUrl = api.media(Api.download(node.id));
+
+  return (
+    <div
+      ref={containerRef}
+      data-gallery-tile={node.id}
+      onClick={() => onOpen(node, nodes)}
+      onContextMenu={onContextMenu}
+      style={{
+        display: "block",
+        width: "100%",
+        aspectRatio: `${ratio}`,
+        overflow: "hidden",
+        borderRadius: isDesktop ? 14 : 8,
+        border: "1px solid var(--stroke)",
+        background: "var(--bg-elevated)",
+        position: "relative",
+        cursor: "pointer",
+        contain: "paint layout",
+      }}
+    >
+      {isVisible ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={imgError ? fallbackUrl : thumbUrl}
+          alt={node.name}
+          loading="lazy"
+          decoding="async"
+          onError={() => {
+            if (!imgError) {
+              setImgError(true);
+            }
+          }}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
+            transition: "opacity 0.15s ease",
+          }}
+        />
+      ) : (
+        <span
+          style={{
+            display: "grid",
+            placeItems: "center",
+            height: "100%",
+            color: "var(--fg-muted)",
+            opacity: 0.3,
+          }}
+        >
+          <Icon glyph="image" size={24} />
+        </span>
+      )}
+    </div>
+  );
+}
+
 function GalleryGridContent({
   nodes,
   columns,
@@ -345,43 +457,19 @@ function GalleryGridContent({
               : 1;
 
           return (
-            <Tappable
+            <LazyGalleryTile
               key={n.id}
-              data-gallery-tile={n.id}
-              onClick={() => onOpen(n, nodes)}
+              node={n}
+              nodes={nodes}
+              ratio={ratio}
+              isDesktop={isDesktop}
+              onOpen={onOpen}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 setMenu({ x: e.clientX, y: e.clientY, node: n });
               }}
-              radius={isDesktop ? 14 : 8}
-              style={{
-                display: "block",
-                width: "100%",
-                aspectRatio: `${ratio}`,
-                overflow: "hidden",
-                border: "1px solid var(--stroke)",
-                background: "var(--bg-elevated)",
-                position: "relative",
-              }}
-            >
-              {n.has_thumbnail ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={api.media(Api.thumbnail(n.id))}
-                  alt={n.name}
-                  loading="lazy"
-                  onError={(e) => {
-                    e.currentTarget.style.display = "none";
-                  }}
-                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                />
-              ) : (
-                <span style={{ display: "grid", placeItems: "center", height: "100%" }}>
-                  <Icon glyph="image" size={36} color="#4CC6C6" />
-                </span>
-              )}
-            </Tappable>
+            />
           );
         })}
       </div>

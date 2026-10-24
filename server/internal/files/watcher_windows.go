@@ -197,6 +197,11 @@ func cleanupDriveLRegistry() {
 }
 
 func getVirtualDriveFolder() string {
+	return GetVirtualDriveFolder()
+}
+
+// GetVirtualDriveFolder returns the local path of the virtual drive (e.g. C:\Users\...\Local Drive or K:\)
+func GetVirtualDriveFolder() string {
 	// 1. Check user local drive folders first
 	userProfile := os.Getenv("USERPROFILE")
 	if userProfile != "" {

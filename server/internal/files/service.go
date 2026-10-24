@@ -248,6 +248,7 @@ type ListOptions struct {
 	Offset   int
 	SortBy   string // name | updated | size
 	SortDesc bool
+	AllUsers bool   // if true, bypass owner_id check (admin view)
 }
 
 // List returns one page of a folder, or one of the filtered views.
@@ -290,13 +291,19 @@ func (s *Service) List(ctx context.Context, userID string, opts ListOptions) ([]
 	// the image section: every picture this account can reach, in one flat stream,
 	// with no folders in it. Only images are returned (strictly no videos).
 	case opts.Filter == "image" || opts.Filter == "images" || opts.Filter == "gallery":
+		ownerClause := "AND (n.owner_id = ? OR n.id IN (SELECT id FROM shared_tree))"
+		args := []any{userID, now, userID, userID, opts.Limit, opts.Offset}
+		if opts.AllUsers {
+			ownerClause = ""
+			args = []any{userID, now, userID, opts.Limit, opts.Offset}
+		}
 		rows, err := s.database.Read().QueryContext(ctx, accessibleCTE+`
 			SELECT `+viewColumns+`, `+viewExtras+viewJoins+`
 			WHERE n.deleted_at IS NULL AND n.trashed_at IS NULL AND n.type = 'file'
 			  AND n.mime_type LIKE 'image/%'
-			  AND (n.owner_id = ? OR n.id IN (SELECT id FROM shared_tree))
+			  `+ownerClause+`
 			`+order+` LIMIT ? OFFSET ?`,
-			userID, now, userID, userID, opts.Limit, opts.Offset)
+			args...)
 		if err != nil {
 			return nil, err
 		}
@@ -304,13 +311,20 @@ func (s *Service) List(ctx context.Context, userID string, opts ListOptions) ([]
 
 	// the video section: every video clip this account can reach
 	case opts.Filter == "video" || opts.Filter == "videos":
+		ownerClause := "AND (n.owner_id = ? OR n.id IN (SELECT id FROM shared_tree))"
+		args := []any{userID, now, userID, userID, opts.Limit, opts.Offset}
+		if opts.AllUsers {
+			ownerClause = ""
+			args = []any{userID, now, userID, opts.Limit, opts.Offset}
+		}
 		rows, err := s.database.Read().QueryContext(ctx, accessibleCTE+`
 			SELECT `+viewColumns+`, `+viewExtras+viewJoins+`
 			WHERE n.deleted_at IS NULL AND n.trashed_at IS NULL AND n.type = 'file'
 			  AND n.mime_type LIKE 'video/%'
-			  AND (n.owner_id = ? OR n.id IN (SELECT id FROM shared_tree))
+			  AND LOWER(n.name) NOT LIKE '%.ts' AND LOWER(n.name) NOT LIKE '%.tsx'
+			  `+ownerClause+`
 			`+order+` LIMIT ? OFFSET ?`,
-			userID, now, userID, userID, opts.Limit, opts.Offset)
+			args...)
 		if err != nil {
 			return nil, err
 		}

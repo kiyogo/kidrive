@@ -21,11 +21,13 @@ export interface UseInfiniteListOptions<T> {
   deps?: unknown[];
   enabled?: boolean;
   autoLoadUntilComplete?: boolean;
+  initialItems?: T[];
+  onItemsUpdated?: (items: T[]) => void;
 }
 
 /**
  * Universal Infinite Scroll Hook
- * - Server-side pagination with batching (50-100 items)
+ * - Server-side pagination with batching (50-1000 items)
  * - Automatic background prefetching until all items are loaded
  * - Fallback scroll listener for high-speed scrolling
  * - AbortController request cancellation on filter/query/sort/dep change
@@ -39,9 +41,11 @@ export function useInfiniteList<T>({
   deps = [],
   enabled = true,
   autoLoadUntilComplete = true,
+  initialItems,
+  onItemsUpdated,
 }: UseInfiniteListOptions<T>) {
-  const [items, setItems] = useState<T[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<T[]>(() => initialItems ?? []);
+  const [loading, setLoading] = useState(() => !(initialItems && initialItems.length > 0));
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +64,9 @@ export function useInfiniteList<T>({
   const getItemKeyRef = useRef(getItemKey);
   getItemKeyRef.current = getItemKey;
 
+  const onItemsUpdatedRef = useRef(onItemsUpdated);
+  onItemsUpdatedRef.current = onItemsUpdated;
+
   const loadBatch = useCallback(
     async (isInitial: boolean) => {
       if (!enabled) return;
@@ -68,7 +75,9 @@ export function useInfiniteList<T>({
         if (abortControllerRef.current) {
           abortControllerRef.current.abort();
         }
-        setLoading(true);
+        if (!items.length) {
+          setLoading(true);
+        }
         setError(null);
         offsetRef.current = 0;
         hasMoreRef.current = true;
@@ -106,23 +115,27 @@ export function useInfiniteList<T>({
         }
 
         setItems((prev) => {
+          let updated: T[];
           if (isInitial) {
-            return fetchedItems;
-          }
-          // Deduplicate by key
-          const seen = new Set<string>();
-          for (const item of prev) {
-            seen.add(getItemKeyRef.current(item));
-          }
-          const appended: T[] = [];
-          for (const item of fetchedItems) {
-            const key = getItemKeyRef.current(item);
-            if (!seen.has(key)) {
-              seen.add(key);
-              appended.push(item);
+            updated = fetchedItems;
+          } else {
+            // Deduplicate by key
+            const seen = new Set<string>();
+            for (const item of prev) {
+              seen.add(getItemKeyRef.current(item));
             }
+            const appended: T[] = [];
+            for (const item of fetchedItems) {
+              const key = getItemKeyRef.current(item);
+              if (!seen.has(key)) {
+                seen.add(key);
+                appended.push(item);
+              }
+            }
+            updated = [...prev, ...appended];
           }
-          return [...prev, ...appended];
+          onItemsUpdatedRef.current?.(updated);
+          return updated;
         });
       } catch (err: any) {
         if (controller.signal.aborted) return;
@@ -142,7 +155,7 @@ export function useInfiniteList<T>({
                 if (hasMoreRef.current && !isFetchingRef.current && !controller.signal.aborted) {
                   void loadBatch(false);
                 }
-              }, 120);
+              }, 15);
             }
           }
         }

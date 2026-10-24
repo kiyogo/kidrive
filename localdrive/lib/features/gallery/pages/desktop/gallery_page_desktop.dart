@@ -152,7 +152,7 @@ class _SizeSlider extends StatelessWidget {
   final int columns;
   final ValueChanged<int> onChanged;
 
-  static const List<int> steps = <int>[3, 4, 5, 6, 8];
+  static const List<int> steps = <int>[3, 4, 5, 6, 8, 10, 12];
 
   @override
   Widget build(BuildContext context) {

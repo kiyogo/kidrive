@@ -12,3 +12,6 @@ func cleanupDriveLRegistry() {}
 func ensureDriveLRegistry(vDrive string) {}
 
 func notifyShell() {}
+
+// GetVirtualDriveFolder is a stub for non-Windows platforms.
+func GetVirtualDriveFolder() string { return "" }

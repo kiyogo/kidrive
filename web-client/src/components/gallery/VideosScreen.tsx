@@ -24,12 +24,15 @@ import { useUploader } from "@/lib/uploads";
 import { ShareSheet } from "@/components/share/ShareSheet";
 import { useInfiniteList } from "@/lib/useInfiniteList";
 
+// In-memory module cache so navigating back to Videos instantly displays all loaded videos
+let memoryVideosCache: NodeModel[] | null = null;
+
 type SortKey = "created" | "updated" | "name" | "size";
 
 /**
  * All videos in one place, matching Flutter VideosPage:
  * - Masonry grid layout with natural video aspect ratios.
- * - Columns customizable (3, 4, 5 on desktop).
+ * - Columns customizable (3, 4, 5, 6, 8, 10, 12 on desktop).
  * - Default sorting by newest added (created desc).
  */
 export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeModel[]) => void }) {
@@ -64,7 +67,7 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
       const saved = localStorage.getItem("ld.videos.columns");
       if (saved) {
         const parsed = parseInt(saved, 10);
-        if ([3, 4, 5, 6, 8].includes(parsed)) {
+        if ([3, 4, 5, 6, 8, 10, 12].includes(parsed)) {
           setColumns(parsed);
         }
       }
@@ -92,7 +95,11 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
     reload: load,
     Sentinel,
   } = useInfiniteList<NodeModel>({
-    pageSize: 100,
+    pageSize: 1000,
+    initialItems: memoryVideosCache ?? undefined,
+    onItemsUpdated: (items) => {
+      memoryVideosCache = items;
+    },
     getItemKey: (node) => node.id,
     deps: [sortBy, sortDesc],
     fetchPage: async ({ offset, limit, signal }) => {
@@ -120,7 +127,7 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
     },
   });
 
-  const nodes = loading ? null : rawNodes;
+  const nodes = loading && !memoryVideosCache?.length ? null : rawNodes;
   const upload = useUploader("", () => void load());
 
   useEffect(() => {
@@ -249,7 +256,7 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
           ) : (
             <>
               {isDesktop && (
-                <SizeSlider columns={columns} onChanged={handleColumnsChange} steps={[3, 4, 5, 6, 8]} />
+                <SizeSlider columns={columns} onChanged={handleColumnsChange} steps={[3, 4, 5, 6, 8, 10, 12]} />
               )}
               <div ref={sortBtnRef}>
                 <Button
@@ -578,74 +585,107 @@ function VideoCard({
   onRatioResolved: (r: number) => void;
   onMenu: (m: { x?: number; y?: number; node: NodeModel; isBulk?: boolean }) => void;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    // Viewport-only thumbnail loading: only mount when in/near viewport
+    // Unmount when far offscreen (>800px) to reclaim RAM and texture memory
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setIsVisible(true);
+          } else {
+            const rect = entry.boundingClientRect;
+            const viewH = window.innerHeight || 800;
+            if (rect.bottom < -800 || rect.top > viewH + 800) {
+              setIsVisible(false);
+            }
+          }
+        }
+      },
+      { rootMargin: "400px 0px 400px 0px" }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth && imgRef.current.naturalHeight) {
       onRatioResolved(imgRef.current.naturalWidth / imgRef.current.naturalHeight);
     }
-  }, [node.id, onRatioResolved]);
+  }, [node.id, onRatioResolved, isVisible]);
 
   return (
-    <Tappable
-      data-video-tile={node.id}
-      onClick={selecting ? onToggleSelect : onOpen}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (selecting && selected) {
-          onMenu({ x: e.clientX, y: e.clientY, node, isBulk: true });
-        } else {
-          if (!selected) {
-            onToggleSelect();
-          }
-          onMenu({ x: e.clientX, y: e.clientY, node, isBulk: false });
-        }
-      }}
-      radius={14}
-      style={{
-        position: "relative",
-        width: "100%",
-        aspectRatio: `${ratio}`,
-        overflow: "hidden",
-        border: selected ? "2px solid var(--accent)" : "1px solid var(--stroke)",
-        padding: selected ? 4 : 0,
-        background: "#141424",
-        borderRadius: "var(--r-tile)",
-        boxSizing: "border-box",
-      }}
-    >
-      {/* Video Thumbnail */}
-      {node.has_thumbnail ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          ref={imgRef}
-          src={api.media(Api.thumbnail(node.id))}
-          alt={node.name}
-          loading="lazy"
-          onLoad={(e) => {
-            const img = e.currentTarget;
-            if (img.naturalWidth && img.naturalHeight) {
-              onRatioResolved(img.naturalWidth / img.naturalHeight);
+    <div ref={containerRef} style={{ width: "100%", contain: "paint layout" }}>
+      <Tappable
+        data-video-tile={node.id}
+        onClick={selecting ? onToggleSelect : onOpen}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (selecting && selected) {
+            onMenu({ x: e.clientX, y: e.clientY, node, isBulk: true });
+          } else {
+            if (!selected) {
+              onToggleSelect();
             }
-          }}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            display: "block",
-            borderRadius: selected ? "calc(var(--r-tile) - 4px)" : "inherit",
-          }}
-        />
-      ) : (
-        <div
-          style={{
-            width: "100%",
-            height: "100%",
-            background: "#141424",
-          }}
-        />
-      )}
+            onMenu({ x: e.clientX, y: e.clientY, node, isBulk: false });
+          }
+        }}
+        radius={14}
+        style={{
+          position: "relative",
+          width: "100%",
+          aspectRatio: `${ratio}`,
+          overflow: "hidden",
+          border: selected ? "2px solid var(--accent)" : "1px solid var(--stroke)",
+          padding: selected ? 4 : 0,
+          background: "#141424",
+          borderRadius: "var(--r-tile)",
+          boxSizing: "border-box",
+        }}
+      >
+        {/* Video Thumbnail */}
+        {node.has_thumbnail && isVisible ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            ref={imgRef}
+            src={api.media(Api.thumbnail(node.id))}
+            alt={node.name}
+            loading="lazy"
+            decoding="async"
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              if (img.naturalWidth && img.naturalHeight) {
+                onRatioResolved(img.naturalWidth / img.naturalHeight);
+              }
+            }}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              display: "block",
+              borderRadius: selected ? "calc(var(--r-tile) - 4px)" : "inherit",
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              background: "#141424",
+              display: "grid",
+              placeItems: "center",
+            }}
+          />
+        )}
 
       {/* Center Play Button Overlay */}
       <div
@@ -740,6 +780,7 @@ function VideoCard({
           {selected && <Icon glyph="check" size={14} color="#FFFFFF" />}
         </div>
       )}
-    </Tappable>
+      </Tappable>
+    </div>
   );
 }
