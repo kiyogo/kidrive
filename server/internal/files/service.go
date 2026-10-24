@@ -252,7 +252,7 @@ type ListOptions struct {
 
 // List returns one page of a folder, or one of the filtered views.
 func (s *Service) List(ctx context.Context, userID string, opts ListOptions) ([]View, error) {
-	if opts.Limit <= 0 || opts.Limit > 500 {
+	if opts.Limit <= 0 || opts.Limit > 100000 {
 		opts.Limit = 200
 	}
 	now := db.NowMillis()

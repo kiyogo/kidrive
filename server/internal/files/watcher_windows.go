@@ -86,7 +86,14 @@ func setFileHiddenAndSystem(path string) error {
 
 func findAppIcon(vDrive string) string {
 	appData := os.Getenv("LOCALAPPDATA")
+	progFiles := os.Getenv("ProgramFiles")
+	var exeDir string
+	if ex, err := os.Executable(); err == nil {
+		exeDir = filepath.Dir(ex)
+	}
 	candidates := []string{
+		filepath.Join(exeDir, "app_icon.ico"),
+		filepath.Join(progFiles, "Local Drive", "app_icon.ico"),
 		filepath.Join(appData, "Programs", "Local Drive", "app_icon.ico"),
 		filepath.Join(appData, "Programs", "LocalDrive", "app_icon.ico"),
 		filepath.Join(appData, "LocalDrive", "app_icon.ico"),
@@ -94,8 +101,10 @@ func findAppIcon(vDrive string) string {
 		`E:\DATA\source\Nas\LocalDrive\windows-installer\app_icon.ico`,
 	}
 	for _, c := range candidates {
-		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
-			return c
+		if c != "" {
+			if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+				return c
+			}
 		}
 	}
 	return ""
@@ -132,14 +141,27 @@ func ensureDriveKRegistry(vDrive string) {
 	}
 
 	if targetFolder != "" && targetFolder != `K:\` {
+		// Clean up legacy mock dummy items
+		dummyItems := []string{"Documents", "From Dad", "From The New Phone", "My Own Folder", "Only Once", "Photos", "Private", "Recipes", "Shared Folder", "Working Again", "note.txt", "small.txt", "two.txt"}
+		for _, d := range dummyItems {
+			dp := filepath.Join(targetFolder, d)
+			if fi, err := os.Stat(dp); err == nil {
+				if fi.IsDir() {
+					_ = os.RemoveAll(dp)
+				} else {
+					_ = os.Remove(dp)
+				}
+			}
+		}
+
 		// 3. Mount drive K: via subst
 		_ = exec.Command("cmd.exe", "/c", "subst K: /D 2>nul").Run()
 		_ = exec.Command("cmd.exe", "/c", fmt.Sprintf(`subst K: "%s"`, targetFolder)).Run()
 
-		// 4. Set DriveIcons\K label to "KiyoDrive"
+		// 4. Set DriveIcons\K label to "KiDrive"
 		kKey, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel`, registry.SET_VALUE)
 		if err == nil {
-			_ = kKey.SetStringValue("", "KiyoDrive")
+			_ = kKey.SetStringValue("", "KiDrive")
 			kKey.Close()
 		}
 
@@ -150,6 +172,18 @@ func ensureDriveKRegistry(vDrive string) {
 				_ = iKey.SetStringValue("", iconPath+",0")
 				iKey.Close()
 			}
+
+			dstIco := filepath.Join(targetFolder, "app_icon.ico")
+			if _, err := os.Stat(dstIco); os.IsNotExist(err) {
+				if data, err := os.ReadFile(iconPath); err == nil {
+					_ = os.WriteFile(dstIco, data, 0o644)
+					setFileHidden(dstIco)
+				}
+			}
+			autorunPath := filepath.Join(targetFolder, "autorun.inf")
+			_ = setFileNormal(autorunPath)
+			_ = os.WriteFile(autorunPath, []byte("[autorun]\r\nicon=app_icon.ico,0\r\nlabel=KiDrive\r\n"), 0o644)
+			setFileHiddenAndSystem(autorunPath)
 		}
 	}
 

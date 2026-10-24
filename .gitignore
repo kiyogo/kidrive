@@ -59,7 +59,7 @@ windows-installer/
 release-installer/
 scratch/
 g/
-LocalDrive.iss
+# LocalDrive.iss is tracked for Inno Setup installer packaging
 installer_crash.log
 c.py
 

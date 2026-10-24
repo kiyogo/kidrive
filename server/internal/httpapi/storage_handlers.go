@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -2198,11 +2199,8 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 			if out, err := exec.Command("zfs", "get", "-H", "-o", "value", "mountpoint", tryName).Output(); err == nil {
 				mp := strings.TrimSpace(string(out))
 				if mp != "" && mp != "none" && mp != "legacy" && !strings.Contains(mp, "zfs-recovery") {
-					if isDirWritable(mp) {
-						return mp
-					}
 					_ = exec.Command("zfs", "mount", tryName).Run()
-					if isDirWritable(mp) {
+					if fi, sErr := os.Stat(mp); sErr == nil && fi.IsDir() {
 						return mp
 					}
 				}
@@ -2210,12 +2208,29 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 			if out, err := exec.Command("zfs", "list", "-H", "-o", "mountpoint", tryName).Output(); err == nil {
 				mp := strings.TrimSpace(string(out))
 				if mp != "" && mp != "none" && mp != "legacy" && !strings.Contains(mp, "zfs-recovery") {
-					if isDirWritable(mp) {
+					_ = exec.Command("zfs", "mount", tryName).Run()
+					if fi, sErr := os.Stat(mp); sErr == nil && fi.IsDir() {
 						return mp
 					}
-					_ = exec.Command("zfs", "mount", tryName).Run()
-					if isDirWritable(mp) {
-						return mp
+				}
+			}
+		}
+
+		// Nếu trimmedName là tên lá (ví dụ 1DATA hoặc DaoKy_5), quét danh sách ZFS để tìm dataset khớp hậu tố
+		if out, err := exec.Command("zfs", "list", "-H", "-o", "name,mountpoint").Output(); err == nil {
+			scanner := bufio.NewScanner(strings.NewReader(string(out)))
+			for scanner.Scan() {
+				parts := strings.Split(scanner.Text(), "\t")
+				if len(parts) >= 2 {
+					zName := strings.TrimSpace(parts[0])
+					zMount := strings.TrimSpace(parts[1])
+					if strings.EqualFold(zName, trimmedName) || strings.HasSuffix(strings.ToLower(zName), "/"+strings.ToLower(trimmedName)) {
+						if zMount != "" && zMount != "none" && zMount != "legacy" && !strings.Contains(zMount, "zfs-recovery") {
+							_ = exec.Command("zfs", "mount", zName).Run()
+							if fi, sErr := os.Stat(zMount); sErr == nil && fi.IsDir() {
+								return zMount
+							}
+						}
 					}
 				}
 			}
@@ -2225,21 +2240,42 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 	cleanMount := filepath.Clean(mount)
 
 	// Danh sách các ứng viên mount thực tế
-	candidateSet := []string{
-		filepath.Join("/mnt", trimmedName),
-		"/" + trimmedName,
+	var candidateSet []string
+	if cleanMount != "" && cleanMount != "/" && cleanMount != "." && !strings.Contains(cleanMount, "zfs-recovery") {
+		candidateSet = append(candidateSet, cleanMount)
 	}
+
+	trimmedSlash := strings.ReplaceAll(trimmedName, "\\", "/")
+	parts := strings.Split(trimmedSlash, "/")
+	leaf := parts[len(parts)-1]
+
+	candidateSet = append(candidateSet,
+		filepath.Join("/mnt", trimmedName),
+		filepath.Join("/mnt", leaf),
+		"/" + trimmedName,
+		"/" + leaf,
+	)
+
+	// Kiểm tra nếu nằm trong bất kỳ thư mục con nào của /mnt
+	if entries, err := os.ReadDir("/mnt"); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				candidateSet = append(candidateSet,
+					filepath.Join("/mnt", e.Name(), trimmedName),
+					filepath.Join("/mnt", e.Name(), leaf),
+				)
+			}
+		}
+	}
+
 	// Nếu cleanMount có /mnt/zfs-recovery/, thử chuyển thành /mnt/ hoặc /
 	if strings.Contains(cleanMount, "zfs-recovery") {
 		cleanStripped := strings.ReplaceAll(cleanMount, "/mnt/zfs-recovery/", "/mnt/")
 		candidateSet = append(candidateSet, cleanStripped)
 		candidateSet = append(candidateSet, strings.ReplaceAll(cleanMount, "/mnt/zfs-recovery/", "/"))
 	}
-	if cleanMount != "" && cleanMount != "/" && cleanMount != "." && !strings.Contains(cleanMount, "zfs-recovery") {
-		candidateSet = append([]string{cleanMount}, candidateSet...)
-	}
 
-	// 2. Ưu tiên tuyệt đối thư mục TỒN TẠI và CÓ QUYỀN GHI (không bị read-only filesystem)
+	// 2. Ưu tiên thư mục TỒN TẠI và CÓ QUYỀN GHI
 	for _, c := range candidateSet {
 		if c != "" && c != "/" && c != "." {
 			if isDirWritable(c) {
@@ -2248,7 +2284,7 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 		}
 	}
 
-	// 3. Nếu chưa probe ghi được, ưu tiên thư mục tồn tại KHÔNG chứa zfs-recovery
+	// 3. Nếu chưa ghi được (read-only hoặc phân quyền hạn chế), ưu tiên thư mục TỒN TẠI
 	for _, c := range candidateSet {
 		if c != "" && c != "/" && c != "." && !strings.Contains(c, "zfs-recovery") {
 			if fi, err := os.Stat(c); err == nil && fi.IsDir() {

@@ -1,10 +1,12 @@
 package httpapi
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"mime"
 	"net/http"
 	"net/url"
@@ -540,47 +542,86 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 
-				if hasFullRoot {
-					dRows, err := a.db.Read().QueryContext(r.Context(),
-						`SELECT name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY name ASC`)
-					if err == nil {
-						defer dRows.Close()
-						for dRows.Next() {
-							var dName, dPool, dMount string
-							if err := dRows.Scan(&dName, &dPool, &dMount); err == nil {
-								role, accessErr := a.checkDatasetAccess(r, dName, false)
-								if accessErr != nil {
-									continue
-								}
-								realMount := a.resolveRealMountPath(dName, dMount)
-								if realMount != "" {
-									addMountTarget(dName, realMount, role)
+				// 1. Quét toàn bộ các tập dữ liệu (datasets) trong CSDL mà tài khoản có quyền truy cập
+				dRows, err := a.db.Read().QueryContext(r.Context(),
+					`SELECT name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY name ASC`)
+				if err == nil {
+					defer dRows.Close()
+					for dRows.Next() {
+						var dName, dPool, dMount string
+						if err := dRows.Scan(&dName, &dPool, &dMount); err == nil {
+							role, accessErr := a.checkDatasetAccess(r, dName, false)
+							if accessErr != nil {
+								continue
+							}
+							realMount := a.resolveRealMountPath(dName, dMount)
+							if realMount != "" {
+								addMountTarget(dName, realMount, role)
+							}
+						}
+					}
+				}
+
+				// 2. Quét toàn bộ các mảng lưu trữ (storage_pools) mà tài khoản có quyền
+				pRows, err := a.db.Read().QueryContext(r.Context(), `SELECT name FROM storage_pools WHERE status != 'deleted'`)
+				if err == nil {
+					defer pRows.Close()
+					for pRows.Next() {
+						var pName string
+						if err := pRows.Scan(&pName); err == nil {
+							role, accessErr := a.checkDatasetAccess(r, pName, false)
+							if accessErr != nil {
+								continue
+							}
+							realMount := a.resolveRealMountPath(pName, "/mnt/"+pName)
+							if realMount != "" {
+								addMountTarget(pName, realMount, role)
+							}
+						}
+					}
+				}
+
+				// 3. Nếu có công cụ OpenZFS, kiểm tra trực tiếp tất cả datasets thực tế đang mount trên hệ thống
+				if hasZFSTools() {
+					if out, err := exec.Command("zfs", "list", "-H", "-o", "name,mountpoint").Output(); err == nil {
+						scanner := bufio.NewScanner(strings.NewReader(string(out)))
+						for scanner.Scan() {
+							parts := strings.Split(scanner.Text(), "\t")
+							if len(parts) >= 2 {
+								zName := strings.TrimSpace(parts[0])
+								zMount := strings.TrimSpace(parts[1])
+								if zMount != "" && zMount != "none" && zMount != "legacy" && !strings.Contains(zMount, "zfs-recovery") {
+									role, accessErr := a.checkDatasetAccess(r, zName, false)
+									if accessErr == nil {
+										addMountTarget(zName, zMount, role)
+									}
 								}
 							}
 						}
 					}
-					pRows, err := a.db.Read().QueryContext(r.Context(), `SELECT name FROM storage_pools WHERE status != 'deleted'`)
-					if err == nil {
-						defer pRows.Close()
-						for pRows.Next() {
-							var pName string
-							if err := pRows.Scan(&pName); err == nil {
-								realMount := a.resolveRealMountPath(pName, "/mnt/"+pName)
-								if realMount != "" {
-									addMountTarget(pName, realMount, "owner")
-								}
-							}
-						}
+				}
+
+				// 4. Quét các danh mục chỉ định cụ thể của người dùng (userRoots)
+				for _, root := range userRoots {
+					role, accessErr := a.checkDatasetAccess(r, root, false)
+					if accessErr != nil {
+						continue
 					}
-				} else {
-					for _, root := range userRoots {
-						role, accessErr := a.checkDatasetAccess(r, root, false)
-						if accessErr != nil {
-							continue
-						}
-						canonical, _, _, mount, err := a.resolveDatasetTarget(r.Context(), "dataset:"+root)
-						if err == nil && mount != "" {
-							addMountTarget(canonical, mount, role)
+					canonical, _, _, mount, err := a.resolveDatasetTarget(r.Context(), "dataset:"+root)
+					if err == nil && mount != "" {
+						addMountTarget(canonical, mount, role)
+					}
+				}
+
+				// 5. Quét tất cả các thư mục có sẵn trong /mnt (TrueNAS / Linux mount point tiêu chuẩn)
+				if mntEntries, err := os.ReadDir("/mnt"); err == nil {
+					for _, me := range mntEntries {
+						if me.IsDir() {
+							mPath := filepath.Join("/mnt", me.Name())
+							role, accessErr := a.checkDatasetAccess(r, me.Name(), false)
+							if accessErr == nil {
+								addMountTarget(me.Name(), mPath, role)
+							}
 						}
 					}
 				}
@@ -590,17 +631,17 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 
 				for _, tgt := range targets {
 					cleanMount := filepath.Clean(tgt.mount)
-					_ = filepath.Walk(cleanMount, func(path string, info os.FileInfo, walkErr error) error {
-						if walkErr != nil || info == nil {
+					_ = filepath.WalkDir(cleanMount, func(path string, d fs.DirEntry, walkErr error) error {
+						if walkErr != nil || d == nil {
 							return nil
 						}
-						if info.IsDir() {
-							lowerName := strings.ToLower(info.Name())
+						if d.IsDir() {
+							lowerName := strings.ToLower(d.Name())
 							if strings.HasPrefix(lowerName, "$") || strings.EqualFold(lowerName, "System Volume Information") {
 								return filepath.SkipDir
 							}
 							switch lowerName {
-							case "node_modules", ".git", ".next", ".cache", "obj", "bin", "dist-inno", "dist-installer", "release-installer", "release_assets", ".dart_tool", ".gradle", "windows-installer", "windows-app":
+							case "node_modules", ".git", ".next", ".cache", "dist-inno", "dist-installer", "release-installer", "release_assets", ".dart_tool", ".gradle", "windows-installer", "windows-app":
 								return filepath.SkipDir
 							}
 							return nil
@@ -609,12 +650,12 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 						if seenFiles[normFilePath] {
 							return nil
 						}
-						ext := strings.ToLower(filepath.Ext(info.Name()))
+						ext := strings.ToLower(filepath.Ext(d.Name()))
 						var matchedCategory string
 						var mimeType string
 						if isImg {
 							switch ext {
-							case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".bmp", ".tiff", ".tif", ".svg", ".ico", ".avif", ".raw", ".cr2", ".nef", ".arw", ".dng":
+							case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".bmp", ".tiff", ".tif", ".svg", ".ico", ".avif", ".raw", ".cr2", ".nef", ".arw", ".dng", ".psd", ".ai", ".jfif", ".jpe":
 								matchedCategory = "image"
 								mimeType = mime.TypeByExtension(ext)
 								if mimeType == "" {
@@ -623,7 +664,7 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 							}
 						} else {
 							switch ext {
-							case ".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v", ".3gp", ".ts", ".m2ts", ".mts", ".vob", ".ogv":
+							case ".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v", ".3gp", ".ts", ".m2ts", ".mts", ".vob", ".ogv", ".rmvb", ".rm", ".asf", ".divx":
 								matchedCategory = "video"
 								mimeType = mime.TypeByExtension(ext)
 								if mimeType == "" {
@@ -632,6 +673,10 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 							}
 						}
 						if matchedCategory == "" {
+							return nil
+						}
+						info, err := d.Info()
+						if err != nil {
 							return nil
 						}
 						seenFiles[normFilePath] = true
@@ -644,7 +689,7 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 						scannedNodes = append(scannedNodes, nodeDTO{
 							ID:           fmt.Sprintf("dataset:%s", relItemPath),
 							ParentID:     fmt.Sprintf("dataset:%s", tgt.canonical),
-							Name:         info.Name(),
+							Name:         d.Name(),
 							Type:         "file",
 							Category:     matchedCategory,
 							MimeType:     mimeType,
@@ -662,7 +707,7 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 				// Kết hợp với các tệp có sẵn trong SQLite database
 				dbList, dbErr := a.files.List(r.Context(), userID, files.ListOptions{
 					Filter: opts.Filter,
-					Limit:  10000,
+					Limit:  100000,
 				})
 				if dbErr == nil {
 					for _, v := range nodeViews(dbList, userID) {

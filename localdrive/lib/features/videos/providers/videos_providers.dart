@@ -76,7 +76,7 @@ final videosProvider = FutureProvider.autoDispose<List<NodeModel>>((ref) async {
         filter: NodeFilter.video,
         sortBy: SortBy.fromWire(sort.by.wire),
         descending: sort.descending,
-        limit: 5000,
+        limit: 100000,
       );
   videosMemoryCache = list;
   return list;

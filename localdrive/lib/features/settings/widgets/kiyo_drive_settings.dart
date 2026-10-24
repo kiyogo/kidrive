@@ -43,9 +43,46 @@ class KiyoDriveSettingsGroup extends HookWidget {
         \$target = '$target';
         \$kd = '$kd';
         if (-not (Test-Path \$target)) { New-Item -ItemType Directory -Path \$target -Force | Out-Null }
+
+        # Xoa cac tep mau/mock cu neu co
+        \$dummyItems = @("Documents", "From Dad", "From The New Phone", "My Own Folder", "Only Once", "Photos", "Private", "Recipes", "Shared Folder", "Working Again", "note.txt", "small.txt", "two.txt")
+        foreach (\$d in \$dummyItems) {
+          \$dp = Join-Path \$target \$d
+          if (Test-Path \$dp) { Remove-Item -Path \$dp -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+
         cmd.exe /c "subst K: /D 2>nul"
         cmd.exe /c "subst K: `"\$target`""
-        cmd.exe /c 'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\K\\DefaultLabel" /ve /t REG_SZ /d "KiyoDrive" /f 2>nul'
+        cmd.exe /c 'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\K\\DefaultLabel" /ve /t REG_SZ /d "KiDrive" /f 2>nul'
+
+        # Tim app_icon.ico
+        \$appData = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::LocalApplicationData)
+        \$progFiles = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFiles)
+        \$candidates = @(
+          (Join-Path \$progFiles "Local Drive\\app_icon.ico"),
+          (Join-Path \$appData "Programs\\Local Drive\\app_icon.ico"),
+          (Join-Path \$appData "Programs\\LocalDrive\\app_icon.ico"),
+          (Join-Path \$appData "LocalDrive\\app_icon.ico"),
+          (Join-Path \$target "app_icon.ico"),
+          "E:\\DATA\\source\\Nas\\LocalDrive\\windows-installer\\app_icon.ico"
+        )
+        \$foundIcon = ""
+        foreach (\$c in \$candidates) {
+          if (Test-Path \$c) { \$foundIcon = \$c; break }
+        }
+        if (\$foundIcon -ne "") {
+          \$targetIco = Join-Path \$target "app_icon.ico"
+          if (-not (Test-Path \$targetIco)) {
+            Copy-Item -Path \$foundIcon -Destination \$targetIco -Force -ErrorAction SilentlyContinue
+          }
+          cmd.exe /c "attrib +h `"\$targetIco`" 2>nul"
+          cmd.exe /c "reg add `"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\K\\DefaultIcon`" /ve /t REG_SZ /d `"\$foundIcon,0`" /f 2>nul"
+
+          \$autorun = Join-Path \$target "autorun.inf"
+          "[autorun]`r`nicon=app_icon.ico,0`r`nlabel=KiDrive`r`n" | Set-Content -Path \$autorun -Encoding ASCII -Force
+          cmd.exe /c "attrib +h +s `"\$autorun`" 2>nul"
+        }
+
         if (Test-Path \$kd) {
           cmd.exe /c "attrib -h -s -r `"\$kd\\*.*`" 2>nul"
           cmd.exe /c "attrib -r `"\$kd`" 2>nul"
