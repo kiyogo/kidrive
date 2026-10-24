@@ -1109,144 +1109,179 @@ func (a *API) handleMediaNodes(w http.ResponseWriter, r *http.Request, userID st
 				}
 			}
 
-			if !hasFullRoot && len(userRoots) > 0 {
-				// Người dùng chỉ có quyền trên một số danh mục cụ thể: chỉ quét đúng danh mục được cấp
-				for _, root := range userRoots {
-					role, accessErr := a.checkDatasetAccess(r, root, false)
-					if accessErr != nil {
-						continue
-					}
-					canonical, _, _, mount, err := a.resolveDatasetTarget(scanCtx, "dataset:"+root)
-					if err == nil && mount != "" {
+			addDatasetRootTarget := func(root, role string) {
+				cleanRoot := strings.Trim(strings.TrimSpace(root), "/")
+				if cleanRoot == "" {
+					return
+				}
+				// 1. Thử qua resolveDatasetTarget
+				canonical, _, _, mount, err := a.resolveDatasetTarget(scanCtx, "dataset:"+cleanRoot)
+				if err == nil && mount != "" {
+					if fi, sErr := os.Stat(mount); sErr == nil && fi.IsDir() {
 						addMountTarget(canonical, mount, role)
+						return
 					}
 				}
-			} else {
-				// 1. Quét toàn bộ các tập dữ liệu (datasets) trong CSDL mà tài khoản có quyền truy cập
-				dRows, err := a.db.Read().QueryContext(scanCtx,
-					`SELECT name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY name ASC`)
-				if err == nil {
+				// 2. Thử qua resolveRealMountPath
+				realMount := a.resolveRealMountPath(cleanRoot, "")
+				if realMount != "" {
+					if fi, sErr := os.Stat(realMount); sErr == nil && fi.IsDir() {
+						addMountTarget(cleanRoot, realMount, role)
+						return
+					}
+				}
+				// 3. Quét dưới các dataset đã biết
+				if dRows, qErr := a.db.Read().QueryContext(scanCtx, `SELECT name, mount FROM datasets WHERE status != 'deleted'`); qErr == nil {
 					defer dRows.Close()
 					for dRows.Next() {
-						var dName, dPool, dMount string
-						if err := dRows.Scan(&dName, &dPool, &dMount); err == nil {
-							role, accessErr := a.checkDatasetAccess(r, dName, false)
-							if accessErr != nil {
-								continue
-							}
-							realMount := a.resolveRealMountPath(dName, dMount)
-							if realMount != "" {
-								addMountTarget(dName, realMount, role)
-							}
-						}
-					}
-				}
-
-				// 2. Quét toàn bộ các mảng lưu trữ (storage_pools) mà tài khoản có quyền
-				pRows, err := a.db.Read().QueryContext(scanCtx, `SELECT name FROM storage_pools WHERE status != 'deleted'`)
-				if err == nil {
-					defer pRows.Close()
-					for pRows.Next() {
-						var pName string
-						if err := pRows.Scan(&pName); err == nil {
-							role, accessErr := a.checkDatasetAccess(r, pName, false)
-							if accessErr != nil {
-								continue
-							}
-							realMount := a.resolveRealMountPath(pName, "/mnt/"+pName)
-							if realMount != "" {
-								addMountTarget(pName, realMount, role)
-							}
-						}
-					}
-				}
-
-				// 3. Nếu có công cụ OpenZFS, kiểm tra trực tiếp tất cả datasets thực tế đang mount trên hệ thống
-				if hasZFSTools() {
-					if out, err := exec.Command("zfs", "list", "-H", "-o", "name,mountpoint").Output(); err == nil {
-						scanner := bufio.NewScanner(strings.NewReader(string(out)))
-						for scanner.Scan() {
-							parts := strings.Split(scanner.Text(), "\t")
-							if len(parts) >= 2 {
-								zName := strings.TrimSpace(parts[0])
-								zMount := strings.TrimSpace(parts[1])
-								if zMount != "" && zMount != "none" && zMount != "legacy" && !strings.Contains(zMount, "zfs-recovery") {
-									role, accessErr := a.checkDatasetAccess(r, zName, false)
-									if accessErr == nil {
-										addMountTarget(zName, zMount, role)
-									}
+						var dName, dMount string
+						if dRows.Scan(&dName, &dMount) == nil {
+							base := a.resolveRealMountPath(dName, dMount)
+							if base != "" {
+								cand := filepath.Join(base, cleanRoot)
+								if fi, sErr := os.Stat(cand); sErr == nil && fi.IsDir() {
+									addMountTarget(filepath.ToSlash(filepath.Join(dName, cleanRoot)), cand, role)
+									return
 								}
 							}
 						}
 					}
 				}
-
-				// 4. Quét các danh mục chỉ định cụ thể của người dùng (userRoots)
-				for _, root := range userRoots {
-					role, accessErr := a.checkDatasetAccess(r, root, false)
-					if accessErr != nil {
-						continue
-					}
-					canonical, _, _, mount, err := a.resolveDatasetTarget(scanCtx, "dataset:"+root)
-					if err == nil && mount != "" {
-						addMountTarget(canonical, mount, role)
-					}
-				}
-
-				// 5. Quét tất cả các thư mục có sẵn trong /mnt (TrueNAS / Linux mount point tiêu chuẩn)
-				if mntEntries, err := os.ReadDir("/mnt"); err == nil {
+				// 4. Quét dưới /mnt
+				if mntEntries, mErr := os.ReadDir("/mnt"); mErr == nil {
 					for _, me := range mntEntries {
 						if me.IsDir() {
-							mPath := filepath.Join("/mnt", me.Name())
-							role, accessErr := a.checkDatasetAccess(r, me.Name(), false)
-							if accessErr == nil {
-								addMountTarget(me.Name(), mPath, role)
+							cand := filepath.Join("/mnt", me.Name(), cleanRoot)
+							if fi, sErr := os.Stat(cand); sErr == nil && fi.IsDir() {
+								addMountTarget(filepath.ToSlash(filepath.Join(me.Name(), cleanRoot)), cand, role)
+								return
 							}
 						}
 					}
 				}
+			}
 
-				// 6. Quét các thư mục chia sẻ mạng (network_shares) trong CSDL
-				sRows, sErr := a.db.Read().QueryContext(scanCtx, `SELECT name, path FROM network_shares WHERE status != 'deleted'`)
-				if sErr == nil {
-					defer sRows.Close()
-					for sRows.Next() {
-						var sName, sPath string
-						if sRows.Scan(&sName, &sPath) == nil {
-							role, accessErr := a.checkDatasetAccess(r, sName, false)
-							if accessErr == nil {
-								realP := a.resolveRealMountPath(sName, sPath)
-								if realP != "" {
-									addMountTarget(sName, realP, role)
+			// 1. Quét tất cả các danh mục chỉ định cụ thể của người dùng (userRoots)
+			for _, root := range userRoots {
+				role, accessErr := a.checkDatasetAccess(r, root, false)
+				if accessErr != nil {
+					continue
+				}
+				addDatasetRootTarget(root, role)
+			}
+
+			// 2. Quét toàn bộ các tập dữ liệu (datasets) trong CSDL mà tài khoản có quyền truy cập
+			dRows, err := a.db.Read().QueryContext(scanCtx,
+				`SELECT name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY name ASC`)
+			if err == nil {
+				defer dRows.Close()
+				for dRows.Next() {
+					var dName, dPool, dMount string
+					if err := dRows.Scan(&dName, &dPool, &dMount); err == nil {
+						role, accessErr := a.checkDatasetAccess(r, dName, false)
+						if accessErr != nil {
+							continue
+						}
+						realMount := a.resolveRealMountPath(dName, dMount)
+						if realMount != "" {
+							addMountTarget(dName, realMount, role)
+						}
+					}
+				}
+			}
+
+			// 3. Quét toàn bộ các mảng lưu trữ (storage_pools) mà tài khoản có quyền
+			pRows, err := a.db.Read().QueryContext(scanCtx, `SELECT name FROM storage_pools WHERE status != 'deleted'`)
+			if err == nil {
+				defer pRows.Close()
+				for pRows.Next() {
+					var pName string
+					if err := pRows.Scan(&pName); err == nil {
+						role, accessErr := a.checkDatasetAccess(r, pName, false)
+						if accessErr != nil {
+							continue
+						}
+						realMount := a.resolveRealMountPath(pName, "/mnt/"+pName)
+						if realMount != "" {
+							addMountTarget(pName, realMount, role)
+						}
+					}
+				}
+			}
+
+			// 4. Nếu có công cụ OpenZFS, kiểm tra trực tiếp tất cả datasets thực tế đang mount trên hệ thống
+			if hasZFSTools() {
+				if out, err := exec.Command("zfs", "list", "-H", "-o", "name,mountpoint").Output(); err == nil {
+					scanner := bufio.NewScanner(strings.NewReader(string(out)))
+					for scanner.Scan() {
+						parts := strings.Split(scanner.Text(), "\t")
+						if len(parts) >= 2 {
+							zName := strings.TrimSpace(parts[0])
+							zMount := strings.TrimSpace(parts[1])
+							if zMount != "" && zMount != "none" && zMount != "legacy" && !strings.Contains(zMount, "zfs-recovery") {
+								role, accessErr := a.checkDatasetAccess(r, zName, false)
+								if accessErr == nil {
+									addMountTarget(zName, zMount, role)
 								}
 							}
 						}
 					}
 				}
+			}
 
-				// 7. Quét các thư viện lưu trữ (libraries)
-				if a.libs != nil {
-					if libList, lErr := a.libs.List(scanCtx); lErr == nil {
-						for _, lib := range libList {
-							if lib.Online() && lib.RootPath != "" {
-								role := "viewer"
-								if hasFullRoot {
-									role = "admin"
-								}
-								addMountTarget("library:"+lib.ID, lib.RootPath, role)
+			// 5. Quét tất cả các thư mục có sẵn trong /mnt (TrueNAS / Linux mount point tiêu chuẩn)
+			if mntEntries, err := os.ReadDir("/mnt"); err == nil {
+				for _, me := range mntEntries {
+					if me.IsDir() {
+						mPath := filepath.Join("/mnt", me.Name())
+						role, accessErr := a.checkDatasetAccess(r, me.Name(), false)
+						if accessErr == nil {
+							addMountTarget(me.Name(), mPath, role)
+						}
+					}
+				}
+			}
+
+			// 6. Quét các thư mục chia sẻ mạng (network_shares) trong CSDL
+			sRows, sErr := a.db.Read().QueryContext(scanCtx, `SELECT name, path FROM network_shares WHERE status != 'deleted'`)
+			if sErr == nil {
+				defer sRows.Close()
+				for sRows.Next() {
+					var sName, sPath string
+					if sRows.Scan(&sName, &sPath) == nil {
+						role, accessErr := a.checkDatasetAccess(r, sName, false)
+						if accessErr == nil {
+							realP := a.resolveRealMountPath(sName, sPath)
+							if realP != "" {
+								addMountTarget(sName, realP, role)
 							}
 						}
 					}
 				}
+			}
 
-				// 8. Quét Virtual Drive folder nếu có (trên Windows / client server)
-				if vdf := files.GetVirtualDriveFolder(); vdf != "" {
-					role := "viewer"
-					if hasFullRoot {
-						role = "admin"
+			// 7. Quét các thư viện lưu trữ (libraries)
+			if a.libs != nil {
+				if libList, lErr := a.libs.List(scanCtx); lErr == nil {
+					for _, lib := range libList {
+						if lib.Online() && lib.RootPath != "" {
+							role := "viewer"
+							if hasFullRoot {
+								role = "admin"
+							}
+							addMountTarget("library:"+lib.ID, lib.RootPath, role)
+						}
 					}
-					addMountTarget("localdrive", vdf, role)
 				}
+			}
+
+			// 8. Quét Virtual Drive folder nếu có (trên Windows / client server)
+			if vdf := files.GetVirtualDriveFolder(); vdf != "" {
+				role := "viewer"
+				if hasFullRoot {
+					role = "admin"
+				}
+				addMountTarget("localdrive", vdf, role)
 			}
 
 			// Tối ưu hóa: Loại bỏ các target con nếu target cha đã có trong danh sách

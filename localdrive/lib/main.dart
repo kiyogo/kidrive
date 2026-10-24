@@ -78,11 +78,8 @@ Future<void> main() async {
     ),
   );
 
-  // The desktop window starts hidden so there is no flash of the system title
-  // bar before the app's own one is in place. Show it once Flutter renders.
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    DesktopShellService.showWindow();
-  });
+  // The desktop window starts hidden so there is no flash of default chrome.
+  DesktopShellService.showWindow();
 }
 
 Future<void> _lockOrientations() async {

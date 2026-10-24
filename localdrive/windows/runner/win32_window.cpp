@@ -120,7 +120,7 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
         static_cast<HICON>(LoadImage(window_class.hInstance, MAKEINTRESOURCE(IDI_APP_ICON),
                                      IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
                                      GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
-    window_class.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
+    window_class.hbrBackground = CreateSolidBrush(RGB(18, 19, 22));
     window_class.lpszMenuName = nullptr;
     window_class.lpfnWndProc = Win32Window::WndProc;
     RegisterClassEx(&window_class);
@@ -239,6 +239,17 @@ Win32Window::MessageHandler(HWND hwnd,
         // Size and position the child window.
         MoveWindow(child_content_, rect.left, rect.top, rect.right - rect.left,
                    rect.bottom - rect.top, TRUE);
+      }
+      return 0;
+    }
+    case WM_SHOWWINDOW: {
+      if (wparam) {
+        RECT rect = GetClientArea();
+        if (child_content_ != nullptr) {
+          MoveWindow(child_content_, rect.left, rect.top, rect.right - rect.left,
+                     rect.bottom - rect.top, TRUE);
+          InvalidateRect(child_content_, nullptr, TRUE);
+        }
       }
       return 0;
     }

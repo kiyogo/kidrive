@@ -916,7 +916,7 @@ export function FilesBrowser({
             </Tappable>
           )}
 
-          {chosen.length > 0 ? (
+          {chosen.length >= 2 ? (
             <div
               style={{
                 display: "inline-flex",
@@ -935,24 +935,6 @@ export function FilesBrowser({
               <Tappable onClick={() => setSelection(new Set(visible.map((n) => n.id)))} radius={999} style={{ padding: 6 }} title={t.actionSelect}>
                 <Icon glyph="check" size={18} />
               </Tappable>
-              {chosen.length === 1 && (
-                <Tappable
-                  radius={999}
-                  style={{ padding: 6 }}
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    setMenu({
-                      anchorRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
-                      x: rect.right,
-                      y: rect.bottom,
-                      node: chosen[0],
-                    });
-                  }}
-                  title={t.moreActions}
-                >
-                  <Icon glyph="more" size={18} />
-                </Tappable>
-              )}
               <Tappable
                 radius={999}
                 style={{ padding: 6, color: "var(--warning)" }}

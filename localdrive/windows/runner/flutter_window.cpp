@@ -27,10 +27,9 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
-  // bitsdojo_window handles showing the window once Flutter is ready to prevent blank white flash.
-  // flutter_controller_->engine()->SetNextFrameCallback([&]() {
-  //   this->Show();
-  // });
+  flutter_controller_->engine()->SetNextFrameCallback([&]() {
+    this->Show();
+  });
 
   // Flutter can complete the first frame before the "show window" callback is
   // registered. The following call ensures a frame is pending to ensure the

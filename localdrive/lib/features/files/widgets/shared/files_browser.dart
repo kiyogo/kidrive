@@ -458,7 +458,7 @@ class SelectionActionBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = L10n.of(context);
     final selection = ref.watch(selectionProvider);
-    if (selection.isEmpty) return const SizedBox.shrink();
+    if (selection.length < 2) return const SizedBox.shrink();
 
     final chosen = nodes
         .where((node) => selection.contains(node.id))

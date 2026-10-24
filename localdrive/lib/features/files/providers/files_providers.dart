@@ -309,7 +309,7 @@ final activeDetailsNodeProvider =
 
 /// Whether the multi select action bar is showing at all.
 final isSelectingProvider = Provider<bool>((ref) {
-  return ref.watch(selectionProvider).isNotEmpty;
+  return ref.watch(selectionProvider).length >= 2;
 });
 
 /// Throws away every answer this device is holding from the server, so the next

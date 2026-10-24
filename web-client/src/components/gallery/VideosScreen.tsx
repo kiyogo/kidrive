@@ -227,9 +227,9 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
       >
         <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", minWidth: 0 }}>
           <h1 className="t-title-md" style={{ margin: 0, lineHeight: 1.2 }}>
-            {selection.size > 0 ? t.gallerySelected({ count: selection.size }) : t.videos}
+            {selection.size >= 2 ? t.gallerySelected({ count: selection.size }) : t.videos}
           </h1>
-          {nodes && nodes.length > 0 && selection.size === 0 && (
+          {nodes && nodes.length > 0 && selection.size < 2 && (
             <span className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 2 }}>
               {t.videosSummary({ count: nodes.length })}
             </span>
@@ -237,7 +237,7 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {selection.size > 0 ? (
+          {selection.size >= 2 ? (
             <>
               <Button
                 variant="secondary"

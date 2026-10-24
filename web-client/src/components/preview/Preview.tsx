@@ -584,7 +584,7 @@ export function Preview({
               ref={videoRef}
               src={src}
               poster={api.media(Api.thumbnail(node.id))}
-              preload="metadata"
+              preload="auto"
               playsInline
               autoPlay
               onPlay={() => {
@@ -1818,7 +1818,7 @@ function InteractiveImage({
               : "none",
         }}
       >
-        {thumbSrc && (
+        {thumbSrc && !fullLoaded && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={thumbSrc}
@@ -1832,11 +1832,8 @@ function InteractiveImage({
               maxWidth: "100%",
               maxHeight: "100%",
               objectFit: "contain",
-              opacity: fullLoaded ? 0 : 0.95,
               pointerEvents: "none",
               userSelect: "none",
-              willChange: "opacity",
-              transition: "opacity 0.22s ease-out",
               backfaceVisibility: "hidden",
               WebkitBackfaceVisibility: "hidden",
             }}
@@ -1844,7 +1841,6 @@ function InteractiveImage({
         )}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          key={src}
           src={src}
           alt={alt}
           draggable={false}
@@ -1871,11 +1867,8 @@ function InteractiveImage({
             maxWidth: "100%",
             maxHeight: "100%",
             objectFit: "contain",
-            opacity: fullLoaded ? 1 : 0,
-            transition: "opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
             userSelect: "none",
             pointerEvents: "auto",
-            willChange: "opacity",
             backfaceVisibility: "hidden",
             WebkitBackfaceVisibility: "hidden",
           }}

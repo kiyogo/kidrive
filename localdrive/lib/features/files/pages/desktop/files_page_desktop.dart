@@ -53,7 +53,7 @@ class FilesPageDesktop extends HookConsumerWidget {
     return LdDesktopScaffold(
       titleWidget: Align(
         alignment: AlignmentDirectional.centerStart,
-        child: selection.isNotEmpty
+        child: selection.length >= 2
             ? SelectionActionBar(nodes: nodes)
             : DesktopBreadcrumb(folderId: folderId, filter: filter),
       ),
