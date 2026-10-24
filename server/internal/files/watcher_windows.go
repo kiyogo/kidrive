@@ -141,19 +141,6 @@ func ensureDriveKRegistry(vDrive string) {
 	}
 
 	if targetFolder != "" && targetFolder != `K:\` {
-		// Clean up legacy mock dummy items
-		dummyItems := []string{"Documents", "From Dad", "From The New Phone", "My Own Folder", "Only Once", "Photos", "Private", "Recipes", "Shared Folder", "Working Again", "note.txt", "small.txt", "two.txt"}
-		for _, d := range dummyItems {
-			dp := filepath.Join(targetFolder, d)
-			if fi, err := os.Stat(dp); err == nil {
-				if fi.IsDir() {
-					_ = os.RemoveAll(dp)
-				} else {
-					_ = os.Remove(dp)
-				}
-			}
-		}
-
 		// 3. Mount drive K: via subst
 		_ = exec.Command("cmd.exe", "/c", "subst K: /D 2>nul").Run()
 		_ = exec.Command("cmd.exe", "/c", fmt.Sprintf(`subst K: "%s"`, targetFolder)).Run()
@@ -175,15 +162,15 @@ func ensureDriveKRegistry(vDrive string) {
 		iconPath := findAppIcon(targetFolder)
 		if iconPath != "" {
 			if iKey, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon`, registry.SET_VALUE); err == nil {
-				_ = iKey.SetStringValue("", iconPath+",0")
+				_ = iKey.SetStringValue("", iconPath)
 				iKey.Close()
 			}
 			if iKeyLM, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon`, registry.SET_VALUE); err == nil {
-				_ = iKeyLM.SetStringValue("", iconPath+",0")
+				_ = iKeyLM.SetStringValue("", iconPath)
 				iKeyLM.Close()
 			}
 			if iKeyCls, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultIcon`, registry.SET_VALUE); err == nil {
-				_ = iKeyCls.SetStringValue("", iconPath+",0")
+				_ = iKeyCls.SetStringValue("", iconPath)
 				iKeyCls.Close()
 			}
 
@@ -196,7 +183,7 @@ func ensureDriveKRegistry(vDrive string) {
 			}
 			autorunPath := filepath.Join(targetFolder, "autorun.inf")
 			_ = setFileNormal(autorunPath)
-			_ = os.WriteFile(autorunPath, []byte("[autorun]\r\nicon=app_icon.ico,0\r\nlabel=KiDrive\r\n"), 0o644)
+			_ = os.WriteFile(autorunPath, []byte("[autorun]\r\nicon=app_icon.ico\r\nlabel=KiDrive\r\n"), 0o644)
 			setFileHiddenAndSystem(autorunPath)
 		}
 	}
@@ -285,10 +272,10 @@ func ensureDriveFiles(vDrive string) {
 
 	// Create autorun.inf
 	autorunPath := filepath.Join(vDrive, "autorun.inf")
-	autorunContent := "[autorun]\r\nicon=app_icon.ico\r\nlabel=KiyoDrive\r\n"
+	autorunContent := "[autorun]\r\nicon=app_icon.ico\r\nlabel=KiDrive\r\n"
 	_ = setFileNormal(autorunPath)
 	_ = os.WriteFile(autorunPath, []byte(autorunContent), 0o644)
-	setFileHidden(autorunPath)
+	setFileHiddenAndSystem(autorunPath)
 }
 
 func setFileHidden(path string) {
@@ -336,24 +323,23 @@ func (s *Service) syncFromVirtualDrive(ctx context.Context, vDrive string, lastQ
 	defer knownDiskMu.Unlock()
 
 	rows, err := s.database.Read().QueryContext(ctx, `
-		SELECT id, name, type, checksum_sha256 FROM nodes
-		WHERE owner_id = ? AND library_id = ?
-		  AND deleted_at IS NULL AND trashed_at IS NULL
-		ORDER BY type ASC`, // delete files before folders
-		ownerID, libraryID)
+		SELECT id, name, type, checksum_sha256, library_id, owner_id FROM nodes
+		WHERE deleted_at IS NULL AND trashed_at IS NULL
+		ORDER BY type ASC`) // delete files before folders
 	if err == nil {
 		type trashItem struct {
-			id   string
-			name string
-			kind string
+			id      string
+			name    string
+			kind    string
+			ownerID string
 		}
 		var toTrash []trashItem
 		var toSyncDown []models.Node
 
 		for rows.Next() {
-			var id, name, kind string
+			var id, name, kind, nodeLibID, nodeOwnerID string
 			var checksum sql.NullString
-			if err := rows.Scan(&id, &name, &kind, &checksum); err == nil {
+			if err := rows.Scan(&id, &name, &kind, &checksum, &nodeLibID, &nodeOwnerID); err == nil {
 				rel, err := relPathOf(ctx, s.database.Read(), id)
 				if err != nil || len(rel) == 0 {
 					continue
@@ -364,12 +350,12 @@ func (s *Service) syncFromVirtualDrive(ctx context.Context, vDrive string, lastQ
 					if _, statErr := os.Stat(diskPath); os.IsNotExist(statErr) {
 						if hasInitialScan && knownDiskItems[relKey] {
 							// Item was known on disk and now removed -> User deleted it in Windows Explorer
-							toTrash = append(toTrash, trashItem{id: id, name: name, kind: kind})
+							toTrash = append(toTrash, trashItem{id: id, name: name, kind: kind, ownerID: nodeOwnerID})
 						} else {
 							// Item in DB was NOT on disk -> Sync it down to vDrive (uploaded from Web/App)
 							toSyncDown = append(toSyncDown, models.Node{
 								ID: id, Name: name, Type: models.NodeType(kind),
-								LibraryID: libraryID, ChecksumSHA256: checksum.String,
+								LibraryID: nodeLibID, OwnerID: nodeOwnerID, ChecksumSHA256: checksum.String,
 							})
 						}
 					}
@@ -384,7 +370,11 @@ func (s *Service) syncFromVirtualDrive(ctx context.Context, vDrive string, lastQ
 				delete(knownDiskItems, filepath.Join(rel...))
 			}
 			s.log.Info("[VirtualDrive] Trashing deleted node from L:\\", "type", item.kind, "name", item.name)
-			_, _ = s.Trash(ctx, ownerID, item.id, "127.0.0.1")
+			oID := item.ownerID
+			if oID == "" {
+				oID = ownerID
+			}
+			_, _ = s.Trash(ctx, oID, item.id, "127.0.0.1")
 		}
 
 		for _, node := range toSyncDown {
@@ -399,7 +389,11 @@ func (s *Service) syncFromVirtualDrive(ctx context.Context, vDrive string, lastQ
 				diskItems[relKey] = true
 				knownDiskItems[relKey] = true
 			} else if node.Type == models.NodeFile && node.ChecksumSHA256 != "" {
-				targetObj, err := s.store.ObjectPath(root, node.ChecksumSHA256)
+				nodeRoot, err := s.libs.Root(node.LibraryID)
+				if err != nil || nodeRoot == "" {
+					nodeRoot = root
+				}
+				targetObj, err := s.store.ObjectPath(nodeRoot, node.ChecksumSHA256)
 				if err == nil {
 					if _, statErr := os.Stat(targetObj); statErr == nil {
 						_ = os.MkdirAll(filepath.Dir(diskPath), 0o755)

@@ -66,13 +66,16 @@ Name: "{userappdata}\Microsoft\Windows\Network Shortcuts\KiyoDrive\target"; File
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "LocalDrive"; ValueData: """{app}\{#MyAppExeName}"""; Tasks: autostart; Flags: uninsdeletevalue
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel"; ValueType: string; ValueData: "KiDrive"; Tasks: kiyodrive; Flags: uninsdeletekey
-Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico,0"; Tasks: kiyodrive; Flags: uninsdeletekey
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico"; Tasks: kiyodrive; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel"; ValueType: string; ValueData: "KiDrive"; Tasks: kiyodrive; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico,0"; Tasks: kiyodrive; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico"; Tasks: kiyodrive; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultLabel"; ValueType: string; ValueData: "KiDrive"; Tasks: kiyodrive; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico,0"; Tasks: kiyodrive; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico"; Tasks: kiyodrive; Flags: uninsdeletekey
 
 [Code]
+procedure SHChangeNotify(wEventId: LongInt; uFlags: Cardinal; dwItem1, dwItem2: LongInt);
+  external 'SHChangeNotify@shell32.dll stdcall';
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   NetFolder, OldNetFolder, IniFile, IniContent, TargetDir: string;
@@ -83,6 +86,7 @@ begin
     // Unmount any mapped drive L: so no red capacity bar or NTFS appears
     Exec('cmd.exe', '/c subst L: /D 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('cmd.exe', '/c net use L: /delete /y 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2\##localhost#c$#Users');
 
     // Delete old variants from Network Shortcuts
     OldNetFolder := ExpandConstant('{userappdata}\Microsoft\Windows\Network Shortcuts\Local Drive');
@@ -95,25 +99,13 @@ begin
       TargetDir := ExpandConstant('{%USERPROFILE}\Local Drive');
       ForceDirectories(TargetDir);
 
-      // Clean up legacy mock dummy items
-      DelTree(TargetDir + '\From Dad', True, True, True);
-      DelTree(TargetDir + '\From The New Phone', True, True, True);
-      DelTree(TargetDir + '\My Own Folder', True, True, True);
-      DelTree(TargetDir + '\Only Once', True, True, True);
-      DelTree(TargetDir + '\Recipes', True, True, True);
-      DelTree(TargetDir + '\Shared Folder', True, True, True);
-      DelTree(TargetDir + '\Working Again', True, True, True);
-      DeleteFile(TargetDir + '\note.txt');
-      DeleteFile(TargetDir + '\small.txt');
-      DeleteFile(TargetDir + '\two.txt');
-
       // Copy icon and write autorun.inf
       FileCopy(ExpandConstant('{app}\app_icon.ico'), TargetDir + '\app_icon.ico', False);
       Exec('attrib', '+h "' + TargetDir + '\app_icon.ico"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
       IniFile := TargetDir + '\autorun.inf';
       IniContent := '[autorun]' + #13#10 +
-                    'icon=app_icon.ico,0' + #13#10 +
+                    'icon=app_icon.ico' + #13#10 +
                     'label=KiDrive' + #13#10;
       SaveStringToFile(IniFile, IniContent, False);
       Exec('attrib', '+h +s "' + IniFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
@@ -142,6 +134,9 @@ begin
       NetFolder := ExpandConstant('{userappdata}\Microsoft\Windows\Network Shortcuts\KiyoDrive');
       DelTree(NetFolder, True, True, True);
     end;
+
+    SHChangeNotify($08000000, 0, 0, 0);
+    SHChangeNotify($00000040, 0, 0, 0);
   end;
 end;
 
