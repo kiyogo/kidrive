@@ -46,38 +46,56 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
     if (!mounted || nodes.isEmpty) return;
     final db = ref.read(filesDbProvider);
 
-    // Precache 5 next images
+    // 1. Precache lightweight thumbnails for 5 next and 5 previous (fast, instant GPU upload)
     for (var i = 1; i <= 5; i++) {
       if (index + i < nodes.length) {
         final next = nodes[index + i];
-        final local =
-            ref.read(offlineLocalPathProvider(next.id)).valueOrNull ?? '';
         precacheImage(
           LdRemoteImage.provider(
-            url: db.downloadUrl(next.id, inline: true),
+            url: db.thumbnailUrl(next.id),
             headers: db.authHeaders,
-            localPath: local,
+          ),
+          context,
+        );
+      }
+      if (index - i >= 0) {
+        final prev = nodes[index - i];
+        precacheImage(
+          LdRemoteImage.provider(
+            url: db.thumbnailUrl(prev.id),
+            headers: db.authHeaders,
           ),
           context,
         );
       }
     }
 
-    // Precache 5 previous images
-    for (var i = 1; i <= 5; i++) {
-      if (index - i >= 0) {
-        final prev = nodes[index - i];
-        final local =
-            ref.read(offlineLocalPathProvider(prev.id)).valueOrNull ?? '';
-        precacheImage(
-          LdRemoteImage.provider(
-            url: db.downloadUrl(prev.id, inline: true),
-            headers: db.authHeaders,
-            localPath: local,
-          ),
-          context,
-        );
-      }
+    // 2. Precache full image ONLY for immediate +1 and -1 (prevents network choke)
+    if (index + 1 < nodes.length) {
+      final next = nodes[index + 1];
+      final local =
+          ref.read(offlineLocalPathProvider(next.id)).valueOrNull ?? '';
+      precacheImage(
+        LdRemoteImage.provider(
+          url: db.downloadUrl(next.id, inline: true),
+          headers: db.authHeaders,
+          localPath: local,
+        ),
+        context,
+      );
+    }
+    if (index - 1 >= 0) {
+      final prev = nodes[index - 1];
+      final local =
+          ref.read(offlineLocalPathProvider(prev.id)).valueOrNull ?? '';
+      precacheImage(
+        LdRemoteImage.provider(
+          url: db.downloadUrl(prev.id, inline: true),
+          headers: db.authHeaders,
+          localPath: local,
+        ),
+        context,
+      );
     }
   }
 
@@ -95,42 +113,52 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
         defaultTargetPlatform == TargetPlatform.android ||
         defaultTargetPlatform == TargetPlatform.iOS;
 
+    final singleNode = ref.watch(nodeProvider(widget.nodeId)).valueOrNull;
+    final nodes = gallery.valueOrNull ?? const <NodeModel>[];
+    final effectiveNodes = (nodes.any((n) => n.id == widget.nodeId))
+        ? nodes
+        : (singleNode != null
+            ? <NodeModel>[singleNode, ...nodes]
+            : (nodes.isNotEmpty
+                ? nodes
+                : <NodeModel>[
+                    NodeModel(
+                      id: widget.nodeId,
+                      name: '',
+                      isFolder: false,
+                      category: FileCategory.image,
+                      libraryId: '',
+                    ),
+                  ]));
+
+    if (effectiveNodes.isEmpty) {
+      return Theme(
+        data: darkTheme,
+        child: const Scaffold(
+          backgroundColor: Colors.black,
+          body: Center(child: LdSpinner(size: 34)),
+        ),
+      );
+    }
+
+    final start = effectiveNodes.indexWhere((n) => n.id == widget.nodeId);
+    if (_controller == null) {
+      final initial = start < 0 ? 0 : start;
+      _controller = PageController(initialPage: initial);
+      _index = initial;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _precacheAdjacent(effectiveNodes, initial);
+      });
+    }
+
+    final current = effectiveNodes[_index.clamp(0, effectiveNodes.length - 1)];
+    final l10n = L10n.of(context);
+
     return Theme(
       data: darkTheme,
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: LdAsync<List<NodeModel>>(
-          value: gallery,
-          errorCopy: LdFormat.errorCopy(context),
-          onRetry: () => ref.invalidate(galleryProvider),
-          loading: const Center(child: LdSpinner(size: 34)),
-          data: (nodes) {
-            final singleNode =
-                ref.watch(nodeProvider(widget.nodeId)).valueOrNull;
-            final effectiveNodes = (nodes.any((n) => n.id == widget.nodeId))
-                ? nodes
-                : (singleNode != null
-                    ? <NodeModel>[singleNode, ...nodes]
-                    : nodes);
-
-            if (effectiveNodes.isEmpty) return const SizedBox.shrink();
-
-            final start =
-                effectiveNodes.indexWhere((n) => n.id == widget.nodeId);
-            if (_controller == null) {
-              final initial = start < 0 ? 0 : start;
-              _controller = PageController(initialPage: initial);
-              _index = initial;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) _precacheAdjacent(effectiveNodes, initial);
-              });
-            }
-
-            final current =
-                effectiveNodes[_index.clamp(0, effectiveNodes.length - 1)];
-            final l10n = L10n.of(context);
-
-            return CallbackShortcuts(
+        body: CallbackShortcuts(
               bindings: <ShortcutActivator, VoidCallback>{
                 const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
                   if (_index > 0) {
@@ -235,11 +263,9 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
                   ],
                 ),
               ),
-            );
-          },
-        ),
-      ),
-    );
+            ),
+          ),
+        );
   }
 }
 
@@ -302,8 +328,22 @@ class _PagesState extends ConsumerState<_Pages> {
         backgroundDecoration: const BoxDecoration(
           color: Colors.black,
         ),
-        loadingBuilder: (context, event) =>
-            const Center(child: LdSpinner(size: 34)),
+        loadingBuilder: (context, event) {
+          final node = widget.nodes[widget.currentIndex.clamp(0, widget.nodes.length - 1)];
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              Image(
+                image: LdRemoteImage.provider(
+                  url: db.thumbnailUrl(node.id),
+                  headers: db.authHeaders,
+                ),
+                fit: BoxFit.contain,
+              ),
+              const Center(child: LdSpinner(size: 28)),
+            ],
+          );
+        },
         builder: (context, index) {
           final node = widget.nodes[index];
           final local =

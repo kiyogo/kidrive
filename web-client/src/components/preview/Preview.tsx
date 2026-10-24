@@ -79,33 +79,57 @@ export function Preview({
   const online = useOnline();
   const unreachable = !online && !local;
 
-  // Preload 5 images before and 5 images after immediately to eliminate loading lag
+  // Hierarchical lookahead:
+  // 1) Immediately preload thumbnails for +/- 5 items (only ~25KB each, loads in 15ms without network congestion)
+  // 2) Preload full images ONLY for immediate next (+1) and previous (-1) with low priority after a short delay
   useEffect(() => {
     if (!nodes || currentIndex < 0) return;
-    const targets: number[] = [];
+
+    // Preload thumbnails for 5 items before and 5 items after
     for (let offset = 1; offset <= 5; offset++) {
-      if (currentIndex + offset < nodes.length) {
-        targets.push(currentIndex + offset);
+      const nextIdx = currentIndex + offset;
+      if (nextIdx < nodes.length) {
+        const nextNode = nodes[nextIdx];
+        if (nextNode && categoryOf(nextNode) === "image") {
+          const thumb = new Image();
+          (thumb as any).fetchPriority = "low";
+          thumb.decoding = "async";
+          thumb.src = api.media(Api.thumbnail(nextNode.id));
+        }
       }
-      if (currentIndex - offset >= 0) {
-        targets.push(currentIndex - offset);
+      const prevIdx = currentIndex - offset;
+      if (prevIdx >= 0) {
+        const prevNode = nodes[prevIdx];
+        if (prevNode && categoryOf(prevNode) === "image") {
+          const thumb = new Image();
+          (thumb as any).fetchPriority = "low";
+          thumb.decoding = "async";
+          thumb.src = api.media(Api.thumbnail(prevNode.id));
+        }
       }
     }
-    for (const i of targets) {
-      const targetNode = nodes[i];
-      if (!targetNode) continue;
-      const targetCat = categoryOf(targetNode);
-      if (targetCat === "image") {
+
+    // Preload full image ONLY for immediate neighbors (+1 and -1) with low priority after 200ms
+    const timer = setTimeout(() => {
+      const neighbors = [currentIndex + 1, currentIndex - 1].filter(
+        (idx) => idx >= 0 && idx < nodes.length,
+      );
+      for (const idx of neighbors) {
+        const targetNode = nodes[idx];
+        if (!targetNode || categoryOf(targetNode) !== "image") continue;
         const fullSrc = api.media(`${Api.download(targetNode.id)}?inline=1`);
+        if (loadedImagesCache.has(fullSrc)) continue;
         const img = new Image();
+        (img as any).fetchPriority = "low";
+        img.decoding = "async";
         img.src = fullSrc;
         img.onload = () => {
           loadedImagesCache.add(fullSrc);
         };
-        const thumb = new Image();
-        thumb.src = api.media(Api.thumbnail(targetNode.id));
       }
-    }
+    }, 200);
+
+    return () => clearTimeout(timer);
   }, [nodes, currentIndex]);
 
   // Eagerly check and mark current image as loaded
@@ -1339,6 +1363,7 @@ function InteractiveImage({
   const clickTimer = useRef<NodeJS.Timeout | null>(null);
   const lastTapTime = useRef(0);
   const lastTapPos = useRef({ x: 0, y: 0 });
+  const rafRef = useRef<number | null>(null);
 
   // Reset zoom, check cache, and trigger smooth horizontal sliding transition when navigating
   useEffect(() => {
@@ -1377,10 +1402,11 @@ function InteractiveImage({
     }
   }, [src, initialWidth, initialHeight, slideDirection]);
 
-  // Clean up timer on unmount
+  // Clean up timer and RAF on unmount
   useEffect(() => {
     return () => {
       if (clickTimer.current) clearTimeout(clickTimer.current);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, []);
 
@@ -1591,24 +1617,30 @@ function InteractiveImage({
       const ratio = dist / pinchStartDist.current;
       const newScale = Math.min(Math.max(MIN_SCALE, pinchStartScale.current * ratio), MAX_SCALE);
       didMove.current = true;
-      if (newScale <= 1.0) {
-        setView({ scale: newScale, x: 0, y: 0 });
-      } else {
-        const clamped = clampPosition(viewRef.current.x, viewRef.current.y, newScale);
-        setView({ scale: newScale, x: clamped.x, y: clamped.y });
-      }
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        if (newScale <= 1.0) {
+          setView({ scale: newScale, x: 0, y: 0 });
+        } else {
+          const clamped = clampPosition(viewRef.current.x, viewRef.current.y, newScale);
+          setView({ scale: newScale, x: clamped.x, y: clamped.y });
+        }
+      });
     } else if (e.touches.length === 1 && viewRef.current.scale > 1.0) {
       const dx = e.touches[0].clientX - dragStart.current.x;
       const dy = e.touches[0].clientY - dragStart.current.y;
       if (Math.hypot(dx, dy) > 5) {
         didMove.current = true;
       }
-      const clamped = clampPosition(
-        startPos.current.x + dx,
-        startPos.current.y + dy,
-        viewRef.current.scale,
-      );
-      setView((v) => ({ ...v, x: clamped.x, y: clamped.y }));
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        const clamped = clampPosition(
+          startPos.current.x + dx,
+          startPos.current.y + dy,
+          viewRef.current.scale,
+        );
+        setView((v) => ({ ...v, x: clamped.x, y: clamped.y }));
+      });
     } else if (e.touches.length === 1 && viewRef.current.scale <= 1.01) {
       const dx = e.touches[0].clientX - dragStart.current.x;
       const dy = e.touches[0].clientY - dragStart.current.y;
@@ -1621,6 +1653,10 @@ function InteractiveImage({
   };
 
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
     if (isPinching.current && e.touches.length < 2) {
       isPinching.current = false;
       if (viewRef.current.scale <= 1.0) {
@@ -1698,15 +1734,22 @@ function InteractiveImage({
     if (Math.hypot(dx, dy) > 3) {
       didMove.current = true;
     }
-    const clamped = clampPosition(
-      startPos.current.x + dx,
-      startPos.current.y + dy,
-      viewRef.current.scale,
-    );
-    setView((v) => ({ ...v, x: clamped.x, y: clamped.y }));
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      const clamped = clampPosition(
+        startPos.current.x + dx,
+        startPos.current.y + dy,
+        viewRef.current.scale,
+      );
+      setView((v) => ({ ...v, x: clamped.x, y: clamped.y }));
+    });
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
     if (isDragging.current) {
       isDragging.current = false;
       try {
@@ -1743,31 +1786,39 @@ function InteractiveImage({
     >
       <style>{`
         @keyframes previewSlideFromRight {
-          0% { transform: translate3d(85px, 0, 0); opacity: 0.85; }
+          0% { transform: translate3d(75px, 0, 0); opacity: 0.88; }
           100% { transform: translate3d(0, 0, 0); opacity: 1; }
         }
         @keyframes previewSlideFromLeft {
-          0% { transform: translate3d(-85px, 0, 0); opacity: 0.85; }
+          0% { transform: translate3d(-75px, 0, 0); opacity: 0.88; }
           100% { transform: translate3d(0, 0, 0); opacity: 1; }
         }
       `}</style>
       <div
-        key={src}
         style={{
           position: "absolute",
           inset: 0,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          transform: `translate3d(${view.x + slideOffset}px, ${view.y}px, 0) scale(${view.scale})`,
+          transformOrigin: "center center",
+          willChange: "transform",
+          backfaceVisibility: "hidden",
+          WebkitBackfaceVisibility: "hidden",
+          contain: "paint layout",
+          transition: isDragging.current || isPinching.current || isSliding
+            ? "none"
+            : "transform 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
           animation:
             slideDirection === "next"
-              ? "previewSlideFromRight 0.3s cubic-bezier(0.16, 1, 0.3, 1)"
+              ? "previewSlideFromRight 0.28s cubic-bezier(0.16, 1, 0.3, 1)"
               : slideDirection === "prev"
-              ? "previewSlideFromLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1)"
+              ? "previewSlideFromLeft 0.28s cubic-bezier(0.16, 1, 0.3, 1)"
               : "none",
         }}
       >
-        {thumbSrc && !fullLoaded && (
+        {thumbSrc && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={thumbSrc}
@@ -1781,18 +1832,19 @@ function InteractiveImage({
               maxWidth: "100%",
               maxHeight: "100%",
               objectFit: "contain",
-              opacity: 0.85,
-              transform: `translate3d(${view.x + slideOffset}px, ${view.y}px, 0) scale(${view.scale})`,
-              transformOrigin: "center center",
+              opacity: fullLoaded ? 0 : 0.95,
               pointerEvents: "none",
-              transition: isDragging.current || isPinching.current
-                ? "none"
-                : "transform 0.28s cubic-bezier(0.16, 1, 0.3, 1)",
+              userSelect: "none",
+              willChange: "opacity",
+              transition: "opacity 0.22s ease-out",
+              backfaceVisibility: "hidden",
+              WebkitBackfaceVisibility: "hidden",
             }}
           />
         )}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
+          key={src}
           src={src}
           alt={alt}
           draggable={false}
@@ -1813,22 +1865,19 @@ function InteractiveImage({
             }
           }}
           style={{
+            position: "relative",
             width: "100%",
             height: "100%",
             maxWidth: "100%",
             maxHeight: "100%",
             objectFit: "contain",
-            transform: `translate3d(${view.x + slideOffset}px, ${view.y}px, 0) scale(${view.scale})`,
-            transformOrigin: "center center",
-            willChange: "transform",
-            backfaceVisibility: "hidden",
-            WebkitBackfaceVisibility: "hidden",
             opacity: fullLoaded ? 1 : 0,
-            transition: isDragging.current || isPinching.current
-              ? "none"
-              : "transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease-in-out",
+            transition: "opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1)",
             userSelect: "none",
             pointerEvents: "auto",
+            willChange: "opacity",
+            backfaceVisibility: "hidden",
+            WebkitBackfaceVisibility: "hidden",
           }}
         />
       </div>

@@ -24,7 +24,7 @@ export function SearchScreen({
 }: {
   onBack: () => void;
   onOpenFolder: (node: NodeModel) => void;
-  onPreview: (node: NodeModel) => void;
+  onPreview: (node: NodeModel, nodes?: NodeModel[]) => void;
 }) {
   const t = useL10n();
   const [term, setTerm] = useState("");
@@ -183,7 +183,7 @@ function SearchResultsList({
 }: {
   results: NodeModel[];
   onOpenFolder: (node: NodeModel) => void;
-  onPreview: (node: NodeModel) => void;
+  onPreview: (node: NodeModel, nodes?: NodeModel[]) => void;
   Sentinel: React.ComponentType;
 }) {
   return (
@@ -195,7 +195,7 @@ function SearchResultsList({
         return (
           <Tappable
             key={node.id}
-            onClick={() => (folder ? onOpenFolder(node) : onPreview(node))}
+            onClick={() => (folder ? onOpenFolder(node) : onPreview(node, results.filter((r) => !isFolder(r))))}
             radius={14}
             style={{
               display: "flex",

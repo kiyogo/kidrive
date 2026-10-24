@@ -439,7 +439,7 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
             setSection("files");
             window.history.pushState(null, "", getCleanUrl(node.id));
           }}
-          onPreview={(n) => openPreview(n)}
+          onPreview={(n, list) => openPreview(n, list)}
         />
       ) : section in filterFor ? (
         <FilesBrowser
