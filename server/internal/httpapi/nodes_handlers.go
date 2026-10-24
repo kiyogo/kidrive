@@ -706,7 +706,7 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 							}
 						} else {
 							switch ext {
-							case ".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v", ".3gp", ".ts", ".m2ts", ".mts", ".vob", ".ogv", ".rmvb", ".rm", ".asf", ".divx":
+							case ".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v", ".3gp", ".m2ts", ".mts", ".vob", ".ogv", ".rmvb", ".rm", ".asf", ".divx":
 								matchedCategory = "video"
 								mimeType = mime.TypeByExtension(ext)
 								if mimeType == "" {

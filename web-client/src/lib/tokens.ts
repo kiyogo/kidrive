@@ -129,11 +129,14 @@ export type FileCategory =
   | "archive"
   | "other";
 
-export function categoryFor(mimeType: string, isFolder = false): FileCategory {
+export function categoryFor(mimeType: string, isFolder = false, name = ""): FileCategory {
   if (isFolder) return "folder";
+  const lowerName = (name || "").toLowerCase();
+  if (lowerName.endsWith(".ts") || lowerName.endsWith(".tsx")) return "code";
   const m = (mimeType || "").toLowerCase();
+  if (m.includes("typescript")) return "code";
   if (m.startsWith("image/")) return "image";
-  if (m.startsWith("video/")) return "video";
+  if (m.startsWith("video/") && !m.includes("mp2t")) return "video";
   if (m.startsWith("audio/")) return "audio";
   if (m.includes("pdf")) return "pdf";
   if (m.includes("spreadsheet") || m.includes("excel") || m.includes("csv"))

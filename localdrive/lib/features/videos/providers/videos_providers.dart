@@ -78,6 +78,10 @@ final videosProvider = FutureProvider.autoDispose<List<NodeModel>>((ref) async {
         descending: sort.descending,
         limit: 100000,
       );
-  videosMemoryCache = list;
-  return list;
+  final filtered = list.where((n) {
+    final name = n.name.toLowerCase();
+    return !name.endsWith('.ts') && !name.endsWith('.tsx');
+  }).toList();
+  videosMemoryCache = filtered;
+  return filtered;
 });

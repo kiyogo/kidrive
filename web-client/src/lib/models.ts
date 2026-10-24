@@ -36,7 +36,7 @@ export interface NodeOwner {
 export const isFolder = (n: NodeModel) => n.type === "folder";
 
 export function categoryOf(n: NodeModel): FileCategory {
-  return categoryFor(n.mime_type, isFolder(n));
+  return categoryFor(n.mime_type, isFolder(n), n.name);
 }
 
 /** One row of the shareable people directory. Deliberately thin: it is

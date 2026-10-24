@@ -130,7 +130,7 @@ class _SizeSlider extends StatelessWidget {
   final int columns;
   final ValueChanged<int> onChanged;
 
-  static const List<int> steps = <int>[3, 4, 5];
+  static const List<int> steps = <int>[3, 4, 5, 6, 8];
 
   @override
   Widget build(BuildContext context) {
@@ -164,7 +164,7 @@ class _SizeSlider extends StatelessWidget {
                   child: CustomPaint(
                     size: const Size.square(13),
                     painter: _GridGlyph(
-                      cells: step >= 5 ? 3 : 2,
+                      cells: step >= 8 ? 4 : step >= 5 ? 3 : 2,
                       color: step == columns
                           ? context.surfaces.foregroundPrimary
                           : context.surfaces.foregroundSecondary,

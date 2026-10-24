@@ -20,12 +20,13 @@ export interface UseInfiniteListOptions<T> {
   getItemKey?: (item: T) => string;
   deps?: unknown[];
   enabled?: boolean;
+  autoLoadUntilComplete?: boolean;
 }
 
 /**
  * Universal Infinite Scroll Hook
- * - Server-side pagination with batching (30-50 items)
- * - Automatic background prefetching with IntersectionObserver (rootMargin: 300px)
+ * - Server-side pagination with batching (50-100 items)
+ * - Automatic background prefetching until all items are loaded
  * - Fallback scroll listener for high-speed scrolling
  * - AbortController request cancellation on filter/query/sort/dep change
  * - Strict key deduplication
@@ -33,10 +34,11 @@ export interface UseInfiniteListOptions<T> {
  */
 export function useInfiniteList<T>({
   fetchPage,
-  pageSize = 40,
+  pageSize = 50,
   getItemKey = (item: T) => (item as any)?.id ?? String(item),
   deps = [],
   enabled = true,
+  autoLoadUntilComplete = true,
 }: UseInfiniteListOptions<T>) {
   const [items, setItems] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
@@ -135,11 +137,18 @@ export function useInfiniteList<T>({
             } else {
               setLoadingMore(false);
             }
+            if (autoLoadUntilComplete && hasMoreRef.current) {
+              setTimeout(() => {
+                if (hasMoreRef.current && !isFetchingRef.current && !controller.signal.aborted) {
+                  void loadBatch(false);
+                }
+              }, 120);
+            }
           }
         }
       }
     },
-    [enabled, pageSize],
+    [enabled, pageSize, autoLoadUntilComplete],
   );
 
   // Reload triggered from outside

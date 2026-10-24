@@ -19,7 +19,7 @@ import {
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
 import { bytes } from "@/lib/format";
-import type { NodeModel } from "@/lib/models";
+import { categoryOf, type NodeModel } from "@/lib/models";
 import { useUploader } from "@/lib/uploads";
 import { ShareSheet } from "@/components/share/ShareSheet";
 import { useInfiniteList } from "@/lib/useInfiniteList";
@@ -64,7 +64,7 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
       const saved = localStorage.getItem("ld.videos.columns");
       if (saved) {
         const parsed = parseInt(saved, 10);
-        if ([3, 4, 5].includes(parsed)) {
+        if ([3, 4, 5, 6, 8].includes(parsed)) {
           setColumns(parsed);
         }
       }
@@ -92,7 +92,7 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
     reload: load,
     Sentinel,
   } = useInfiniteList<NodeModel>({
-    pageSize: 40,
+    pageSize: 100,
     getItemKey: (node) => node.id,
     deps: [sortBy, sortDesc],
     fetchPage: async ({ offset, limit, signal }) => {
@@ -107,11 +107,15 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
         },
         { signal }
       );
-      const vNodes = data?.nodes ?? [];
+      const vNodes = (data?.nodes ?? []).filter((n) => {
+        const name = (n.name || "").toLowerCase();
+        if (name.endsWith(".ts") || name.endsWith(".tsx")) return false;
+        return categoryOf(n) === "video" || n.mime_type?.startsWith("video/");
+      });
       return {
         items: vNodes,
         hasMore: Boolean(data?.has_more ?? (vNodes.length >= limit)),
-        nextOffset: data?.next_offset ?? offset + vNodes.length,
+        nextOffset: data?.next_offset ?? offset + (data?.nodes?.length ?? 0),
       };
     },
   });
@@ -245,7 +249,7 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
           ) : (
             <>
               {isDesktop && (
-                <SizeSlider columns={columns} onChanged={handleColumnsChange} steps={[3, 4, 5]} />
+                <SizeSlider columns={columns} onChanged={handleColumnsChange} steps={[3, 4, 5, 6, 8]} />
               )}
               <div ref={sortBtnRef}>
                 <Button

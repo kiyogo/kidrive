@@ -86,6 +86,10 @@ func CategoryOf(nodeType NodeType, mimeType, name string) FileCategory {
 	if m == "" {
 		m = MimeFromName(name)
 	}
+	ext := strings.ToLower(path.Ext(name))
+	if ext == ".ts" || ext == ".tsx" || m == "text/x-typescript" {
+		return CategoryCode
+	}
 	switch {
 	case m == "application/pdf":
 		return CategoryPDF

@@ -60,7 +60,7 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
     reload: load,
     Sentinel,
   } = useInfiniteList<NodeModel>({
-    pageSize: 50,
+    pageSize: 100,
     getItemKey: (node) => node.id,
     deps: [sortBy, sortDesc],
     fetchPage: async ({ offset, limit, signal }) => {
