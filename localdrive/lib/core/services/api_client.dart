@@ -80,8 +80,10 @@ class ApiClient {
         url = sameOrigin;
         await _store.writeNodeUrl(url);
       } else {
-        // Fallback probe for local backend on port 9683 (desktop and web dev)
-        final localDevServer = await _probeServer('http://localhost:9683') ??
+        // Fallback probe for local backend on port 5437 (and legacy 9683)
+        final localDevServer = await _probeServer('http://localhost:5437') ??
+            await _probeServer('http://127.0.0.1:5437') ??
+            await _probeServer('http://localhost:9683') ??
             await _probeServer('http://127.0.0.1:9683');
         if (localDevServer != null) {
           url = localDevServer;
@@ -189,7 +191,7 @@ class ApiClient {
   /// The one port a Local Drive server serves on, matching the backend's own
   /// default. Not 443, so it does not collide with whatever else is on the
   /// machine someone is hosting from.
-  static const int defaultPort = 9683;
+  static const int defaultPort = 5437;
 
   /// Builds an absolute URL for something an image or a video widget will
   /// fetch itself, such as a thumbnail.

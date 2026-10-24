@@ -158,19 +158,33 @@ func ensureDriveKRegistry(vDrive string) {
 		_ = exec.Command("cmd.exe", "/c", "subst K: /D 2>nul").Run()
 		_ = exec.Command("cmd.exe", "/c", fmt.Sprintf(`subst K: "%s"`, targetFolder)).Run()
 
-		// 4. Set DriveIcons\K label to "KiDrive"
-		kKey, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel`, registry.SET_VALUE)
-		if err == nil {
+		// 4. Set DriveIcons\K label to "KiDrive" (HKCU, HKLM, and Classes)
+		if kKey, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel`, registry.SET_VALUE); err == nil {
 			_ = kKey.SetStringValue("", "KiDrive")
 			kKey.Close()
+		}
+		if kKeyLM, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel`, registry.SET_VALUE); err == nil {
+			_ = kKeyLM.SetStringValue("", "KiDrive")
+			kKeyLM.Close()
+		}
+		if kKeyCls, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultLabel`, registry.SET_VALUE); err == nil {
+			_ = kKeyCls.SetStringValue("", "KiDrive")
+			kKeyCls.Close()
 		}
 
 		iconPath := findAppIcon(targetFolder)
 		if iconPath != "" {
-			iKey, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon`, registry.SET_VALUE)
-			if err == nil {
+			if iKey, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon`, registry.SET_VALUE); err == nil {
 				_ = iKey.SetStringValue("", iconPath+",0")
 				iKey.Close()
+			}
+			if iKeyLM, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon`, registry.SET_VALUE); err == nil {
+				_ = iKeyLM.SetStringValue("", iconPath+",0")
+				iKeyLM.Close()
+			}
+			if iKeyCls, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultIcon`, registry.SET_VALUE); err == nil {
+				_ = iKeyCls.SetStringValue("", iconPath+",0")
+				iKeyCls.Close()
 			}
 
 			dstIco := filepath.Join(targetFolder, "app_icon.ico")

@@ -1,5 +1,6 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
+set(CMAKE_VS_MSBUILD_COMMAND "C:/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe" CACHE FILEPATH "Use 32-bit MSBuild" FORCE)
 set(CMAKE_SYSTEM_VERSION "10.0.26100.0" CACHE STRING "Target Windows SDK Version" FORCE)
 project(localdrive LANGUAGES CXX)
 

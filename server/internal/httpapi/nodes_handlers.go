@@ -522,6 +522,9 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 					return c, nil
 				}
 
+				scanCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+
 				type scanTarget struct {
 					canonical string
 					mount     string
@@ -543,7 +546,7 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 				}
 
 				// 1. Quét toàn bộ các tập dữ liệu (datasets) trong CSDL mà tài khoản có quyền truy cập
-				dRows, err := a.db.Read().QueryContext(r.Context(),
+				dRows, err := a.db.Read().QueryContext(scanCtx,
 					`SELECT name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY name ASC`)
 				if err == nil {
 					defer dRows.Close()
@@ -563,7 +566,7 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 				}
 
 				// 2. Quét toàn bộ các mảng lưu trữ (storage_pools) mà tài khoản có quyền
-				pRows, err := a.db.Read().QueryContext(r.Context(), `SELECT name FROM storage_pools WHERE status != 'deleted'`)
+				pRows, err := a.db.Read().QueryContext(scanCtx, `SELECT name FROM storage_pools WHERE status != 'deleted'`)
 				if err == nil {
 					defer pRows.Close()
 					for pRows.Next() {
@@ -607,7 +610,7 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 					if accessErr != nil {
 						continue
 					}
-					canonical, _, _, mount, err := a.resolveDatasetTarget(r.Context(), "dataset:"+root)
+					canonical, _, _, mount, err := a.resolveDatasetTarget(scanCtx, "dataset:"+root)
 					if err == nil && mount != "" {
 						addMountTarget(canonical, mount, role)
 					}
@@ -625,6 +628,45 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
+
+				// 6. Quét các thư mục chia sẻ mạng (network_shares) trong CSDL
+				sRows, sErr := a.db.Read().QueryContext(scanCtx, `SELECT name, path FROM network_shares WHERE status != 'deleted'`)
+				if sErr == nil {
+					defer sRows.Close()
+					for sRows.Next() {
+						var sName, sPath string
+						if sRows.Scan(&sName, &sPath) == nil {
+							role, accessErr := a.checkDatasetAccess(r, sName, false)
+							if accessErr == nil {
+								realP := a.resolveRealMountPath(sName, sPath)
+								if realP != "" {
+									addMountTarget(sName, realP, role)
+								}
+							}
+						}
+					}
+				}
+
+				// Tối ưu hóa: Loại bỏ các target con nếu target cha đã có trong danh sách
+				sort.Slice(targets, func(i, j int) bool {
+					return len(targets[i].mount) < len(targets[j].mount)
+				})
+				var uniqueTargets []scanTarget
+				for _, t := range targets {
+					tNorm := strings.ToLower(filepath.Clean(t.mount))
+					isSub := false
+					for _, u := range uniqueTargets {
+						uNorm := strings.ToLower(filepath.Clean(u.mount))
+						if tNorm == uNorm || strings.HasPrefix(tNorm, uNorm+string(filepath.Separator)) {
+							isSub = true
+							break
+						}
+					}
+					if !isSub {
+						uniqueTargets = append(uniqueTargets, t)
+					}
+				}
+				targets = uniqueTargets
 
 				var scannedNodes []nodeDTO
 				seenFiles := make(map[string]bool)
@@ -705,7 +747,7 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 				}
 
 				// Kết hợp với các tệp có sẵn trong SQLite database
-				dbList, dbErr := a.files.List(r.Context(), userID, files.ListOptions{
+				dbList, dbErr := a.files.List(scanCtx, userID, files.ListOptions{
 					Filter: opts.Filter,
 					Limit:  100000,
 				})

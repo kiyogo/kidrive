@@ -54,6 +54,8 @@ class KiyoDriveSettingsGroup extends HookWidget {
         cmd.exe /c "subst K: /D 2>nul"
         cmd.exe /c "subst K: `"\$target`""
         cmd.exe /c 'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\K\\DefaultLabel" /ve /t REG_SZ /d "KiDrive" /f 2>nul'
+        cmd.exe /c 'reg add "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\K\\DefaultLabel" /ve /t REG_SZ /d "KiDrive" /f 2>nul'
+        cmd.exe /c 'reg add "HKCU\\Software\\Classes\\Applications\\Explorer.exe\\DriveIcons\\K\\DefaultLabel" /ve /t REG_SZ /d "KiDrive" /f 2>nul'
 
         # Tim app_icon.ico
         \$appData = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::LocalApplicationData)
@@ -77,6 +79,8 @@ class KiyoDriveSettingsGroup extends HookWidget {
           }
           cmd.exe /c "attrib +h `"\$targetIco`" 2>nul"
           cmd.exe /c "reg add `"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\K\\DefaultIcon`" /ve /t REG_SZ /d `"\$foundIcon,0`" /f 2>nul"
+          cmd.exe /c "reg add `"HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\K\\DefaultIcon`" /ve /t REG_SZ /d `"\$foundIcon,0`" /f 2>nul"
+          cmd.exe /c "reg add `"HKCU\\Software\\Classes\\Applications\\Explorer.exe\\DriveIcons\\K\\DefaultIcon`" /ve /t REG_SZ /d `"\$foundIcon,0`" /f 2>nul"
 
           \$autorun = Join-Path \$target "autorun.inf"
           "[autorun]`r`nicon=app_icon.ico,0`r`nlabel=KiDrive`r`n" | Set-Content -Path \$autorun -Encoding ASCII -Force
