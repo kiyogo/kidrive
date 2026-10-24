@@ -133,7 +133,7 @@ func CategoryOf(nodeType NodeType, mimeType, name string) FileCategory {
 // only offering a download.
 func Previewable(category FileCategory) bool {
 	switch category {
-	case CategoryImage, CategoryVideo, CategoryAudio, CategoryPDF, CategoryText, CategoryCode:
+	case CategoryImage, CategoryVideo, CategoryAudio, CategoryPDF, CategoryText, CategoryCode, CategoryDocument, CategorySpreadsheet, CategoryPresentation:
 		return true
 	default:
 		return false

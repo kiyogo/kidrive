@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -2173,6 +2174,21 @@ func (a *API) checkDatasetAccess(r *http.Request, datasetName string, needEditor
 	return "viewer", nil
 }
 
+// isDirWritable tests whether a directory is physically writable (not read-only filesystem / EROFS).
+func isDirWritable(dir string) bool {
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return false
+	}
+	testFile := filepath.Join(dir, fmt.Sprintf(".ld_writable_probe_%d", time.Now().UnixNano()))
+	f, err := os.OpenFile(testFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	_ = os.Remove(testFile)
+	return true
+}
+
 func (a *API) resolveRealMountPath(name, mount string) string {
 	trimmedName := strings.Trim(strings.TrimSpace(name), "/")
 
@@ -2181,24 +2197,24 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 		for _, tryName := range []string{trimmedName, strings.ToUpper(trimmedName), strings.ToLower(trimmedName)} {
 			if out, err := exec.Command("zfs", "get", "-H", "-o", "value", "mountpoint", tryName).Output(); err == nil {
 				mp := strings.TrimSpace(string(out))
-				if mp != "" && mp != "none" && mp != "legacy" {
-					if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
+				if mp != "" && mp != "none" && mp != "legacy" && !strings.Contains(mp, "zfs-recovery") {
+					if isDirWritable(mp) {
 						return mp
 					}
 					_ = exec.Command("zfs", "mount", tryName).Run()
-					if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
+					if isDirWritable(mp) {
 						return mp
 					}
 				}
 			}
 			if out, err := exec.Command("zfs", "list", "-H", "-o", "mountpoint", tryName).Output(); err == nil {
 				mp := strings.TrimSpace(string(out))
-				if mp != "" && mp != "none" && mp != "legacy" {
-					if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
+				if mp != "" && mp != "none" && mp != "legacy" && !strings.Contains(mp, "zfs-recovery") {
+					if isDirWritable(mp) {
 						return mp
 					}
 					_ = exec.Command("zfs", "mount", tryName).Run()
-					if fi, err := os.Stat(mp); err == nil && fi.IsDir() {
+					if isDirWritable(mp) {
 						return mp
 					}
 				}
@@ -2206,29 +2222,54 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 		}
 	}
 
-	// 2. Kiểm tra mount truyền vào
 	cleanMount := filepath.Clean(mount)
+
+	// Danh sách các ứng viên mount thực tế
+	candidateSet := []string{
+		filepath.Join("/mnt", trimmedName),
+		"/" + trimmedName,
+	}
+	// Nếu cleanMount có /mnt/zfs-recovery/, thử chuyển thành /mnt/ hoặc /
+	if strings.Contains(cleanMount, "zfs-recovery") {
+		cleanStripped := strings.ReplaceAll(cleanMount, "/mnt/zfs-recovery/", "/mnt/")
+		candidateSet = append(candidateSet, cleanStripped)
+		candidateSet = append(candidateSet, strings.ReplaceAll(cleanMount, "/mnt/zfs-recovery/", "/"))
+	}
+	if cleanMount != "" && cleanMount != "/" && cleanMount != "." && !strings.Contains(cleanMount, "zfs-recovery") {
+		candidateSet = append([]string{cleanMount}, candidateSet...)
+	}
+
+	// 2. Ưu tiên tuyệt đối thư mục TỒN TẠI và CÓ QUYỀN GHI (không bị read-only filesystem)
+	for _, c := range candidateSet {
+		if c != "" && c != "/" && c != "." {
+			if isDirWritable(c) {
+				return c
+			}
+		}
+	}
+
+	// 3. Nếu chưa probe ghi được, ưu tiên thư mục tồn tại KHÔNG chứa zfs-recovery
+	for _, c := range candidateSet {
+		if c != "" && c != "/" && c != "." && !strings.Contains(c, "zfs-recovery") {
+			if fi, err := os.Stat(c); err == nil && fi.IsDir() {
+				return c
+			}
+		}
+	}
+
+	// 4. Nếu có zfs-recovery và là đường dẫn duy nhất còn lại
 	if cleanMount != "" && cleanMount != "/" && cleanMount != "." {
 		if fi, err := os.Stat(cleanMount); err == nil && fi.IsDir() {
 			return cleanMount
 		}
 	}
-
-	// 3. Kiểm tra các thư mục mount thông dụng của TrueNAS / ZFS
-	candidates := []string{
-		filepath.Join("/mnt", trimmedName),
-		"/" + trimmedName,
-		filepath.Join("/mnt/zfs-recovery", trimmedName),
+	recPath := filepath.Join("/mnt/zfs-recovery", trimmedName)
+	if fi, err := os.Stat(recPath); err == nil && fi.IsDir() {
+		return recPath
 	}
 
-	for _, c := range candidates {
-		if fi, err := os.Stat(c); err == nil && fi.IsDir() {
-			return c
-		}
-	}
-
-	// 4. Dự phòng nếu chưa được mount vật lý
-	if cleanMount != "" && cleanMount != "." && cleanMount != "/" {
+	// 5. Dự phòng nếu chưa được mount vật lý
+	if cleanMount != "" && cleanMount != "." && cleanMount != "/" && !strings.Contains(cleanMount, "zfs-recovery") {
 		return cleanMount
 	}
 	if trimmedName != "" {
@@ -2427,9 +2468,27 @@ func (a *API) handleCreateDatasetFolder(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := os.MkdirAll(cleanTarget, 0755); err != nil {
-		a.log.Error("mkdir failed", "path", cleanTarget, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("Không thể tạo thư mục vật lý (%s): %v", folderName, err)})
-		return
+		// Nếu bị read-only file system hoặc mount chứa zfs-recovery, tự động chuyển sang mount point ghi được
+		if strings.Contains(strings.ToLower(err.Error()), "read-only") || strings.Contains(mount, "zfs-recovery") {
+			altMount := a.resolveRealMountPath(dsName, "")
+			if altMount != "" && altMount != mount && !strings.Contains(altMount, "zfs-recovery") {
+				altTarget := filepath.Clean(filepath.Join(altMount, subpath, folderName))
+				if retryErr := os.MkdirAll(altTarget, 0755); retryErr == nil {
+					mount = altMount
+					cleanTarget = altTarget
+					_ = a.db.Write(r.Context(), func(c context.Context, tx *sql.Tx) error {
+						_, _ = tx.ExecContext(c, `UPDATE datasets SET mount = ? WHERE name = ?`, altMount, dsName)
+						return nil
+					})
+					err = nil
+				}
+			}
+		}
+		if err != nil {
+			a.log.Error("mkdir failed", "path", cleanTarget, "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("Không thể tạo thư mục vật lý (%s): %v", folderName, err)})
+			return
+		}
 	}
 
 	now := db.NowMillis()

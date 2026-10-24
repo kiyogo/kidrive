@@ -26,38 +26,31 @@ class KiyoDriveSettingsGroup extends HookWidget {
 
   static bool checkExists() {
     if (!isAvailable()) return false;
-    final shortcutDir = _networkShortcutPath;
-    if (shortcutDir.isEmpty) return false;
-    final lnk = File(p.join(shortcutDir, 'target.lnk'));
-    final ini = File(p.join(shortcutDir, 'desktop.ini'));
-    return lnk.existsSync() && ini.existsSync();
+    try {
+      return Directory('K:\\').existsSync();
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<void> setDriveVisible(bool visible) async {
     if (!isAvailable()) return;
     final kd = _networkShortcutPath;
     final target = _localDriveFolder;
-    if (kd.isEmpty) return;
 
     if (visible) {
       final script = '''
-        \$kd = '$kd';
         \$target = '$target';
+        \$kd = '$kd';
         if (-not (Test-Path \$target)) { New-Item -ItemType Directory -Path \$target -Force | Out-Null }
-        if (-not (Test-Path \$kd)) { New-Item -ItemType Directory -Path \$kd -Force | Out-Null }
-        cmd.exe /c "attrib -h -s -r `"\$kd\\*.*`" 2>nul"
-        cmd.exe /c "attrib -r `"\$kd`" 2>nul"
-        \$ini = Join-Path \$kd 'desktop.ini';
-        \$lines = @('[.ShellClassInfo]', 'CLSID2={0AFACED1-E828-11D1-9187-B532F1E9575D}', 'Flags=2', 'ConfirmFileOp=0');
-        [IO.File]::WriteAllText(\$ini, (\$lines -join "`r`n") + "`r`n", [Text.Encoding]::ASCII);
-        cmd.exe /c "attrib +h +s `"\$ini`"";
-        cmd.exe /c "attrib +r `"\$kd`"";
-        \$wsh = New-Object -ComObject WScript.Shell;
-        \$sc = \$wsh.CreateShortcut((Join-Path \$kd 'target.lnk'));
-        \$sc.TargetPath = \$target;
-        \$sc.WorkingDirectory = \$target;
-        \$sc.Description = 'KiyoDrive';
-        \$sc.Save();
+        cmd.exe /c "subst K: /D 2>nul"
+        cmd.exe /c "subst K: `"\$target`""
+        cmd.exe /c 'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\K\\DefaultLabel" /ve /t REG_SZ /d "KiyoDrive" /f 2>nul'
+        if (Test-Path \$kd) {
+          cmd.exe /c "attrib -h -s -r `"\$kd\\*.*`" 2>nul"
+          cmd.exe /c "attrib -r `"\$kd`" 2>nul"
+          Remove-Item -Path \$kd -Recurse -Force -ErrorAction SilentlyContinue
+        }
         try {
           Add-Type -MemberDefinition '[DllImport("shell32.dll")] public static extern void SHChangeNotify(int w, uint u, IntPtr d1, IntPtr d2);' -Name 'WinNotify' -Namespace 'ShellUtils' -PassThru | Out-Null;
           [ShellUtils.WinNotify]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero);
@@ -66,6 +59,8 @@ class KiyoDriveSettingsGroup extends HookWidget {
       await Process.run('powershell', ['-NoProfile', '-NonInteractive', '-Command', script]);
     } else {
       final script = '''
+        cmd.exe /c "subst K: /D 2>nul"
+        cmd.exe /c 'reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\K" /f 2>nul'
         \$kd = '$kd';
         if (Test-Path \$kd) {
           cmd.exe /c "attrib -h -s -r `"\$kd\\*.*`" 2>nul"
@@ -88,7 +83,14 @@ class KiyoDriveSettingsGroup extends HookWidget {
     if (!dir.existsSync()) {
       dir.createSync(recursive: true);
     }
-    await Process.run('explorer.exe', [folder]);
+    if (!checkExists()) {
+      await setDriveVisible(true);
+    }
+    if (checkExists()) {
+      await Process.run('explorer.exe', ['K:\\']);
+    } else {
+      await Process.run('explorer.exe', [folder]);
+    }
   }
 
   @override

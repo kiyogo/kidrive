@@ -102,59 +102,55 @@ func findAppIcon(vDrive string) string {
 }
 
 func ensureDriveLRegistry(vDrive string) {
-	// 1. Unmount drive L: from subst and net use so no capacity bar or NTFS appears
+	ensureDriveKRegistry(vDrive)
+}
+
+func ensureDriveKRegistry(vDrive string) {
+	// 1. Unmount legacy drive L:
 	_ = exec.Command("cmd.exe", "/c", "subst L: /D 2>nul").Run()
 	_ = exec.Command("cmd.exe", "/c", "net use L: /delete /y 2>nul").Run()
-
-	// 2. Clean up DriveIcons\L registry if existing
 	_ = registry.DeleteKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\L\DefaultLabel`)
 	_ = registry.DeleteKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\L\DefaultIcon`)
 	_ = registry.DeleteKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\L`)
-	_ = registry.DeleteKey(registry.CURRENT_USER, `Software\Classes\Applications\Explorer.exe\Drives\L\DefaultLabel`)
-	_ = registry.DeleteKey(registry.CURRENT_USER, `Software\Classes\Applications\Explorer.exe\Drives\L\DefaultIcon`)
-	_ = registry.DeleteKey(registry.CURRENT_USER, `Software\Classes\Applications\Explorer.exe\Drives\L`)
 
-	// 3. Ensure clean Network Location: APPDATA\Microsoft\Windows\Network Shortcuts\KiyoDrive
+	// 2. Clean up Network Shortcuts in AppData so Explorer address bar never shows that path
 	roaming := os.Getenv("APPDATA")
-	iconPath := findAppIcon(vDrive)
-	if roaming != "" && iconPath != "" {
+	if roaming != "" {
 		netShortcuts := filepath.Join(roaming, "Microsoft", "Windows", "Network Shortcuts")
-		_ = os.MkdirAll(netShortcuts, 0o755)
-
-		// Remove old named variants
-		for _, oldName := range []string{"Local Drive", "Kiyo Drive"} {
+		for _, oldName := range []string{"KiyoDrive", "Local Drive", "Kiyo Drive"} {
 			oldDir := filepath.Join(netShortcuts, oldName)
 			if _, err := os.Stat(oldDir); err == nil {
 				_ = setFileNormal(oldDir)
 				_ = os.RemoveAll(oldDir)
 			}
 		}
+	}
 
-		kdDir := filepath.Join(netShortcuts, "KiyoDrive")
-		_ = os.MkdirAll(kdDir, 0o755)
+	targetFolder := vDrive
+	if targetFolder == `K:\` || targetFolder == `L:\` || targetFolder == "" {
+		targetFolder = getVirtualDriveFolder()
+	}
 
-		iniPath := filepath.Join(kdDir, "desktop.ini")
-		_ = setFileNormal(iniPath)
-		_ = setFileNormal(kdDir)
+	if targetFolder != "" && targetFolder != `K:\` {
+		// 3. Mount drive K: via subst
+		_ = exec.Command("cmd.exe", "/c", "subst K: /D 2>nul").Run()
+		_ = exec.Command("cmd.exe", "/c", fmt.Sprintf(`subst K: "%s"`, targetFolder)).Run()
 
-		iniContent := fmt.Sprintf("[.ShellClassInfo]\r\nCLSID2={0AFACED1-E828-11D1-9187-B532F1E9575D}\r\nFlags=2\r\nConfirmFileOp=0\r\nIconFile=%s\r\nIconIndex=0\r\nIconResource=%s,0\r\n", iconPath, iconPath)
-		_ = os.WriteFile(iniPath, []byte(iniContent), 0o644)
-
-		_ = setFileHiddenAndSystem(iniPath)
-		_ = setFileReadOnly(kdDir)
-
-		lnkPath := filepath.Join(kdDir, "target.lnk")
-		targetFolder := vDrive
-		if targetFolder == `L:\` || targetFolder == "" {
-			targetFolder = getVirtualDriveFolder()
+		// 4. Set DriveIcons\K label to "KiyoDrive"
+		kKey, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel`, registry.SET_VALUE)
+		if err == nil {
+			_ = kKey.SetStringValue("", "KiyoDrive")
+			kKey.Close()
 		}
-		psCmd := fmt.Sprintf("$w=New-Object -ComObject WScript.Shell;$s=$w.CreateShortcut('%s');$s.TargetPath='%s';$s.WorkingDirectory='%s';$s.IconLocation='%s,0';$s.Description='KiyoDrive';$s.Save()",
-			strings.ReplaceAll(lnkPath, "'", "''"),
-			strings.ReplaceAll(targetFolder, "'", "''"),
-			strings.ReplaceAll(targetFolder, "'", "''"),
-			strings.ReplaceAll(iconPath, "'", "''"),
-		)
-		_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psCmd).Run()
+
+		iconPath := findAppIcon(targetFolder)
+		if iconPath != "" {
+			iKey, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon`, registry.SET_VALUE)
+			if err == nil {
+				_ = iKey.SetStringValue("", iconPath+",0")
+				iKey.Close()
+			}
+		}
 	}
 
 	notifyShell()
@@ -162,7 +158,7 @@ func ensureDriveLRegistry(vDrive string) {
 
 func cleanupDriveLRegistry() {
 	vDrive := getVirtualDriveFolder()
-	ensureDriveLRegistry(vDrive)
+	ensureDriveKRegistry(vDrive)
 }
 
 func getVirtualDriveFolder() string {
@@ -180,7 +176,11 @@ func getVirtualDriveFolder() string {
 			}
 		}
 	}
-	// 2. Fallback to L:\ if present
+	// 2. Fallback to K:\ if present
+	if fi, err := os.Stat(`K:\`); err == nil && fi.IsDir() {
+		return `K:\`
+	}
+	// 3. Fallback to legacy L:\ if present
 	if fi, err := os.Stat(`L:\`); err == nil && fi.IsDir() {
 		return `L:\`
 	}

@@ -46,34 +46,38 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
     if (!mounted || nodes.isEmpty) return;
     final db = ref.read(filesDbProvider);
 
-    // Precache next image
-    if (index + 1 < nodes.length) {
-      final next = nodes[index + 1];
-      final local =
-          ref.read(offlineLocalPathProvider(next.id)).valueOrNull ?? '';
-      precacheImage(
-        LdRemoteImage.provider(
-          url: db.downloadUrl(next.id, inline: true),
-          headers: db.authHeaders,
-          localPath: local,
-        ),
-        context,
-      );
+    // Precache 2 next images
+    for (var i = 1; i <= 2; i++) {
+      if (index + i < nodes.length) {
+        final next = nodes[index + i];
+        final local =
+            ref.read(offlineLocalPathProvider(next.id)).valueOrNull ?? '';
+        precacheImage(
+          LdRemoteImage.provider(
+            url: db.downloadUrl(next.id, inline: true),
+            headers: db.authHeaders,
+            localPath: local,
+          ),
+          context,
+        );
+      }
     }
 
-    // Precache previous image
-    if (index - 1 >= 0) {
-      final prev = nodes[index - 1];
-      final local =
-          ref.read(offlineLocalPathProvider(prev.id)).valueOrNull ?? '';
-      precacheImage(
-        LdRemoteImage.provider(
-          url: db.downloadUrl(prev.id, inline: true),
-          headers: db.authHeaders,
-          localPath: local,
-        ),
-        context,
-      );
+    // Precache 2 previous images
+    for (var i = 1; i <= 2; i++) {
+      if (index - i >= 0) {
+        final prev = nodes[index - i];
+        final local =
+            ref.read(offlineLocalPathProvider(prev.id)).valueOrNull ?? '';
+        precacheImage(
+          LdRemoteImage.provider(
+            url: db.downloadUrl(prev.id, inline: true),
+            headers: db.authHeaders,
+            localPath: local,
+          ),
+          context,
+        );
+      }
     }
   }
 

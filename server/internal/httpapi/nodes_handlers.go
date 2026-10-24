@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"mime"
@@ -379,12 +381,27 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
+			var combinedNodes []nodeDTO
+			combinedNodes = append(combinedNodes, rootDsNodes...)
+			dbList, dbErr := a.files.List(r.Context(), userID, files.ListOptions{
+				ParentID: "",
+				Filter:   "none",
+				Query:    opts.Query,
+				Limit:    opts.Limit,
+				Offset:   opts.Offset,
+				SortBy:   opts.SortBy,
+				SortDesc: opts.SortDesc,
+			})
+			if dbErr == nil && len(dbList) > 0 {
+				combinedNodes = append(combinedNodes, nodeViews(dbList, userID)...)
+			}
+
 			writeJSON(w, http.StatusOK, map[string]any{
-				"nodes":       rootDsNodes,
+				"nodes":       combinedNodes,
 				"limit":       opts.Limit,
 				"offset":      opts.Offset,
 				"has_more":    false,
-				"next_offset": len(rootDsNodes),
+				"next_offset": len(combinedNodes),
 			})
 			return
 		}
@@ -649,9 +666,27 @@ func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := os.MkdirAll(targetPath, 0755); err != nil {
-			a.log.Error("mkdir failed", "path", targetPath, "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("Không thể tạo thư mục vật lý (%s): %v", folderName, err)})
-			return
+			// Nếu bị read-only file system hoặc mount chứa zfs-recovery, tự động chuyển sang mount point ghi được
+			if strings.Contains(strings.ToLower(err.Error()), "read-only") || strings.Contains(mount, "zfs-recovery") {
+				altMount := a.resolveRealMountPath(dsName, "")
+				if altMount != "" && altMount != mount && !strings.Contains(altMount, "zfs-recovery") {
+					altTarget := filepath.Clean(filepath.Join(altMount, cleanedSub, folderName))
+					if retryErr := os.MkdirAll(altTarget, 0755); retryErr == nil {
+						mount = altMount
+						targetPath = altTarget
+						_ = a.db.Write(r.Context(), func(c context.Context, tx *sql.Tx) error {
+							_, _ = tx.ExecContext(c, `UPDATE datasets SET mount = ? WHERE name = ?`, altMount, dsName)
+							return nil
+						})
+						err = nil
+					}
+				}
+			}
+			if err != nil {
+				a.log.Error("mkdir failed", "path", targetPath, "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("Không thể tạo thư mục vật lý (%s): %v", folderName, err)})
+				return
+			}
 		}
 		relPath := filepath.ToSlash(filepath.Join(cleanedSub, folderName))
 		relPath = strings.TrimPrefix(relPath, "/")
@@ -1108,12 +1143,15 @@ func (a *API) handleDownload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		filename := filepath.Base(cleanTarget)
-		mimeType := mime.TypeByExtension(filepath.Ext(filename))
+		mimeType := models.MimeFromName(filename)
+		if mimeType == "" {
+			mimeType = mime.TypeByExtension(filepath.Ext(filename))
+		}
 		if mimeType == "" {
 			mimeType = "application/octet-stream"
 		}
 		disposition := "attachment"
-		if boolQuery(r, "inline") {
+		if boolQuery(r, "inline") || models.Previewable(models.CategoryOf(models.NodeFile, mimeType, filename)) {
 			disposition = "inline"
 		}
 		w.Header().Set("Content-Type", mimeType)

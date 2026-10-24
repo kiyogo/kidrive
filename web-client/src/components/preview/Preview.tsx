@@ -68,11 +68,30 @@ export function Preview({
     };
   }, [node.id]);
 
-  const src = local || api.media(Api.download(node.id));
+  const src = local || api.media(`${Api.download(node.id)}?inline=1`);
+  const isDocx = /\.docx$/i.test(node.name);
   const isMarkdown = /\.(md|markdown)$/i.test(node.name);
   const textual = category === "code" || category === "document" || isTextual(node.mime_type);
   const online = useOnline();
   const unreachable = !online && !local;
+
+  // Windowed preloading: only load/preload 2 items ahead and 2 items behind
+  useEffect(() => {
+    if (!nodes || currentIndex < 0) return;
+    const start = Math.max(0, currentIndex - 2);
+    const end = Math.min(nodes.length - 1, currentIndex + 2);
+
+    for (let i = start; i <= end; i++) {
+      if (i === currentIndex) continue;
+      const targetNode = nodes[i];
+      if (!targetNode) continue;
+      const targetCat = categoryOf(targetNode);
+      if (targetCat === "image") {
+        const img = new Image();
+        img.src = api.media(`${Api.download(targetNode.id)}?inline=1`);
+      }
+    }
+  }, [nodes, currentIndex]);
 
   const handlePrev = useCallback(() => {
     if (nodes && currentIndex > 0 && onNavigate) {
@@ -555,6 +574,19 @@ export function Preview({
             style={{ width: "100%", height: "100%", border: 0 }}
             onClick={(e) => e.stopPropagation()}
           />
+        ) : isDocx ? (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              height: "100%",
+              maxWidth: 960,
+              padding: "40px 24px 80px",
+              overflowY: "auto",
+            }}
+          >
+            <DocxView node={node} />
+          </div>
         ) : textual ? (
           <div
             onClick={(e) => e.stopPropagation()}
@@ -562,7 +594,7 @@ export function Preview({
               width: "100%",
               height: "100%",
               maxWidth: 960,
-              padding: "80px 24px",
+              padding: "40px 24px 80px",
               overflowY: "auto",
             }}
           >
@@ -578,8 +610,8 @@ export function Preview({
           />
         )}
 
-        {/* Previous / Next Desktop Controls (only for photo gallery matching Flutter) */}
-        {category === "image" && !isMobile && nodes && currentIndex > 0 && (
+        {/* Previous Controls - Universal for ALL file types */}
+        {nodes && currentIndex > 0 && (
           <button
             type="button"
             onClick={(e) => {
@@ -589,34 +621,37 @@ export function Preview({
             title={t.previewPreviousPage}
             style={{
               position: "absolute",
-              left: 16,
+              left: isMobile ? 8 : 20,
               top: "50%",
               transform: "translateY(-50%)",
-              width: 42,
-              height: 42,
+              width: isMobile ? 38 : 44,
+              height: isMobile ? 38 : 44,
               borderRadius: "50%",
-              background: "rgba(30, 30, 30, 0.85)",
-              border: "1px solid rgba(255, 255, 255, 0.15)",
+              background: "rgba(20, 20, 20, 0.85)",
+              border: "1px solid rgba(255, 255, 255, 0.2)",
               color: "#FFFFFF",
               display: "grid",
               placeItems: "center",
               cursor: "pointer",
               opacity: chrome ? 1 : 0,
               pointerEvents: chrome ? "auto" : "none",
-              zIndex: 40,
+              zIndex: 50,
+              boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+              transition: "background 0.15s ease, opacity 0.2s ease",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(50, 50, 50, 0.95)";
+              e.currentTarget.style.background = "rgba(45, 45, 45, 0.95)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(30, 30, 30, 0.85)";
+              e.currentTarget.style.background = "rgba(20, 20, 20, 0.85)";
             }}
           >
-            <Icon glyph="chevron-left" size={20} color="#FFFFFF" />
+            <Icon glyph="chevron-left" size={isMobile ? 18 : 22} color="#FFFFFF" />
           </button>
         )}
 
-        {category === "image" && !isMobile && nodes && currentIndex < total - 1 && (
+        {/* Next Controls - Universal for ALL file types */}
+        {nodes && currentIndex < total - 1 && (
           <button
             type="button"
             onClick={(e) => {
@@ -626,30 +661,32 @@ export function Preview({
             title={t.previewNextPage}
             style={{
               position: "absolute",
-              right: 16,
+              right: isMobile ? 8 : 20,
               top: "50%",
               transform: "translateY(-50%)",
-              width: 42,
-              height: 42,
+              width: isMobile ? 38 : 44,
+              height: isMobile ? 38 : 44,
               borderRadius: "50%",
-              background: "rgba(30, 30, 30, 0.85)",
-              border: "1px solid rgba(255, 255, 255, 0.15)",
+              background: "rgba(20, 20, 20, 0.85)",
+              border: "1px solid rgba(255, 255, 255, 0.2)",
               color: "#FFFFFF",
               display: "grid",
               placeItems: "center",
               cursor: "pointer",
               opacity: chrome ? 1 : 0,
               pointerEvents: chrome ? "auto" : "none",
-              zIndex: 40,
+              zIndex: 50,
+              boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+              transition: "background 0.15s ease, opacity 0.2s ease",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(50, 50, 50, 0.95)";
+              e.currentTarget.style.background = "rgba(45, 45, 45, 0.95)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(30, 30, 30, 0.85)";
+              e.currentTarget.style.background = "rgba(20, 20, 20, 0.85)";
             }}
           >
-            <Icon glyph="chevron-right" size={20} color="#FFFFFF" />
+            <Icon glyph="chevron-right" size={isMobile ? 18 : 22} color="#FFFFFF" />
           </button>
         )}
       </div>
@@ -1759,19 +1796,14 @@ function TextView({
     let ignore = false;
     void (async () => {
       try {
-        const resp = await fetch(api.media(Api.download(node.id)), {
-          headers: { Range: `bytes=0-${MAX_PREVIEW_BYTES}` },
-        });
-        if (!resp.ok && resp.status !== 206) {
-          throw new Error(`HTTP ${resp.status}`);
-        }
+        const resp = await api.bytes(`${Api.download(node.id)}?inline=1`);
         const buf = await resp.arrayBuffer();
         if (ignore) return;
         const decoded = new TextDecoder("utf-8", { fatal: false }).decode(buf);
         setText(decoded);
         setTruncated(node.size_bytes > MAX_PREVIEW_BYTES);
       } catch (e) {
-        if (!ignore) setError(e instanceof Error ? e.message : "Load failed");
+        if (!ignore) setError(e instanceof Error ? e.message : "Không thể xem tệp văn bản này");
       }
     })();
     return () => {
@@ -1796,5 +1828,152 @@ function TextView({
     >
       {text}
     </pre>
+  );
+}
+
+function DocxView({ node }: { node: NodeModel }) {
+  const [paragraphs, setParagraphs] = useState<{ text: string; isHeading?: boolean; isBullet?: boolean }[] | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let ignore = false;
+    void (async () => {
+      try {
+        const resp = await api.bytes(`${Api.download(node.id)}?inline=1`);
+        const buffer = await resp.arrayBuffer();
+        if (ignore) return;
+
+        const bytes = new Uint8Array(buffer);
+        const view = new DataView(buffer);
+
+        let xmlText = "";
+        let eocdOffset = -1;
+        for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+          if (view.getUint32(i, true) === 0x06054b50) {
+            eocdOffset = i;
+            break;
+          }
+        }
+
+        if (eocdOffset !== -1) {
+          const cdOffset = view.getUint32(eocdOffset + 16, true);
+          const cdCount = view.getUint16(eocdOffset + 10, true);
+          let cur = cdOffset;
+
+          for (let c = 0; c < cdCount && cur < eocdOffset; c++) {
+            if (view.getUint32(cur, true) !== 0x02014b50) break;
+            const compMethod = view.getUint16(cur + 10, true);
+            const compSize = view.getUint32(cur + 20, true);
+            const nameLen = view.getUint16(cur + 28, true);
+            const extraLen = view.getUint16(cur + 30, true);
+            const commentLen = view.getUint16(cur + 32, true);
+            const localHeaderOffset = view.getUint32(cur + 42, true);
+
+            const fileNameBytes = bytes.subarray(cur + 46, cur + 46 + nameLen);
+            const fileName = new TextDecoder().decode(fileNameBytes);
+
+            if (fileName === "word/document.xml") {
+              const localNameLen = view.getUint16(localHeaderOffset + 26, true);
+              const localExtraLen = view.getUint16(localHeaderOffset + 28, true);
+              const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+              const compressed = bytes.subarray(dataStart, dataStart + compSize);
+
+              if (compMethod === 0) {
+                xmlText = new TextDecoder("utf-8").decode(compressed);
+              } else if (compMethod === 8) {
+                if (typeof DecompressionStream !== "undefined") {
+                  const ds = new DecompressionStream("deflate-raw");
+                  const writer = ds.writable.getWriter();
+                  writer.write(compressed);
+                  writer.close();
+                  const r = new Response(ds.readable);
+                  xmlText = await r.text();
+                }
+              }
+              break;
+            }
+            cur += 46 + nameLen + extraLen + commentLen;
+          }
+        }
+
+        if (!xmlText) {
+          throw new Error("Không thể trích xuất nội dung văn bản Word");
+        }
+
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, "application/xml");
+        const pEls = Array.from(xmlDoc.getElementsByTagNameNS("*", "p"));
+        const parsed: { text: string; isHeading?: boolean; isBullet?: boolean }[] = [];
+
+        for (const p of pEls) {
+          const styleEl = p.getElementsByTagNameNS("*", "pStyle")[0];
+          const styleVal = styleEl ? styleEl.getAttribute("w:val") || "" : "";
+          const isHeading = /heading|title/i.test(styleVal);
+          const numPr = p.getElementsByTagNameNS("*", "numPr")[0];
+          const isBullet = Boolean(numPr);
+
+          const tEls = Array.from(p.getElementsByTagNameNS("*", "t"));
+          const text = tEls.map((t) => t.textContent || "").join("");
+          if (text.trim() || isHeading) {
+            parsed.push({ text, isHeading, isBullet });
+          }
+        }
+
+        if (!ignore) {
+          setParagraphs(parsed);
+        }
+      } catch (e: any) {
+        if (!ignore) {
+          setError(e?.message || "Không thể xem trước tệp .docx này");
+        }
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [node.id]);
+
+  if (error) return <ErrorState message={error} />;
+  if (paragraphs === null) return <Spinner />;
+
+  return (
+    <div
+      style={{
+        background: "#FFFFFF",
+        color: "#24292F",
+        borderRadius: 8,
+        padding: "48px 56px",
+        boxShadow: "0 4px 24px rgba(0,0,0,0.3)",
+        minHeight: "100%",
+        fontFamily: "'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif",
+      }}
+    >
+      <div style={{ borderBottom: "1px solid #E1E4E8", paddingBottom: 16, marginBottom: 24, display: "flex", alignItems: "center", gap: 12 }}>
+        <Icon glyph="file" size={24} color="#2B579A" />
+        <span style={{ fontSize: 18, fontWeight: 600, color: "#1F2328" }}>{node.name}</span>
+      </div>
+      {paragraphs.length === 0 ? (
+        <div style={{ color: "#656D76", fontStyle: "italic", textAlign: "center", padding: "40px 0" }}>Tài liệu trống</div>
+      ) : (
+        paragraphs.map((p, idx) => (
+          <div
+            key={idx}
+            style={{
+              fontSize: p.isHeading ? 18 : 14.5,
+              fontWeight: p.isHeading ? 700 : 400,
+              lineHeight: 1.75,
+              marginBottom: p.isHeading ? 14 : 10,
+              color: p.isHeading ? "#0969DA" : "#1F2328",
+              paddingLeft: p.isBullet ? 20 : 0,
+              display: p.isBullet ? "flex" : "block",
+              gap: p.isBullet ? 8 : 0,
+            }}
+          >
+            {p.isBullet && <span style={{ color: "#0969DA", fontWeight: 700 }}>•</span>}
+            <span>{p.text}</span>
+          </div>
+        ))
+      )}
+    </div>
   );
 }
