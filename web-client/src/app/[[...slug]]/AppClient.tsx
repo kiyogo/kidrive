@@ -267,7 +267,7 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
       if (defaultSingleDataset) {
         const dsClean = defaultSingleDataset.replace(/^\/+|\/+$/g, "");
         if (clean.toLowerCase() === dsClean.toLowerCase()) {
-          return [];
+          return [{ id: `dataset:${dsClean}`, name: dsClean.split("/").pop() || dsClean }];
         }
         let sub = clean;
         if (clean.toLowerCase().startsWith(dsClean.toLowerCase() + "/")) {

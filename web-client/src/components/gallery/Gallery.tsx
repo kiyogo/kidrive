@@ -23,9 +23,9 @@ import { categoryOf, type NodeModel } from "@/lib/models";
 import { transfers, type Transfer } from "@/lib/upload";
 import { useUploader } from "@/lib/uploads";
 import { ShareSheet } from "@/components/share/ShareSheet";
-import { useInfiniteList } from "@/lib/useInfiniteList";
+import { useInfiniteList, getAdaptivePageSize } from "@/lib/useInfiniteList";
 
-// In-memory module cache so navigating back to Gallery instantly displays all loaded photos
+// In-memory module cache so navigating back to Gallery instantly displays loaded photos
 let memoryGalleryCache: NodeModel[] | null = null;
 
 /**
@@ -53,6 +53,13 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
   const toast = useToast();
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // Clear cache on unmount so exiting and re-entering loads fresh from beginning
+  useEffect(() => {
+    return () => {
+      memoryGalleryCache = null;
+    };
+  }, []);
+
   const {
     items: rawNodes,
     setItems: setNodes,
@@ -63,7 +70,7 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
     reload: load,
     Sentinel,
   } = useInfiniteList<NodeModel>({
-    pageSize: 1000,
+    pageSize: getAdaptivePageSize(50, 100),
     initialItems: memoryGalleryCache ?? undefined,
     onItemsUpdated: (items) => {
       memoryGalleryCache = items;

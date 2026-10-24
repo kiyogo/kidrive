@@ -22,9 +22,9 @@ import { bytes } from "@/lib/format";
 import { categoryOf, type NodeModel } from "@/lib/models";
 import { useUploader } from "@/lib/uploads";
 import { ShareSheet } from "@/components/share/ShareSheet";
-import { useInfiniteList } from "@/lib/useInfiniteList";
+import { useInfiniteList, getAdaptivePageSize } from "@/lib/useInfiniteList";
 
-// In-memory module cache so navigating back to Videos instantly displays all loaded videos
+// In-memory module cache so navigating back to Videos instantly displays loaded videos
 let memoryVideosCache: NodeModel[] | null = null;
 
 type SortKey = "created" | "updated" | "name" | "size";
@@ -32,7 +32,7 @@ type SortKey = "created" | "updated" | "name" | "size";
 /**
  * All videos in one place, matching Flutter VideosPage:
  * - Masonry grid layout with natural video aspect ratios.
- * - Columns customizable (3, 4, 5, 6, 8, 10, 12 on desktop).
+ * - Columns customizable (3, 4, 5, 6, 8, 10, 12, 14, 16 on desktop).
  * - Default sorting by newest added (created desc).
  */
 export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeModel[]) => void }) {
@@ -61,13 +61,20 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
   const toast = useToast();
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // Clear cache on unmount so exiting and re-entering loads fresh from beginning
+  useEffect(() => {
+    return () => {
+      memoryVideosCache = null;
+    };
+  }, []);
+
   // Restore saved column preference
   useEffect(() => {
     try {
       const saved = localStorage.getItem("ld.videos.columns");
       if (saved) {
         const parsed = parseInt(saved, 10);
-        if ([3, 4, 5, 6, 8, 10, 12].includes(parsed)) {
+        if ([3, 4, 5, 6, 8, 10, 12, 14, 16].includes(parsed)) {
           setColumns(parsed);
         }
       }
@@ -95,7 +102,7 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
     reload: load,
     Sentinel,
   } = useInfiniteList<NodeModel>({
-    pageSize: 1000,
+    pageSize: getAdaptivePageSize(40, 80),
     initialItems: memoryVideosCache ?? undefined,
     onItemsUpdated: (items) => {
       memoryVideosCache = items;
@@ -256,7 +263,7 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
           ) : (
             <>
               {isDesktop && (
-                <SizeSlider columns={columns} onChanged={handleColumnsChange} steps={[3, 4, 5, 6, 8, 10, 12]} />
+                <SizeSlider columns={columns} onChanged={handleColumnsChange} steps={[3, 4, 5, 6, 8, 10, 12, 14, 16]} />
               )}
               <div ref={sortBtnRef}>
                 <Button

@@ -26,21 +26,51 @@ export interface UseInfiniteListOptions<T> {
 }
 
 /**
+ * Adaptive page size calculator based on hardware/network capabilities.
+ * Guarantees smooth scrolling and prevents DOM / texture memory overload.
+ */
+export function getAdaptivePageSize(min = 40, max = 100): number {
+  if (typeof window === "undefined") return 60;
+  try {
+    const memory = (navigator as any).deviceMemory || 4;
+    const cpus = navigator.hardwareConcurrency || 4;
+    const conn = (navigator as any).connection;
+
+    let size = 60;
+    if (memory >= 8 && cpus >= 8) {
+      size = 90;
+    } else if (memory <= 4 || cpus <= 4) {
+      size = 50;
+    }
+
+    if (conn) {
+      if (conn.saveData || conn.effectiveType === "2g" || conn.effectiveType === "3g") {
+        size = Math.min(size, 30);
+      } else if (conn.effectiveType === "4g" && conn.downlink >= 15) {
+        size = Math.min(max, size + 20);
+      }
+    }
+    return Math.max(min, Math.min(max, size));
+  } catch {
+    return 60;
+  }
+}
+
+/**
  * Universal Infinite Scroll Hook
- * - Server-side pagination with batching (50-1000 items)
- * - Automatic background prefetching until all items are loaded
- * - Fallback scroll listener for high-speed scrolling
- * - AbortController request cancellation on filter/query/sort/dep change
- * - Strict key deduplication
- * - 0% UI change, maintaining 100% pixel-perfect layouts
+ * - Adaptive batching (50-100 items based on hardware & network)
+ * - Load-on-demand as user scrolls (no infinite background runaway)
+ * - IntersectionObserver sentinel + fallback scroll listener
+ * - Strict key deduplication and AbortController request cleanup
+ * - Robust loading state clearing to prevent stuck spinners
  */
 export function useInfiniteList<T>({
   fetchPage,
-  pageSize = 50,
+  pageSize = 60,
   getItemKey = (item: T) => (item as any)?.id ?? String(item),
   deps = [],
   enabled = true,
-  autoLoadUntilComplete = true,
+  autoLoadUntilComplete = false,
   initialItems,
   onItemsUpdated,
 }: UseInfiniteListOptions<T>) {
@@ -144,19 +174,17 @@ export function useInfiniteList<T>({
       } finally {
         if (abortControllerRef.current === controller) {
           isFetchingRef.current = false;
-          if (!controller.signal.aborted) {
-            if (isInitial) {
-              setLoading(false);
-            } else {
-              setLoadingMore(false);
-            }
-            if (autoLoadUntilComplete && hasMoreRef.current) {
-              setTimeout(() => {
-                if (hasMoreRef.current && !isFetchingRef.current && !controller.signal.aborted) {
-                  void loadBatch(false);
-                }
-              }, 15);
-            }
+          if (isInitial) {
+            setLoading(false);
+          } else {
+            setLoadingMore(false);
+          }
+          if (autoLoadUntilComplete && hasMoreRef.current && !controller.signal.aborted) {
+            setTimeout(() => {
+              if (hasMoreRef.current && !isFetchingRef.current && !controller.signal.aborted) {
+                void loadBatch(false);
+              }
+            }, 30);
           }
         }
       }
@@ -187,6 +215,9 @@ export function useInfiniteList<T>({
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+      setLoading(false);
+      setLoadingMore(false);
+      isFetchingRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, loadBatch, ...deps]);

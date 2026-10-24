@@ -68,10 +68,6 @@ Future<void> main() async {
     );
   }
 
-  // the desktop window starts hidden so there is no flash of the system title
-  // bar before the app's own one is in place. This is what shows it
-  DesktopShellService.showWindow();
-
   final prefs = await SharedPreferences.getInstance();
   runApp(
     ProviderScope(
@@ -81,6 +77,12 @@ Future<void> main() async {
       child: const LocalDriveApp(),
     ),
   );
+
+  // The desktop window starts hidden so there is no flash of the system title
+  // bar before the app's own one is in place. Show it once Flutter renders.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    DesktopShellService.showWindow();
+  });
 }
 
 Future<void> _lockOrientations() async {
