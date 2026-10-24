@@ -97,13 +97,10 @@ elif [ "$ARCH" = "arm64" ]; then
 fi
 
 URLS=(
-  "$DIRECT_CDN"
   "https://github.com/kiyogo/kidrive/releases/download/v1.1.7/localdrive-linux-${ARCH}"
-  "https://github.com/ngdaison/LocalDrive/releases/download/v1.1.7/localdrive-linux-${ARCH}"
   "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH}"
-  "https://github.com/ngdaison/LocalDrive/releases/latest/download/localdrive-linux-${ARCH}"
   "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH_LEGACY}"
-  "https://github.com/ngdaison/LocalDrive/releases/latest/download/localdrive-linux-${ARCH_LEGACY}"
+  "$DIRECT_CDN"
 )
 
 for URL in "${URLS[@]}"; do
