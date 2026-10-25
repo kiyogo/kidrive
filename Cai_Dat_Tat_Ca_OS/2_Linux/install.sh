@@ -91,10 +91,10 @@ main() {
 
   DOWNLOADED=false
   URLS=(
-    "https://github.com/kiyogo/kidrive/releases/download/v1.1.8/localdrive-linux-${ARCH}"
+    "https://github.com/kiyogo/kidrive/releases/download/v1.1.9/localdrive-linux-${ARCH}"
+    "https://github.com/kiyogo/kidrive/releases/download/v1.1.9/localdrive-linux-${ARCH_LEGACY}"
     "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH}"
-    "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH_LEGACY}"
-    "https://github.com/kiyogo/kidrive/releases/download/v1.1.7/localdrive-linux-${ARCH}"
+    "https://github.com/kiyogo/kidrive/releases/download/v1.1.8/localdrive-linux-${ARCH}"
   )
 
   for URL in "${URLS[@]}"; do
