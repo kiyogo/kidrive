@@ -5,7 +5,9 @@ package httpapi
 import (
 	"bufio"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -365,4 +367,57 @@ func getZFSPoolCapacity(poolName string) (int64, int64, string, error) {
 		return size, alloc, health, nil
 	}
 	return 0, 0, "", errors.New("invalid zpool list output")
+}
+
+// UnlockStorageRW ensures all ZFS pools, datasets, and Linux mount points are in read-write mode.
+func UnlockStorageRW(pathHint string) {
+	// 1. Pools: if any pool is readonly, unlock it
+	if out, err := exec.Command("zpool", "list", "-H", "-o", "name").Output(); err == nil {
+		for _, p := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				_ = exec.Command("zpool", "set", "readonly=off", p).Run()
+				_ = exec.Command("zfs", "set", "-r", "readonly=off", p).Run()
+			}
+		}
+	}
+
+	// 2. All datasets: force readonly=off
+	if out, err := exec.Command("zfs", "list", "-H", "-o", "name").Output(); err == nil {
+		for _, ds := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			ds = strings.TrimSpace(ds)
+			if ds != "" {
+				_ = exec.Command("zfs", "set", "readonly=off", ds).Run()
+			}
+		}
+	}
+	_ = exec.Command("zfs", "set", "-r", "readonly=off", "DATA").Run()
+	_ = exec.Command("zfs", "mount", "-a").Run()
+
+	// 3. Remount known and active recovery/DATA mount points as rw
+	_ = exec.Command("mount", "-o", "remount,rw", "/mnt/zfs-recovery").Run()
+	_ = exec.Command("mount", "-o", "remount,rw", "/mnt/zfs-recovery/DATA").Run()
+	_ = exec.Command("mount", "-o", "remount,rw", "/DATA").Run()
+	_ = exec.Command("mount", "-o", "remount,rw", "/DATA/KiyoVN").Run()
+
+	if mounts, err := os.ReadFile("/proc/mounts"); err == nil {
+		for _, line := range strings.Split(string(mounts), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				mp := fields[1]
+				if strings.Contains(mp, "zfs") || strings.Contains(mp, "DATA") || strings.Contains(mp, "KiyoVN") {
+					_ = exec.Command("mount", "-o", "remount,rw", mp).Run()
+					_ = exec.Command("chmod", "777", mp).Run()
+				}
+			}
+		}
+	}
+
+	if pathHint != "" {
+		clean := filepath.Clean(pathHint)
+		_ = exec.Command("mount", "-o", "remount,rw", clean).Run()
+		_ = exec.Command("mount", "-o", "remount,rw", filepath.Dir(clean)).Run()
+		_ = exec.Command("chmod", "777", clean).Run()
+		_ = exec.Command("chmod", "777", filepath.Dir(clean)).Run()
+	}
 }

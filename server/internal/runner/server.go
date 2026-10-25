@@ -75,6 +75,9 @@ func runServer(args []string) error {
 		return err
 	}
 
+	// Tự động mở khóa quyền ghi trên Linux/ZFS ngay khi khởi động
+	go httpapi.UnlockStorageRW("")
+
 	server := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           application.Handler(),

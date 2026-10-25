@@ -196,15 +196,32 @@ main() {
   fi
   modprobe zfs 2>/dev/null || true
   if command -v zpool >/dev/null 2>&1; then
-    zpool import -f -a 2>/dev/null || true
-    zfs mount -a 2>/dev/null || true
-    zfs set readonly=off DATA 2>/dev/null || true
+    echo -e "${BLUE}Kiểm tra và mở khóa toàn diện quyền ghi trên các mảng ZFS...${NC}"
+    if zpool get -H -o value readonly DATA 2>/dev/null | grep -q "on"; then
+      echo -e "${YELLOW}Pool DATA đang ở trạng thái readonly, đang nạp lại read-write...${NC}"
+      zpool export -f DATA 2>/dev/null || true
+      zpool import -f -R /mnt/zfs-recovery DATA 2>/dev/null || zpool import -f DATA 2>/dev/null || true
+    else
+      zpool import -f -a 2>/dev/null || true
+    fi
     for p in $(zpool list -H -o name 2>/dev/null); do
-      zfs set readonly=off "$p" 2>/dev/null || true
+      zpool set readonly=off "$p" 2>/dev/null || true
+      zfs set -r readonly=off "$p" 2>/dev/null || true
     done
+  fi
+  if command -v zfs >/dev/null 2>&1; then
+    for ds in $(zfs list -H -o name 2>/dev/null); do
+      zfs set readonly=off "$ds" 2>/dev/null || true
+    done
+    zfs set -r readonly=off DATA 2>/dev/null || true
+    zfs mount -a 2>/dev/null || true
   fi
   mount -o remount,rw /mnt/zfs-recovery 2>/dev/null || true
   mount -o remount,rw /mnt/zfs-recovery/DATA 2>/dev/null || true
+  for m in $(cat /proc/mounts 2>/dev/null | grep -E "zfs|zfs-recovery|DATA|KiyoVN" | awk '{print $2}'); do
+    mount -o remount,rw "$m" 2>/dev/null || true
+    chmod -R 777 "$m" 2>/dev/null || true
+  done
 
   # Cài đặt và cấu hình dịch vụ chia sẻ mạng nội bộ Samba (SMB) với quyền Guest
   if ! command -v smbd >/dev/null 2>&1; then
@@ -440,6 +457,7 @@ Environment="DB_PATH=${DATA_DIR}/db/localdrive.sqlite"
 Environment="LOCALDRIVE_PORT=9683"
 Environment="LOCALDRIVE_WEB_PORT=5437"
 EnvironmentFile=-${ENV_FILE}
+ExecStartPre=/bin/sh -c 'if command -v zpool >/dev/null 2>&1; then for p in $$(zpool list -H -o name 2>/dev/null); do zpool set readonly=off "$$p" 2>/dev/null || true; zfs set -r readonly=off "$$p" 2>/dev/null || true; done; for ds in $$(zfs list -H -o name 2>/dev/null); do zfs set readonly=off "$$ds" 2>/dev/null || true; done; zfs set -r readonly=off DATA 2>/dev/null || true; zfs mount -a 2>/dev/null || true; fi; for m in $$(cat /proc/mounts 2>/dev/null | grep -E "zfs|zfs-recovery|DATA" | awk "{print \$$2}"); do mount -o remount,rw "$$m" 2>/dev/null || true; chmod 777 "$$m" 2>/dev/null || true; done'
 ExecStart=${BIN_TARGET} serve --dir ${INSTALL_DIR}
 Restart=always
 RestartSec=3s
@@ -450,14 +468,25 @@ WantedBy=multi-user.target
 EOF
 
     # Tự động gỡ bỏ cờ read-only trên ZFS và Linux mount
-    if command -v zfs >/dev/null 2>&1; then
-      zfs set readonly=off DATA 2>/dev/null || true
+    if command -v zpool >/dev/null 2>&1; then
       for p in $(zpool list -H -o name 2>/dev/null); do
-        zfs set readonly=off "$p" 2>/dev/null || true
+        zpool set readonly=off "$p" 2>/dev/null || true
+        zfs set -r readonly=off "$p" 2>/dev/null || true
       done
+    fi
+    if command -v zfs >/dev/null 2>&1; then
+      for ds in $(zfs list -H -o name 2>/dev/null); do
+        zfs set readonly=off "$ds" 2>/dev/null || true
+      done
+      zfs set -r readonly=off DATA 2>/dev/null || true
+      zfs mount -a 2>/dev/null || true
     fi
     mount -o remount,rw /mnt/zfs-recovery 2>/dev/null || true
     mount -o remount,rw /mnt/zfs-recovery/DATA 2>/dev/null || true
+    for m in $(cat /proc/mounts 2>/dev/null | grep -E "zfs|zfs-recovery|DATA|KiyoVN" | awk '{print $2}'); do
+      mount -o remount,rw "$m" 2>/dev/null || true
+      chmod -R 777 "$m" 2>/dev/null || true
+    done
 
     systemctl daemon-reload 2>/dev/null || true
     systemctl reset-failed localdrive 2>/dev/null || true

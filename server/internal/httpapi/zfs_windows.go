@@ -54,3 +54,6 @@ func getZFSPoolDisks(poolName string) []string {
 func getZFSPoolCapacity(poolName string) (int64, int64, string, error) {
 	return 0, 0, "", nil
 }
+
+func UnlockStorageRW(pathHint string) {}
+

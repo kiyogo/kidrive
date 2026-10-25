@@ -2961,14 +2961,9 @@ func (a *API) handleCreateDatasetFolder(w http.ResponseWriter, r *http.Request) 
 
 	if err := os.MkdirAll(cleanTarget, 0755); err != nil {
 		// Nếu bị read-only file system hoặc mount chứa zfs-recovery, tự động bỏ cờ readonly hoặc chuyển sang mount point ghi được
-		if strings.Contains(strings.ToLower(err.Error()), "read-only") || strings.Contains(mount, "zfs-recovery") {
+		if isReadOnlyError(err) || strings.Contains(mount, "zfs-recovery") {
 			poolName := strings.Split(strings.Trim(dsName, "/"), "/")[0]
-			_ = exec.Command("zfs", "set", "readonly=off", dsName).Run()
-			_ = exec.Command("zfs", "set", "readonly=off", poolName).Run()
-			_ = exec.Command("mount", "-o", "remount,rw", cleanMount).Run()
-			_ = exec.Command("mount", "-o", "remount,rw", mount).Run()
-			_ = exec.Command("mount", "-o", "remount,rw", filepath.Dir(mount)).Run()
-			_ = exec.Command("mount", "-o", "remount,rw", "/mnt/zfs-recovery").Run()
+			UnlockStorageRW(cleanTarget)
 			if retryErr := os.MkdirAll(cleanTarget, 0755); retryErr == nil {
 				err = nil
 			} else {
@@ -3071,8 +3066,14 @@ func (a *API) handleDeleteDatasetItem(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err := os.RemoveAll(cleanTarget); err != nil {
-		a.fail(w, r, err)
-		return
+		if isReadOnlyError(err) {
+			UnlockStorageRW(cleanTarget)
+			err = os.RemoveAll(cleanTarget)
+		}
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
 	}
 
 	if deletedBytes > 0 {
@@ -3135,8 +3136,14 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := os.MkdirAll(cleanTarget, 0755); err != nil {
-		a.fail(w, r, err)
-		return
+		if isReadOnlyError(err) {
+			UnlockStorageRW(cleanTarget)
+			err = os.MkdirAll(cleanTarget, 0755)
+		}
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
 	}
 
 	err = r.ParseMultipartForm(128 << 20)
@@ -3194,8 +3201,14 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 		dstPath := filepath.Join(cleanTarget, filepath.Base(fh.Filename))
 		dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
-			src.Close()
-			continue
+			if isReadOnlyError(err) {
+				UnlockStorageRW(dstPath)
+				dst, err = os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+			}
+			if err != nil {
+				src.Close()
+				continue
+			}
 		}
 		size, err := io.Copy(dst, src)
 		src.Close()
@@ -3334,6 +3347,8 @@ func (a *API) handleStorageReadiness(w http.ResponseWriter, r *http.Request) {
 		code = "no_user_category"
 		msg = "Tài khoản của bạn chưa được phân quyền danh mục lưu trữ (Tập dữ liệu). Vui lòng liên hệ quản trị viên."
 	}
+
+	go UnlockStorageRW("")
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ready":           ready,

@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -730,7 +729,7 @@ func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.HasPrefix(req.ParentID, "dataset:") {
-		canonicalPath, dsName, _, mountPath, err := a.resolveDatasetTarget(r.Context(), req.ParentID)
+		canonicalPath, _, _, mountPath, err := a.resolveDatasetTarget(r.Context(), req.ParentID)
 		if err != nil {
 			a.fail(w, r, err)
 			return
@@ -752,14 +751,9 @@ func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := os.MkdirAll(targetPath, 0755); err != nil {
-			// Nếu bị read-only file system hoặc mount chứa zfs-recovery, tự động bỏ cờ readonly
-			poolName := strings.Split(strings.Trim(dsName, "/"), "/")[0]
-			_ = exec.Command("zfs", "set", "readonly=off", dsName).Run()
-			_ = exec.Command("zfs", "set", "readonly=off", poolName).Run()
-			_ = exec.Command("mount", "-o", "remount,rw", cleanMount).Run()
-			_ = exec.Command("mount", "-o", "remount,rw", targetPath).Run()
-			_ = exec.Command("mount", "-o", "remount,rw", filepath.Dir(targetPath)).Run()
-			_ = exec.Command("mount", "-o", "remount,rw", "/mnt/zfs-recovery").Run()
+			if isReadOnlyError(err) || strings.Contains(mountPath, "zfs-recovery") {
+				UnlockStorageRW(targetPath)
+			}
 			if retryErr := os.MkdirAll(targetPath, 0755); retryErr != nil {
 				a.log.Error("mkdir failed", "path", targetPath, "error", retryErr)
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("Không thể tạo thư mục vật lý (%s): %v", folderName, retryErr)})
@@ -945,8 +939,14 @@ func (a *API) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 			oldTarget := filepath.Clean(mountPath)
 			newTarget := filepath.Clean(filepath.Join(filepath.Dir(oldTarget), newName))
 			if err := os.Rename(oldTarget, newTarget); err != nil {
-				a.fail(w, r, err)
-				return
+				if isReadOnlyError(err) {
+					UnlockStorageRW(newTarget)
+					err = os.Rename(oldTarget, newTarget)
+				}
+				if err != nil {
+					a.fail(w, r, err)
+					return
+				}
 			}
 			newCanonical := filepath.ToSlash(filepath.Join(filepath.Dir(canonicalPath), newName))
 			newCanonical = strings.TrimPrefix(newCanonical, "/")
@@ -975,11 +975,23 @@ func (a *API) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 			fileName := filepath.Base(oldTarget)
 			newTarget := filepath.Clean(filepath.Join(destMount, fileName))
 			if err := os.Rename(oldTarget, newTarget); err != nil {
-				if copyErr := copyPathRecursive(oldTarget, newTarget); copyErr != nil {
-					a.fail(w, r, copyErr)
-					return
+				if isReadOnlyError(err) {
+					UnlockStorageRW(newTarget)
+					err = os.Rename(oldTarget, newTarget)
 				}
-				_ = os.RemoveAll(oldTarget)
+				if err != nil {
+					if copyErr := copyPathRecursive(oldTarget, newTarget); copyErr != nil {
+						if isReadOnlyError(copyErr) {
+							UnlockStorageRW(newTarget)
+							copyErr = copyPathRecursive(oldTarget, newTarget)
+						}
+						if copyErr != nil {
+							a.fail(w, r, copyErr)
+							return
+						}
+					}
+					_ = os.RemoveAll(oldTarget)
+				}
 			}
 			newCanonical := filepath.ToSlash(filepath.Join(destCanonical, fileName))
 			newCanonical = strings.TrimPrefix(newCanonical, "/")
@@ -2105,7 +2117,13 @@ func copyPathRecursive(src, dst string) error {
 	}
 	if info.IsDir() {
 		if err := os.MkdirAll(dst, 0755); err != nil {
-			return err
+			if isReadOnlyError(err) {
+				UnlockStorageRW(dst)
+				err = os.MkdirAll(dst, 0755)
+			}
+			if err != nil {
+				return err
+			}
 		}
 		entries, err := os.ReadDir(src)
 		if err != nil {
@@ -2127,7 +2145,13 @@ func copyPathRecursive(src, dst string) error {
 	defer sFile.Close()
 	dFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
-		return err
+		if isReadOnlyError(err) {
+			UnlockStorageRW(dst)
+			dFile, err = os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		}
+		if err != nil {
+			return err
+		}
 	}
 	defer dFile.Close()
 	_, err = io.Copy(dFile, sFile)
@@ -2190,8 +2214,14 @@ func (a *API) handleCopyNode(w http.ResponseWriter, r *http.Request) {
 			fileName = filepath.Base(newTarget)
 		}
 		if err := copyPathRecursive(srcMount, newTarget); err != nil {
-			a.fail(w, r, err)
-			return
+			if isReadOnlyError(err) {
+				UnlockStorageRW(newTarget)
+				err = copyPathRecursive(srcMount, newTarget)
+			}
+			if err != nil {
+				a.fail(w, r, err)
+				return
+			}
 		}
 		newCanonical := filepath.ToSlash(filepath.Join(destCanonical, fileName))
 		newCanonical = strings.TrimPrefix(newCanonical, "/")
@@ -2221,6 +2251,71 @@ func (a *API) handleCopyNode(w http.ResponseWriter, r *http.Request) {
 		ext := filepath.Ext(newName)
 		base := strings.TrimSuffix(newName, ext)
 		newName = fmt.Sprintf("%s - Copy%s", base, ext)
+	}
+
+	// 2a. Target is dataset, copy from DB node into dataset
+	if strings.HasPrefix(targetParentID, "dataset:") {
+		destCanonical, _, _, destMount, dErr := a.resolveDatasetTarget(r.Context(), targetParentID)
+		if dErr != nil {
+			a.fail(w, r, dErr)
+			return
+		}
+		destRole, dErr := a.checkDatasetAccess(r, destCanonical, true)
+		if dErr != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": dErr.Error()})
+			return
+		}
+		newTarget := filepath.Clean(filepath.Join(destMount, newName))
+		if _, statErr := os.Stat(newTarget); statErr == nil {
+			ext := filepath.Ext(newName)
+			base := strings.TrimSuffix(newName, ext)
+			newTarget = filepath.Clean(filepath.Join(destMount, fmt.Sprintf("%s - Copy%s", base, ext)))
+			newName = filepath.Base(newTarget)
+		}
+		if srcNode.Type == models.NodeFolder {
+			if err := os.MkdirAll(newTarget, 0755); err != nil {
+				if isReadOnlyError(err) {
+					UnlockStorageRW(newTarget)
+					err = os.MkdirAll(newTarget, 0755)
+				}
+				if err != nil {
+					a.fail(w, r, err)
+					return
+				}
+			}
+		} else {
+			f, _, err := a.files.OpenNodeBytes(srcNode)
+			if err != nil {
+				a.fail(w, r, err)
+				return
+			}
+			defer f.Close()
+			dFile, err := os.OpenFile(newTarget, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+			if err != nil {
+				if isReadOnlyError(err) {
+					UnlockStorageRW(newTarget)
+					dFile, err = os.OpenFile(newTarget, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+				}
+				if err != nil {
+					a.fail(w, r, err)
+					return
+				}
+			}
+			_, _ = io.Copy(dFile, f)
+			_ = dFile.Close()
+		}
+		newCanonical := filepath.ToSlash(filepath.Join(destCanonical, newName))
+		newCanonical = strings.TrimPrefix(newCanonical, "/")
+		invalidateAllCaches()
+		writeJSON(w, http.StatusCreated, nodeDTO{
+			ID:        fmt.Sprintf("dataset:%s", newCanonical),
+			ParentID:  targetParentID,
+			Name:      newName,
+			Role:      destRole,
+			CreatedAt: time.Now().UnixMilli(),
+			UpdatedAt: time.Now().UnixMilli(),
+		})
+		return
 	}
 
 	if srcNode.Type == models.NodeFolder {
@@ -2312,12 +2407,88 @@ func (a *API) handleMoveNode(w http.ResponseWriter, r *http.Request) {
 		fileName := filepath.Base(oldTarget)
 		newTarget := filepath.Clean(filepath.Join(destMount, fileName))
 		if err := os.Rename(oldTarget, newTarget); err != nil {
-			if copyErr := copyPathRecursive(oldTarget, newTarget); copyErr != nil {
-				a.fail(w, r, copyErr)
+			if isReadOnlyError(err) {
+				UnlockStorageRW(newTarget)
+				err = os.Rename(oldTarget, newTarget)
+			}
+			if err != nil {
+				if copyErr := copyPathRecursive(oldTarget, newTarget); copyErr != nil {
+					if isReadOnlyError(copyErr) {
+						UnlockStorageRW(newTarget)
+						copyErr = copyPathRecursive(oldTarget, newTarget)
+					}
+					if copyErr != nil {
+						a.fail(w, r, copyErr)
+						return
+					}
+				}
+				_ = os.RemoveAll(oldTarget)
+			}
+		}
+		newCanonical := filepath.ToSlash(filepath.Join(destCanonical, fileName))
+		newCanonical = strings.TrimPrefix(newCanonical, "/")
+		invalidateAllCaches()
+		writeJSON(w, http.StatusOK, nodeDTO{
+			ID:        fmt.Sprintf("dataset:%s", newCanonical),
+			ParentID:  targetParentID,
+			Name:      fileName,
+			Role:      destRole,
+			UpdatedAt: time.Now().UnixMilli(),
+		})
+		return
+	}
+
+	if strings.HasPrefix(targetParentID, "dataset:") {
+		destCanonical, _, _, destMount, dErr := a.resolveDatasetTarget(r.Context(), targetParentID)
+		if dErr != nil {
+			a.fail(w, r, dErr)
+			return
+		}
+		destRole, accessErr := a.checkDatasetAccess(r, destCanonical, true)
+		if accessErr != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": accessErr.Error()})
+			return
+		}
+		srcNode, sErr := a.files.GetNode(r.Context(), nodeID)
+		if sErr != nil {
+			a.fail(w, r, sErr)
+			return
+		}
+		fileName := srcNode.Name
+		newTarget := filepath.Clean(filepath.Join(destMount, fileName))
+		if srcNode.Type == models.NodeFolder {
+			if err := os.MkdirAll(newTarget, 0755); err != nil {
+				if isReadOnlyError(err) {
+					UnlockStorageRW(newTarget)
+					err = os.MkdirAll(newTarget, 0755)
+				}
+				if err != nil {
+					a.fail(w, r, err)
+					return
+				}
+			}
+		} else {
+			f, _, err := a.files.OpenNodeBytes(srcNode)
+			if err != nil {
+				a.fail(w, r, err)
 				return
 			}
-			_ = os.RemoveAll(oldTarget)
+			defer f.Close()
+			dFile, err := os.OpenFile(newTarget, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+			if err != nil {
+				if isReadOnlyError(err) {
+					UnlockStorageRW(newTarget)
+					dFile, err = os.OpenFile(newTarget, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+				}
+				if err != nil {
+					a.fail(w, r, err)
+					return
+				}
+			}
+			_, _ = io.Copy(dFile, f)
+			_ = dFile.Close()
 		}
+		_ = a.files.PermanentDelete(r.Context(), userID, nodeID, ip)
 		newCanonical := filepath.ToSlash(filepath.Join(destCanonical, fileName))
 		newCanonical = strings.TrimPrefix(newCanonical, "/")
 		invalidateAllCaches()
