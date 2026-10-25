@@ -6,7 +6,6 @@ import '../../files/providers/files_providers.dart';
 import '../../files/widgets/shared/rename_sheet.dart';
 import '../../storage/providers/storage_providers.dart';
 import '../../upload/controller/transfer_controller.dart';
-import '../../about/controller/update_controller.dart';
 import '../widgets/uploads_tray.dart';
 
 /// Whether the phone tab bar belongs on this screen at all.
@@ -106,7 +105,6 @@ class _Banners extends ConsumerWidget {
             glyph: LdGlyph.upload,
             tint: LdColors.accentPrimary,
           ),
-        const _UpdateBanner(),
       ],
     );
   }
@@ -127,41 +125,8 @@ class _UpdateBanner extends ConsumerStatefulWidget {
 
 class _UpdateBannerState extends ConsumerState<_UpdateBanner> {
   @override
-  void initState() {
-    super.initState();
-    // quiet, so a laptop with no connection does not open onto an error about
-    // GitHub when all anyone did was start the app
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        ref.read(updateControllerProvider.notifier).check(quiet: true);
-      }
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final state = ref.watch(updateControllerProvider);
-    if (state is! UpdateAvailable) return const SizedBox.shrink();
-
-    final l10n = L10n.of(context);
-    return LdBanner(
-      message: l10n.updateAvailable(state.release.version),
-      glyph: LdGlyph.download,
-      tint: LdColors.accentPrimary,
-      action: LdTappable(
-        onTap: () => context.push(Routes.settingsAbout),
-        borderRadius: LdRadii.chipRadius,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Text(
-            l10n.updateNotes,
-            style: Theme.of(
-              context,
-            ).textTheme.labelMedium!.copyWith(color: LdColors.accentPrimary),
-          ),
-        ),
-      ),
-    );
+    return const SizedBox.shrink();
   }
 }
 
@@ -221,7 +186,7 @@ class _MobileShell extends ConsumerWidget {
                   label: l10n.navCreate,
                   emphasized: true,
                 ),
-                LdNavItem(glyph: LdGlyph.shared, label: l10n.navShared),
+                LdNavItem(glyph: LdGlyph.video, label: l10n.videos),
                 LdNavItem(glyph: LdGlyph.settings, label: l10n.navSettings),
               ],
             ),
@@ -230,7 +195,7 @@ class _MobileShell extends ConsumerWidget {
 
   static int _mobileIndexOf(String location) {
     if (location.startsWith(Routes.image)) return 1;
-    if (location.startsWith(Routes.shared)) return 3;
+    if (location.startsWith(Routes.videos)) return 3;
     if (location.startsWith(Routes.settings)) return 4;
     return 0;
   }
@@ -245,7 +210,7 @@ class _MobileShell extends ConsumerWidget {
         // create does not navigate; it opens the same sheet from anywhere
         unawaitedCreate(context, ref);
       case 3:
-        context.go(Routes.shared);
+        context.go(Routes.videos);
       case 4:
         context.go(Routes.settings);
     }

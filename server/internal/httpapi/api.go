@@ -345,6 +345,13 @@ func (a *API) uploadHandler() http.Handler {
 	limited := mw.LimitConcurrency(a.uploadSem, mw.ByUser)(strip)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := mw.UserFrom(r.Context())
+		if ok {
+			usedBytes, limitBytes, _, isUnlimited, _ := a.resolveUserStorageDataset(r.Context(), user)
+			if !isUnlimited && limitBytes > 0 && usedBytes >= limitBytes {
+				writeError(w, http.StatusInsufficientStorage, "quota_exceeded", "Dung lượng lưu trữ đã vượt quá hạn ngạch cho phép, không thể tải thêm dữ liệu.")
+				return
+			}
+		}
 		if ok && user.Role != models.RoleAdmin {
 			hasPerms := false
 			if user.DatasetPermissions != "" && user.DatasetPermissions != "{}" {

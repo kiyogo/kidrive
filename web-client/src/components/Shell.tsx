@@ -654,6 +654,10 @@ export function Shell({
             );
           })}
         </div>
+
+        {user && (
+          <QuotaBar used={user.quota_bytes_used || 0} total={user.quota_bytes || 0} />
+        )}
       </aside>
 
       <main
@@ -746,37 +750,51 @@ function QuotaBar({ used, total }: { used: number; total: number }) {
   const t = useL10n();
   const unlimited = !total || total <= 0;
   const pct = percent(used, total);
-  const pctDisplay = pct > 0 && pct < 1 ? pct.toFixed(1) : Math.round(pct);
   const remaining = Math.max(0, total - used);
+  const isOverQuota = !unlimited && used > total;
 
   return (
     <div
       onClick={() => {
-        window.location.href = "/storage";
+        window.history.pushState(null, "", "/storage");
+        window.dispatchEvent(new PopStateEvent("popstate"));
       }}
       title="Xem chi tiết bộ nhớ tài khoản"
       style={{
-        padding: "12px 10px",
+        padding: "10px 14px 12px",
         whiteSpace: "nowrap",
         cursor: "pointer",
-        borderRadius: 8,
+        borderRadius: 12,
+        background: isOverQuota ? "rgba(239, 68, 68, 0.08)" : "var(--bg-sunken, #f8fafc)",
+        border: `1px solid ${isOverQuota ? "rgba(239, 68, 68, 0.3)" : "var(--stroke, rgba(0,0,0,0.06))"}`,
+        margin: "8px 12px 14px",
+        transition: "all 0.2s ease",
       }}
     >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: isOverQuota ? "#ef4444" : "var(--fg-secondary)" }}>
+          {isOverQuota ? "Vượt hạn ngạch" : "Bộ nhớ tài khoản"}
+        </span>
+        <span style={{ fontSize: 11, color: isOverQuota ? "#ef4444" : "var(--fg-muted)", fontWeight: 500 }}>
+          {unlimited ? bytes(used) : `${bytes(used)} / ${bytes(total)}`}
+        </span>
+      </div>
       <div
         style={{
           height: 6,
           borderRadius: 999,
           background: "var(--border-subtle, #e2e8f0)",
           overflow: "hidden",
-          marginBottom: 8,
+          marginBottom: 6,
         }}
       >
         <div
           style={{
             height: "100%",
-            width: unlimited ? "12%" : `${pct}%`,
-            background: pct > 90 ? "var(--warning)" : "var(--accent, #2563EB)",
+            width: isOverQuota ? "100%" : unlimited ? (used > 0 ? "25%" : "0%") : `${Math.min(100, Math.max(0, pct))}%`,
+            background: isOverQuota ? "#ef4444" : pct > 90 ? "var(--warning)" : "var(--accent, #2563EB)",
             borderRadius: 999,
+            transition: "width 0.3s ease",
           }}
         />
       </div>
@@ -786,17 +804,17 @@ function QuotaBar({ used, total }: { used: number; total: number }) {
           justifyContent: "space-between",
           alignItems: "center",
           whiteSpace: "nowrap",
-          fontSize: 12,
-          color: "var(--fg-secondary)",
+          fontSize: 11,
+          color: isOverQuota ? "#ef4444" : "var(--fg-secondary)",
           gap: 6,
         }}
       >
-        <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>
+        <span style={{ fontWeight: 500, whiteSpace: "nowrap" }}>
           {t.sidebarStorageUsed({ used: bytes(used) })}
         </span>
         {!unlimited && (
-          <span style={{ color: "var(--fg-muted)", whiteSpace: "nowrap" }}>
-            {t.sidebarStorageFree({ free: bytes(remaining) })}
+          <span style={{ color: isOverQuota ? "#ef4444" : "var(--fg-muted)", whiteSpace: "nowrap" }}>
+            {isOverQuota ? "0 B" : t.sidebarStorageFree({ free: bytes(remaining) })}
           </span>
         )}
       </div>

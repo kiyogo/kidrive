@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -78,13 +80,167 @@ type categoryStatDTO struct {
 	Count int64 `json:"count"`
 }
 
+func (a *API) resolveUserStorageDataset(ctx context.Context, user models.User) (usedBytes, limitBytes, totalBytes int64, isUnlimited bool, dsName string) {
+	type dsRecord struct {
+		id    string
+		name  string
+		pool  string
+		mount string
+		quota int64
+		used  int64
+	}
+	var allDatasets []dsRecord
+	dRows, dErr := a.db.Read().QueryContext(ctx, `SELECT id, name, pool, mount, quota_bytes, used_bytes FROM datasets`)
+	if dErr == nil {
+		defer dRows.Close()
+		for dRows.Next() {
+			var d dsRecord
+			if err := dRows.Scan(&d.id, &d.name, &d.pool, &d.mount, &d.quota, &d.used); err == nil {
+				allDatasets = append(allDatasets, d)
+			}
+		}
+	}
+
+	poolTotals := make(map[string]int64)
+	poolUseds := make(map[string]int64)
+	pRows, pErr := a.db.Read().QueryContext(ctx, `SELECT name, total_bytes, used_bytes FROM storage_pools`)
+	if pErr == nil {
+		defer pRows.Close()
+		for pRows.Next() {
+			var pName string
+			var pTotal, pUsed int64
+			if err := pRows.Scan(&pName, &pTotal, &pUsed); err == nil {
+				poolTotals[strings.ToLower(pName)] = pTotal
+				poolUseds[strings.ToLower(pName)] = pUsed
+			}
+		}
+	}
+
+	if hasZFSTools() {
+		for _, zp := range detectZFSPools() {
+			pLower := strings.ToLower(zp.Name)
+			poolTotals[pLower] = zp.TotalBytes
+			poolUseds[pLower] = zp.UsedBytes
+			for _, zd := range zp.Datasets {
+				dClean := strings.ToLower(strings.Trim(zd.Name, "/"))
+				for i := range allDatasets {
+					if strings.ToLower(strings.Trim(allDatasets[i].name, "/")) == dClean {
+						allDatasets[i].used = zd.UsedBytes
+					}
+				}
+			}
+		}
+	}
+
+	var matchedDs *dsRecord
+	var rawPerms map[string]any
+	if user.DatasetPermissions != "" && user.DatasetPermissions != "{}" {
+		_ = json.Unmarshal([]byte(user.DatasetPermissions), &rawPerms)
+	}
+
+	if len(rawPerms) > 0 {
+		for _, d := range allDatasets {
+			dClean := strings.ToLower(strings.Trim(d.name, "/"))
+			for k, v := range rawPerms {
+				if v == nil || v == "none" {
+					continue
+				}
+				kClean := strings.ToLower(strings.Trim(k, "/"))
+				if kClean == "" || kClean == "*" || kClean == "/" {
+					continue
+				}
+				if kClean == dClean || strings.HasSuffix(dClean, "/"+kClean) || strings.Contains(dClean, kClean) {
+					dCopy := d
+					matchedDs = &dCopy
+					break
+				}
+			}
+			if matchedDs != nil {
+				break
+			}
+		}
+	}
+
+	if matchedDs == nil && user.Username != "" {
+		uLower := strings.ToLower(user.Username)
+		for _, d := range allDatasets {
+			dLower := strings.ToLower(d.name)
+			if strings.Contains(dLower, uLower) {
+				dCopy := d
+				matchedDs = &dCopy
+				break
+			}
+		}
+	}
+
+	if matchedDs == nil && len(allDatasets) > 0 {
+		var maxUsed int64 = -1
+		for _, d := range allDatasets {
+			if d.used > maxUsed {
+				maxUsed = d.used
+				dCopy := d
+				matchedDs = &dCopy
+			}
+		}
+	}
+
+	if matchedDs != nil {
+		dsName = matchedDs.name
+		usedBytes = matchedDs.used
+		pLower := strings.ToLower(matchedDs.pool)
+		if pt, ok := poolTotals[pLower]; ok && pt > 0 {
+			totalBytes = pt
+		} else if len(poolTotals) > 0 {
+			for _, pt := range poolTotals {
+				if pt > totalBytes {
+					totalBytes = pt
+				}
+			}
+		}
+
+		effectiveQuota := user.QuotaBytes
+		if effectiveQuota <= 0 && matchedDs.quota > 0 {
+			effectiveQuota = matchedDs.quota
+		}
+
+		if effectiveQuota <= 0 {
+			isUnlimited = true
+			if totalBytes > 0 {
+				limitBytes = totalBytes
+			} else {
+				limitBytes = usedBytes + (350 * 1024 * 1024 * 1024)
+			}
+		} else {
+			isUnlimited = false
+			if totalBytes > 0 && effectiveQuota > totalBytes {
+				limitBytes = totalBytes
+			} else {
+				limitBytes = effectiveQuota
+			}
+		}
+		return
+	}
+
+	usedBytes = user.QuotaBytesUsed
+	if user.QuotaBytes > 0 {
+		isUnlimited = false
+		limitBytes = user.QuotaBytes
+		totalBytes = user.QuotaBytes
+	} else {
+		isUnlimited = true
+		limitBytes = 0
+		totalBytes = 0
+	}
+	return
+}
+
 func (a *API) handleAccountStorageBreakdown(w http.ResponseWriter, r *http.Request) {
 	user, _ := mw.UserFrom(r.Context())
-	quota := user.QuotaBytes
-	used := user.QuotaBytesUsed
+	used, limit, total, isUnlimited, dsName := a.resolveUserStorageDataset(r.Context(), user)
+
 	var free int64 = -1
-	if quota > 0 {
-		free = quota - used
+	if limit > 0 {
+		free = limit - used
 		if free < 0 {
 			free = 0
 		}
@@ -99,6 +255,7 @@ func (a *API) handleAccountStorageBreakdown(w http.ResponseWriter, r *http.Reque
 		"trash":     {},
 	}
 
+	var totalCategorized int64 = 0
 	rows, err := a.db.Read().QueryContext(r.Context(), `
 		SELECT 
 			CASE 
@@ -114,9 +271,9 @@ func (a *API) handleAccountStorageBreakdown(w http.ResponseWriter, r *http.Reque
 			COUNT(*),
 			COALESCE(SUM(size_bytes), 0)
 		FROM nodes
-		WHERE owner_id = ? AND deleted_at IS NULL AND type = 'file'
+		WHERE deleted_at IS NULL AND type = 'file'
 		GROUP BY cat
-	`, user.ID)
+	`)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -124,20 +281,32 @@ func (a *API) handleAccountStorageBreakdown(w http.ResponseWriter, r *http.Reque
 			var count, totalBytes int64
 			if err := rows.Scan(&cat, &count, &totalBytes); err == nil {
 				stats[cat] = categoryStatDTO{Bytes: totalBytes, Count: count}
+				totalCategorized += totalBytes
 			}
 		}
 	}
 
-	var usagePercent float64
-	if quota > 0 {
-		usagePercent = float64(used) / float64(quota) * 100.0
+	if used > totalCategorized {
+		diff := used - totalCategorized
+		other := stats["other"]
+		other.Bytes += diff
+		stats["other"] = other
+	}
+
+	var usagePercent float64 = 0
+	if limit > 0 {
+		usagePercent = float64(used) / float64(limit) * 100.0
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"quota_bytes":   quota,
+		"quota_bytes":   limit,
 		"used_bytes":    used,
 		"free_bytes":    free,
 		"usage_percent": usagePercent,
+		"is_unlimited":  isUnlimited,
+		"is_over_quota": used > limit && limit > 0,
+		"total_bytes":   total,
+		"dataset_name":  dsName,
 		"categories":    stats,
 	})
 }

@@ -35,6 +35,31 @@ class FilesDb {
     return _nodes(json['nodes']);
   }
 
+  Future<({List<NodeModel> nodes, bool hasMore, int nextOffset, int total})> listPaged({
+    String parentId = '',
+    String filter = NodeFilter.none,
+    String query = '',
+    SortBy sortBy = SortBy.name,
+    bool descending = false,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final json = await _api.get(Api.nodes, query: <String, dynamic>{
+      if (parentId.isNotEmpty) Api.qParentId: parentId,
+      if (filter.isNotEmpty) Api.qFilter: filter,
+      if (query.isNotEmpty) Api.qQuery: query,
+      Api.qSort: sortBy.wire,
+      Api.qOrder: descending ? 'desc' : 'asc',
+      Api.qLimit: limit,
+      Api.qOffset: offset,
+    });
+    final nodes = _nodes(json['nodes']);
+    final hasMore = json['has_more'] as bool? ?? (nodes.length >= limit);
+    final nextOffset = json['next_offset'] as int? ?? (offset + nodes.length);
+    final total = json['total'] as int? ?? nodes.length;
+    return (nodes: nodes, hasMore: hasMore, nextOffset: nextOffset, total: total);
+  }
+
   Future<NodeModel> node(String id) async =>
       NodeModel.fromJson(await _api.get(Api.node(id)));
 

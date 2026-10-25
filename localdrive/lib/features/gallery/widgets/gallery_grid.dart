@@ -34,43 +34,59 @@ class GalleryGrid extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     const padding = 13.0;
 
-    return CustomScrollView(
-      slivers: <Widget>[
-        for (final section in sections) ...<Widget>[
-          if (section.label.isNotEmpty)
-            SliverPersistentHeader(
-              // headings stick while their own section is on screen, so it is
-              // always clear which month is being looked at
-              pinned: true,
-              delegate: _HeadingDelegate(
-                label: section.label,
-                count: section.items.length,
-                padding: padding,
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification.metrics.pixels >=
+            notification.metrics.maxScrollExtent - 600) {
+          ref.read(galleryProvider.notifier).loadMore();
+        }
+        return false;
+      },
+      child: CustomScrollView(
+        slivers: <Widget>[
+          for (final section in sections) ...<Widget>[
+            if (section.label.isNotEmpty)
+              SliverPersistentHeader(
+                // headings stick while their own section is on screen, so it is
+                // always clear which month is being looked at
+                pinned: true,
+                delegate: _HeadingDelegate(
+                  label: section.label,
+                  count: section.items.length,
+                  padding: padding,
+                ),
+              ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(13, 13, 13, 13),
+              sliver: SliverMasonryGrid.count(
+                crossAxisCount: columns,
+                mainAxisSpacing: 13,
+                crossAxisSpacing: 13,
+                childCount: section.items.length,
+                itemBuilder: (context, index) {
+                  final node = section.items[index];
+                  return GalleryTile(
+                    node: node,
+                    selected: selection.contains(node.id),
+                    selecting: selection.isNotEmpty,
+                    onOpen: () => onOpen(node),
+                    onToggleSelect: () => onToggleSelect(node),
+                  );
+                },
               ),
             ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(13, 13, 13, 13),
-            sliver: SliverMasonryGrid.count(
-              crossAxisCount: columns,
-              mainAxisSpacing: 13,
-              crossAxisSpacing: 13,
-              childCount: section.items.length,
-              itemBuilder: (context, index) {
-                final node = section.items[index];
-                return GalleryTile(
-                  node: node,
-                  selected: selection.contains(node.id),
-                  selecting: selection.isNotEmpty,
-                  onOpen: () => onOpen(node),
-                  onToggleSelect: () => onToggleSelect(node),
-                );
-              },
+          ],
+          if (ref.watch(galleryProvider.notifier).hasMore)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Center(child: LdSpinner()),
+              ),
             ),
-          ),
+          // room under the last row for the floating navigation to sit over
+          const SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
-        // room under the last row for the floating navigation to sit over
-        const SliverToBoxAdapter(child: SizedBox(height: 100)),
-      ],
+      ),
     );
   }
 }

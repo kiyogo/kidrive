@@ -1455,6 +1455,10 @@ interface AccountStorageData {
   used_bytes: number;
   free_bytes: number;
   usage_percent: number;
+  is_unlimited?: boolean;
+  is_over_quota?: boolean;
+  total_bytes?: number;
+  dataset_name?: string;
   categories: {
     images: CategoryStat;
     videos: CategoryStat;
@@ -1518,11 +1522,12 @@ export function StorageScreen() {
   }
 
   const quota = data?.quota_bytes ?? (user?.quota_bytes ?? 0);
-  const isUnlimited = !quota || quota <= 0;
+  const isUnlimited = data?.is_unlimited ?? (!quota || quota <= 0);
   const used = data?.used_bytes ?? 0;
-  const free = isUnlimited ? -1 : (data?.free_bytes ?? Math.max(0, quota - used));
-  const percentUsed = !isUnlimited && quota > 0 ? Math.min(100, Math.max(0, (used / quota) * 100)) : 0;
-  const isWarn = percentUsed >= 95;
+  const isOverQuota = Boolean(data?.is_over_quota || (!isUnlimited && quota > 0 && used > quota));
+  const free = isUnlimited ? Math.max(0, quota - used) : (data?.free_bytes ?? Math.max(0, quota - used));
+  const percentUsed = quota > 0 ? Math.min(100, Math.max(0, (used / quota) * 100)) : 0;
+  const isWarn = percentUsed >= 90 || isOverQuota;
 
   const categories = data?.categories ?? {
     images: { bytes: 0, count: 0 },
@@ -1644,10 +1649,9 @@ export function StorageScreen() {
                 style={{
                   fontSize: 12,
                   fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.8,
-                  color: "var(--accent)",
-                  background: "rgba(76, 141, 255, 0.12)",
+                  letterSpacing: 0.2,
+                  color: isOverQuota ? "#ef4444" : "var(--accent)",
+                  background: isOverQuota ? "rgba(239, 68, 68, 0.12)" : "rgba(76, 141, 255, 0.12)",
                   padding: "4px 10px",
                   borderRadius: 999,
                 }}
@@ -1660,13 +1664,28 @@ export function StorageScreen() {
             </span>
           </div>
 
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 16 }}>
-            <span style={{ fontSize: 36, fontWeight: 700, lineHeight: 1.1, color: "var(--fg-primary)" }}>
+          <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+            <span style={{ fontSize: 36, fontWeight: 700, lineHeight: 1.1, color: isOverQuota ? "#ef4444" : "var(--fg-primary)" }}>
               {bytes(used)}
             </span>
-            <span style={{ fontSize: 16, color: "var(--fg-secondary)", fontWeight: 500 }}>
-              / {isUnlimited ? "Không giới hạn" : bytes(quota)}
+            <span style={{ fontSize: 16, color: isOverQuota ? "#ef4444" : "var(--fg-secondary)", fontWeight: 500 }}>
+              / {quota > 0 ? bytes(quota) : (isUnlimited ? "Không giới hạn" : bytes(quota))}
             </span>
+            {isOverQuota && (
+              <span
+                style={{
+                  marginLeft: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#ef4444",
+                  background: "rgba(239, 68, 68, 0.12)",
+                  padding: "2px 8px",
+                  borderRadius: 6,
+                }}
+              >
+                Vượt quá dung lượng
+              </span>
+            )}
           </div>
 
           {/* Smooth modern progress bar */}
@@ -1684,9 +1703,9 @@ export function StorageScreen() {
             <div
               style={{
                 height: "100%",
-                width: isUnlimited ? (used > 0 ? "100%" : "0%") : `${percentUsed}%`,
+                width: isOverQuota ? "100%" : `${Math.min(100, Math.max(0, percentUsed))}%`,
                 minWidth: used > 0 ? 4 : 0,
-                background: isWarn ? "var(--warning)" : "var(--accent)",
+                background: isOverQuota ? "#ef4444" : (isWarn ? "var(--warning)" : "var(--accent)"),
                 borderRadius: 999,
                 transition: "width 0.4s ease",
               }}
@@ -1694,13 +1713,30 @@ export function StorageScreen() {
           </div>
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-            <span className="t-body-sm" style={{ color: "var(--fg-secondary)", fontWeight: 500 }}>
+            <span className="t-body-sm" style={{ color: isOverQuota ? "#ef4444" : "var(--fg-secondary)", fontWeight: 500 }}>
               Đã dùng {bytes(used)}
             </span>
-            <span className="t-body-sm" style={{ color: "var(--fg-secondary)", fontWeight: 500 }}>
-              Còn {isUnlimited ? "Không giới hạn" : bytes(free)}
+            <span className="t-body-sm" style={{ color: isOverQuota ? "#ef4444" : "var(--fg-secondary)", fontWeight: 500 }}>
+              {isOverQuota ? "Vượt mức hạn ngạch" : `Còn ${bytes(free)}`}
             </span>
           </div>
+
+          {isOverQuota && (
+            <div
+              style={{
+                marginTop: 14,
+                padding: "10px 14px",
+                borderRadius: 8,
+                background: "rgba(239, 68, 68, 0.08)",
+                border: "1px solid rgba(239, 68, 68, 0.2)",
+                color: "#ef4444",
+                fontSize: 12.5,
+                lineHeight: 1.45,
+              }}
+            >
+              Dung lượng đã vượt quá hạn ngạch cho phép ({bytes(used)} / {bytes(quota)}). Toàn bộ dữ liệu hiện tại vẫn được bảo toàn tuyệt đối, hệ thống sẽ chỉ tạm ngưng tải thêm tệp mới cho đến khi hạn ngạch được tăng hoặc dữ liệu được dọn dẹp bớt.
+            </div>
+          )}
         </div>
 
         {/* Category Breakdown Section */}

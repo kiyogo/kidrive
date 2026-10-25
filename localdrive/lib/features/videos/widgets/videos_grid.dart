@@ -2,10 +2,11 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 
 import '../../../imports.dart';
 import '../../files/models/node_model.dart';
+import '../providers/videos_providers.dart';
 import 'video_tile.dart';
 
 /// The grid layout for video items.
-class VideosGrid extends StatelessWidget {
+class VideosGrid extends ConsumerWidget {
   const VideosGrid({
     super.key,
     required this.nodes,
@@ -22,30 +23,46 @@ class VideosGrid extends StatelessWidget {
   final void Function(NodeModel node) onToggleSelect;
 
   @override
-  Widget build(BuildContext context) {
-    return CustomScrollView(
-      slivers: <Widget>[
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(13, 13, 13, 13),
-          sliver: SliverMasonryGrid.count(
-            crossAxisCount: columns,
-            mainAxisSpacing: 13,
-            crossAxisSpacing: 13,
-            childCount: nodes.length,
-            itemBuilder: (context, index) {
-              final node = nodes[index];
-              return VideoTile(
-                node: node,
-                selected: selection.contains(node.id),
-                selecting: selection.isNotEmpty,
-                onOpen: () => onOpen(node),
-                onToggleSelect: () => onToggleSelect(node),
-              );
-            },
+  Widget build(BuildContext context, WidgetRef ref) {
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification.metrics.pixels >=
+            notification.metrics.maxScrollExtent - 600) {
+          ref.read(videosProvider.notifier).loadMore();
+        }
+        return false;
+      },
+      child: CustomScrollView(
+        slivers: <Widget>[
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(13, 13, 13, 13),
+            sliver: SliverMasonryGrid.count(
+              crossAxisCount: columns,
+              mainAxisSpacing: 13,
+              crossAxisSpacing: 13,
+              childCount: nodes.length,
+              itemBuilder: (context, index) {
+                final node = nodes[index];
+                return VideoTile(
+                  node: node,
+                  selected: selection.contains(node.id),
+                  selecting: selection.isNotEmpty,
+                  onOpen: () => onOpen(node),
+                  onToggleSelect: () => onToggleSelect(node),
+                );
+              },
+            ),
           ),
-        ),
-        const SliverToBoxAdapter(child: SizedBox(height: 100)),
-      ],
+          if (ref.watch(videosProvider.notifier).hasMore)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Center(child: LdSpinner()),
+              ),
+            ),
+          const SliverToBoxAdapter(child: SizedBox(height: 100)),
+        ],
+      ),
     );
   }
 }

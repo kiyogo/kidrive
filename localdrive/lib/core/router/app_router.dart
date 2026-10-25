@@ -70,8 +70,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         SessionStage.signedOut => onboarding ? null : Routes.signIn,
         SessionStage.pendingApproval =>
           location == Routes.pendingApproval ? null : Routes.pendingApproval,
-        SessionStage.mustEnableTotp =>
-          location == Routes.twoFactorSetup ? null : Routes.twoFactorSetup,
+        SessionStage.mustEnableTotp => Routes.files,
         SessionStage.mustChangePassword =>
           location == Routes.changePassword ? null : Routes.changePassword,
         // The screens that hold you until you pass them. Once the stage moves

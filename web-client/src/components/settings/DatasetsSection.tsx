@@ -17,6 +17,9 @@ export interface DatasetItem {
   available: string;
   mount: string;
   quota: string;
+  usedBytes?: number;
+  quotaBytes?: number;
+  isOverQuota?: boolean;
   status: "Hoạt động" | "Chỉ đọc";
   createdAt: number;
 }
@@ -32,6 +35,9 @@ export interface DatasetTreeNode {
   total?: string;
   free?: string;
   quota: string;
+  usedBytes?: number;
+  quotaBytes?: number;
+  isOverQuota?: boolean;
   status?: "Hoạt động" | "Chỉ đọc";
   isShared?: boolean;
   dataset?: DatasetItem;
@@ -238,8 +244,8 @@ function DatasetMobileCard({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid var(--stroke)", paddingTop: 8, fontSize: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ color: "var(--fg-secondary)" }}>Dung lượng:</span>
-            <span style={{ fontWeight: 600, color: "var(--fg-primary)", fontSize: 12 }}>
-              {node.used} / {node.available}
+            <span style={{ fontWeight: 600, color: node.isOverQuota ? "#ef4444" : "var(--fg-primary)", fontSize: 12 }}>
+              {node.isOverQuota ? `${node.used} / ${node.quota}` : `${node.used} / ${node.available}`}
             </span>
           </div>
           <span
@@ -378,8 +384,8 @@ function DatasetTreeRow({
         }}
       >
         <div style={{ minHeight: 32, display: "flex", alignItems: "center" }}>
-          <span style={{ fontWeight: 500, fontSize: 13 }}>
-            {node.used} / {node.available}
+          <span style={{ fontWeight: 500, fontSize: 13, color: node.isOverQuota ? "#ef4444" : "var(--fg-primary)" }}>
+            {node.isOverQuota ? `${node.used} / ${node.quota}` : `${node.used} / ${node.available}`}
           </span>
         </div>
       </td>
@@ -583,13 +589,18 @@ export function DatasetsSection({
         const poolName = formatProperCase(d.pool || "");
         const dsName = formatProperCase(d.name || "");
         const usedBytes = d.used_bytes || 0;
-        const availBytes = d.available_bytes ?? (d.quota_bytes > 0 ? Math.max(0, d.quota_bytes - usedBytes) : 0);
+        const quotaBytes = d.quota_bytes || 0;
+        const availBytes = d.available_bytes ?? (quotaBytes > 0 ? Math.max(0, quotaBytes - usedBytes) : 0);
+        const isOverQuota = quotaBytes > 0 && usedBytes > quotaBytes;
         return {
           id: d.id,
           name: dsName,
           pool: poolName,
           used: formatDatasetBytes(usedBytes),
           available: availBytes > 0 ? formatDatasetBytes(availBytes) : "0 B",
+          usedBytes,
+          quotaBytes,
+          isOverQuota,
           mount: d.mount,
           quota: d.quota_bytes > 0 ? formatDatasetBytes(d.quota_bytes) : "Không giới hạn",
           status: (d.status === "readonly" ? "Chỉ đọc" : "Hoạt động") as "Chỉ đọc" | "Hoạt động",
@@ -743,6 +754,9 @@ export function DatasetsSection({
               used: isLeaf ? d.used : "0 B",
               available: isLeaf ? d.available : (poolFree !== undefined ? formatDatasetBytes(poolFree) : "0 B"),
               quota: isLeaf ? d.quota : "Không giới hạn",
+              usedBytes: isLeaf ? d.usedBytes : 0,
+              quotaBytes: isLeaf ? d.quotaBytes : 0,
+              isOverQuota: isLeaf ? d.isOverQuota : false,
               status: isLeaf ? d.status : "Hoạt động",
               isShared,
               dataset: isLeaf
@@ -771,6 +785,9 @@ export function DatasetsSection({
             existing.used = d.used;
             existing.available = d.available;
             existing.quota = d.quota;
+            existing.usedBytes = d.usedBytes;
+            existing.quotaBytes = d.quotaBytes;
+            existing.isOverQuota = d.isOverQuota;
             existing.status = d.status;
             existing.isShared = sharedNames.has(d.name) || sharedNames.has(d.mount) || sharedNames.has(properPart) || sharedNames.has(part);
             existing.dataset = d;
@@ -1591,6 +1608,29 @@ export function DatasetsSection({
                 </>
               )}
             </div>
+
+            {(() => {
+              const selectedBytes = parseQuota(quotaSelectedOption);
+              const usedBytes = (quotaModalItem as any)?.usedBytes || 0;
+              if (selectedBytes > 0 && usedBytes > selectedBytes) {
+                return (
+                  <div
+                    style={{
+                      padding: "10px 14px",
+                      borderRadius: 8,
+                      background: "rgba(239, 68, 68, 0.08)",
+                      border: "1px solid rgba(239, 68, 68, 0.25)",
+                      color: "#ef4444",
+                      fontSize: 12.5,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    Hạn ngạch bạn chọn ({quotaSelectedOption}) nhỏ hơn dung lượng hiện đang sử dụng ({quotaModalItem.used}). Dữ liệu đã lưu vẫn được bảo toàn nguyên vẹn, hệ thống sẽ chỉ tạm ngưng tải thêm dữ liệu mới cho đến khi mở rộng thêm dung lượng.
+                  </div>
+                );
+              }
+              return null;
+            })()}
 
             {/* Buttons */}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>

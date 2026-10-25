@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/api_endpoints.dart';
@@ -117,24 +118,100 @@ final galleryGroupingProvider =
 
 List<NodeModel>? galleryMemoryCache;
 
-/// Every picture this account can reach, in one flat stream.
-/// Strictly images only (no videos).
-final galleryProvider = FutureProvider.autoDispose<List<NodeModel>>((ref) async {
-  final sort = ref.watch(gallerySortProvider);
-  ref.keepAlive();
+class GalleryController extends AutoDisposeAsyncNotifier<List<NodeModel>> {
+  int _offset = 0;
+  bool _hasMore = true;
+  bool _isLoadingMore = false;
+  int _totalCount = 0;
 
-  final list = await ref.watch(filesDbProvider).list(
-        filter: NodeFilter.image,
-        sortBy: SortBy.fromWire(sort.by.wire),
-        descending: sort.descending,
-        limit: 100000,
-      );
-  final imagesOnly = list
-      .where((node) => node.category == FileCategory.image)
-      .toList(growable: false);
-  galleryMemoryCache = imagesOnly;
-  return imagesOnly;
-});
+  bool get hasMore => _hasMore;
+  bool get isLoadingMore => _isLoadingMore;
+  int get totalCount => _totalCount;
+
+  static int get batchSize {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.windows:
+      case TargetPlatform.linux:
+      case TargetPlatform.macOS:
+        return 200;
+      default:
+        return 60;
+    }
+  }
+
+  @override
+  Future<List<NodeModel>> build() async {
+    final sort = ref.watch(gallerySortProvider);
+    ref.keepAlive();
+
+    _offset = 0;
+    _hasMore = true;
+    _isLoadingMore = false;
+
+    final paged = await ref.watch(filesDbProvider).listPaged(
+          filter: NodeFilter.image,
+          sortBy: SortBy.fromWire(sort.by.wire),
+          descending: sort.descending,
+          limit: batchSize,
+          offset: 0,
+        );
+
+    final imagesOnly = paged.nodes
+        .where((node) => node.category == FileCategory.image)
+        .toList();
+    _offset = paged.nextOffset;
+    _hasMore = paged.hasMore;
+    _totalCount = paged.total;
+    galleryMemoryCache = imagesOnly;
+    return imagesOnly;
+  }
+
+  Future<void> loadMore() async {
+    if (!_hasMore || _isLoadingMore) return;
+    _isLoadingMore = true;
+
+    try {
+      final sort = ref.read(gallerySortProvider);
+      final paged = await ref.read(filesDbProvider).listPaged(
+            filter: NodeFilter.image,
+            sortBy: SortBy.fromWire(sort.by.wire),
+            descending: sort.descending,
+            limit: batchSize,
+            offset: _offset,
+          );
+
+      final nextImages = paged.nodes
+          .where((node) => node.category == FileCategory.image)
+          .toList();
+
+      final current = state.value ?? <NodeModel>[];
+      final seenIds = {for (final n in current) n.id};
+      final combined = List<NodeModel>.of(current);
+      for (final img in nextImages) {
+        if (!seenIds.contains(img.id)) {
+          seenIds.add(img.id);
+          combined.add(img);
+        }
+      }
+
+      _offset = paged.nextOffset;
+      _hasMore = paged.hasMore && nextImages.isNotEmpty;
+      _totalCount = paged.total > 0 ? paged.total : combined.length;
+      galleryMemoryCache = combined;
+      state = AsyncData(combined);
+    } catch (_) {
+      // Keep existing data on transient network error
+    } finally {
+      _isLoadingMore = false;
+    }
+  }
+}
+
+/// Every picture this account can reach, with infinite scrolling batching.
+final galleryProvider =
+    AsyncNotifierProvider.autoDispose<GalleryController, List<NodeModel>>(
+  GalleryController.new,
+);
 
 /// One run of items under one heading.
 class GallerySection {
@@ -198,8 +275,10 @@ List<GallerySection> groupGallery(
 /// What the images view counts, for the header line.
 final gallerySummaryProvider =
     Provider.autoDispose<({int photos, int videos})>((ref) {
-  return ref.watch(galleryProvider).maybeWhen(
-        data: (nodes) => (photos: nodes.length, videos: 0),
+  final gallery = ref.watch(galleryProvider);
+  final total = ref.watch(galleryProvider.notifier).totalCount;
+  return gallery.maybeWhen(
+        data: (nodes) => (photos: total > 0 ? total : nodes.length, videos: 0),
         orElse: () => (photos: 0, videos: 0),
       );
 });

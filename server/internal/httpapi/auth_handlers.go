@@ -89,7 +89,7 @@ func userBody(u models.User) *meBody {
 		Role: string(u.Role), AvatarSeed: u.AvatarSeed, QuotaBytes: u.QuotaBytes,
 		QuotaBytesUsed: u.QuotaBytesUsed, MustChangePassword: u.MustChangePassword,
 		TOTPEnabled:        u.TOTPEnabled,
-		MustEnableTOTP:     u.Role == models.RoleAdmin && !u.TOTPEnabled,
+		MustEnableTOTP:     false,
 		DatasetPermissions: u.DatasetPermissions,
 		Disabled:           u.DisabledAt > 0,
 		CreatedAt:          u.CreatedAt,
@@ -254,7 +254,13 @@ func (a *API) handleMe(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, userBody(fresh))
+	body := userBody(fresh)
+	used, limit, _, _, _ := a.resolveUserStorageDataset(r.Context(), fresh)
+	if used > 0 || limit > 0 {
+		body.QuotaBytesUsed = used
+		body.QuotaBytes = limit
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 type changePasswordRequest struct {

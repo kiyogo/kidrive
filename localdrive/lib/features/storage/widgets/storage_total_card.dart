@@ -24,15 +24,19 @@ class StorageTotalCard extends ConsumerWidget {
             : 10 * 1024 * 1024 * 1024;
     final free = storage.freeBytes;
     final percent = quota > 0 ? (used / quota).clamp(0.0, 1.0) : 0.0;
-    final percentFormatted = (percent * 100).toStringAsFixed(1);
-    final isWarn = percent >= 0.95;
+    final isOverQuota = quota > 0 && used > quota;
+    final isWarn = percent >= 0.90 || isOverQuota;
 
     return Container(
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: context.surfaces.backgroundElevated,
         borderRadius: LdRadii.cardRadius,
-        border: Border.all(color: context.surfaces.strokeOutline),
+        border: Border.all(
+          color: isOverQuota
+              ? const Color(0x66EF4444)
+              : context.surfaces.strokeOutline,
+        ),
         boxShadow: const [
           BoxShadow(
             color: Color(0x06000000),
@@ -50,23 +54,29 @@ class StorageTotalCard extends ConsumerWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: LdColors.wash(LdColors.accentPrimary, 0.12),
+                  color: isOverQuota
+                      ? const Color(0x1FEF4444)
+                      : LdColors.wash(LdColors.accentPrimary, 0.12),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
-                  caption,
-                  style: const TextStyle(
+                  isOverQuota ? 'Vượt quá hạn ngạch' : caption,
+                  style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.8,
-                    color: LdColors.accentPrimary,
+                    color: isOverQuota
+                        ? const Color(0xFFEF4444)
+                        : LdColors.accentPrimary,
                   ),
                 ),
               ),
               Text(
                 '${l10n.storage} ${LdFormat.bytes(context, quota)}',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: context.surfaces.foregroundSecondary,
+                      color: isOverQuota
+                          ? const Color(0xFFEF4444)
+                          : context.surfaces.foregroundSecondary,
                       fontWeight: FontWeight.w500,
                     ),
               ),
@@ -82,13 +92,16 @@ class StorageTotalCard extends ConsumerWidget {
                 style: Theme.of(context).textTheme.displayLarge?.copyWith(
                       fontSize: 34,
                       fontWeight: FontWeight.w800,
+                      color: isOverQuota ? const Color(0xFFEF4444) : null,
                     ),
               ),
               const SizedBox(width: 8),
               Text(
                 '/ ${LdFormat.bytes(context, quota)}',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: context.surfaces.foregroundSecondary,
+                      color: isOverQuota
+                          ? const Color(0xFFEF4444)
+                          : context.surfaces.foregroundSecondary,
                       fontWeight: FontWeight.w600,
                     ),
               ),
@@ -104,12 +117,14 @@ class StorageTotalCard extends ConsumerWidget {
               color: context.surfaces.backgroundSunken,
               child: FractionallySizedBox(
                 alignment: Alignment.centerLeft,
-                widthFactor: percent.clamp(used > 0 ? 0.01 : 0.0, 1.0),
+                widthFactor: isOverQuota ? 1.0 : percent.clamp(used > 0 ? 0.01 : 0.0, 1.0),
                 child: Container(
                   decoration: BoxDecoration(
-                    color: isWarn
-                        ? LdColors.accentWarning
-                        : LdColors.accentPrimary,
+                    color: isOverQuota
+                        ? const Color(0xFFEF4444)
+                        : (isWarn
+                            ? LdColors.accentWarning
+                            : LdColors.accentPrimary),
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
