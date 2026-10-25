@@ -10,22 +10,23 @@ class StorageTotalCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = L10n.of(context);
-    final isAdmin = ref.watch(isAdminProvider);
     final user = ref.watch(currentUserProvider);
 
-    final used = isAdmin
-        ? (storage.serverTotalUsed > 0 ? storage.serverTotalUsed : storage.usedBytes)
-        : (user?.quotaBytesUsed ?? storage.usedBytes);
-    final caption = isAdmin ? l10n.storageTotal : l10n.storageYours;
     final quota = storage.quotaBytes > 0
         ? storage.quotaBytes
-        : (user?.quotaBytes ?? 0) > 0
-            ? user!.quotaBytes
-            : 10 * 1024 * 1024 * 1024;
-    final free = storage.freeBytes;
-    final percent = quota > 0 ? (used / quota).clamp(0.0, 1.0) : 0.0;
-    final isOverQuota = quota > 0 && used > quota;
+        : (storage.totalBytes > 0
+            ? storage.totalBytes
+            : ((user?.quotaBytes ?? 0) > 0 ? user!.quotaBytes : 0));
+    final used = storage.usedBytes > 0
+        ? storage.usedBytes
+        : (user?.quotaBytesUsed ?? 0);
+    final isUnlimited = storage.isUnlimited || quota <= 0;
+    final isOverQuota = storage.isOverQuota || (!isUnlimited && quota > 0 && used > quota);
+    final effectiveLimit = (isUnlimited && storage.totalBytes > 0) ? storage.totalBytes : quota;
+    final free = effectiveLimit > used ? (effectiveLimit - used) : 0;
+    final percent = effectiveLimit > 0 ? (used / effectiveLimit).clamp(0.0, 1.0) : 0.0;
     final isWarn = percent >= 0.90 || isOverQuota;
+    const caption = 'Bộ nhớ tài khoản';
 
     return Container(
       padding: const EdgeInsets.all(22),
@@ -72,7 +73,9 @@ class StorageTotalCard extends ConsumerWidget {
                 ),
               ),
               Text(
-                '${l10n.storage} ${LdFormat.bytes(context, quota)}',
+                isUnlimited
+                    ? 'Gói Không giới hạn'
+                    : '${l10n.storage} ${LdFormat.bytes(context, effectiveLimit)}',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: isOverQuota
                           ? const Color(0xFFEF4444)
@@ -97,7 +100,9 @@ class StorageTotalCard extends ConsumerWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                '/ ${LdFormat.bytes(context, quota)}',
+                effectiveLimit > 0
+                    ? '/ ${LdFormat.bytes(context, effectiveLimit)}'
+                    : (isUnlimited ? '/ Không giới hạn' : ''),
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: isOverQuota
                           ? const Color(0xFFEF4444)
@@ -143,9 +148,13 @@ class StorageTotalCard extends ConsumerWidget {
                     ),
               ),
               Text(
-                l10n.sidebarStorageFree(LdFormat.bytes(context, free)),
+                isOverQuota
+                    ? l10n.sidebarStorageFree('0 B')
+                    : l10n.sidebarStorageFree(LdFormat.bytes(context, free)),
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: context.surfaces.foregroundSecondary,
+                      color: isOverQuota
+                          ? const Color(0xFFEF4444)
+                          : context.surfaces.foregroundSecondary,
                       fontWeight: FontWeight.w500,
                     ),
               ),

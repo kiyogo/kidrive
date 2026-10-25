@@ -761,24 +761,15 @@ function QuotaBar({ used, total }: { used: number; total: number }) {
       }}
       title="Xem chi tiết bộ nhớ tài khoản"
       style={{
-        padding: "10px 14px 12px",
+        padding: "4px 14px 6px",
         whiteSpace: "nowrap",
         cursor: "pointer",
-        borderRadius: 12,
-        background: isOverQuota ? "rgba(239, 68, 68, 0.08)" : "var(--bg-sunken, #f8fafc)",
-        border: `1px solid ${isOverQuota ? "rgba(239, 68, 68, 0.3)" : "var(--stroke, rgba(0,0,0,0.06))"}`,
-        margin: "8px 12px 14px",
+        background: "transparent",
+        border: "none",
+        margin: "4px 12px 10px",
         transition: "all 0.2s ease",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-        <span style={{ fontSize: 11.5, fontWeight: 600, color: isOverQuota ? "#ef4444" : "var(--fg-secondary)" }}>
-          {isOverQuota ? "Vượt hạn ngạch" : "Bộ nhớ tài khoản"}
-        </span>
-        <span style={{ fontSize: 11, color: isOverQuota ? "#ef4444" : "var(--fg-muted)", fontWeight: 500 }}>
-          {unlimited ? bytes(used) : `${bytes(used)} / ${bytes(total)}`}
-        </span>
-      </div>
       <div
         style={{
           height: 6,

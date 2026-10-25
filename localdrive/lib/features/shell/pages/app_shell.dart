@@ -392,12 +392,19 @@ class _QuotaFooter extends ConsumerWidget {
       orElse: () => -1,
     );
 
-    final used = user.quotaBytesUsed;
+    final accountStorage = ref.watch(accountStorageProvider).valueOrNull;
+    final used = (accountStorage != null && accountStorage.usedBytes > 0)
+        ? accountStorage.usedBytes
+        : user.quotaBytesUsed;
 
-    // Determine max capacity: user quota, or library total, or fallback 10 GB
+    // Determine max capacity: user quota, or account storage dataset total, or library total
     final int maxCapacity;
     if (user.quotaBytes > 0) {
       maxCapacity = user.quotaBytes;
+    } else if (accountStorage != null && accountStorage.quotaBytes > 0) {
+      maxCapacity = accountStorage.quotaBytes;
+    } else if (accountStorage != null && accountStorage.totalBytes > 0) {
+      maxCapacity = accountStorage.totalBytes;
     } else {
       final summaryTotal = libraries.maybeWhen(
         data: (summary) => summary.totalBytes > 0

@@ -238,12 +238,14 @@ func (a *API) handleAccountStorageBreakdown(w http.ResponseWriter, r *http.Reque
 	user, _ := mw.UserFrom(r.Context())
 	used, limit, total, isUnlimited, dsName := a.resolveUserStorageDataset(r.Context(), user)
 
-	var free int64 = -1
+	var free int64 = 0
 	if limit > 0 {
 		free = limit - used
-		if free < 0 {
-			free = 0
-		}
+	} else if total > 0 {
+		free = total - used
+	}
+	if free < 0 {
+		free = 0
 	}
 
 	stats := map[string]categoryStatDTO{

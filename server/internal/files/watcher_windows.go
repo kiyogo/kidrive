@@ -145,33 +145,41 @@ func ensureDriveKRegistry(vDrive string) {
 		_ = exec.Command("cmd.exe", "/c", "subst K: /D 2>nul").Run()
 		_ = exec.Command("cmd.exe", "/c", fmt.Sprintf(`subst K: "%s"`, targetFolder)).Run()
 
-		// 4. Set DriveIcons\K label to "KiDrive" (HKCU, HKLM, and Classes)
-		if kKey, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel`, registry.SET_VALUE); err == nil {
-			_ = kKey.SetStringValue("", "KiDrive")
-			kKey.Close()
+		// 4. Set Drive label to "KiDrive" across HKCU, HKLM, and Classes (both Drives\K and DriveIcons\K)
+		for _, subKey := range []string{
+			`Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel`,
+			`Software\Classes\Applications\Explorer.exe\Drives\K\DefaultLabel`,
+			`Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultLabel`,
+		} {
+			if kKey, _, err := registry.CreateKey(registry.CURRENT_USER, subKey, registry.SET_VALUE); err == nil {
+				_ = kKey.SetStringValue("", "KiDrive")
+				kKey.Close()
+			}
 		}
 		if kKeyLM, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel`, registry.SET_VALUE); err == nil {
 			_ = kKeyLM.SetStringValue("", "KiDrive")
 			kKeyLM.Close()
 		}
-		if kKeyCls, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultLabel`, registry.SET_VALUE); err == nil {
-			_ = kKeyCls.SetStringValue("", "KiDrive")
-			kKeyCls.Close()
-		}
 
 		iconPath := findAppIcon(targetFolder)
 		if iconPath != "" {
-			if iKey, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon`, registry.SET_VALUE); err == nil {
-				_ = iKey.SetStringValue("", iconPath)
-				iKey.Close()
+			iconWithIndex := iconPath
+			if !strings.Contains(iconWithIndex, ",") {
+				iconWithIndex = iconPath + ",0"
+			}
+			for _, subKey := range []string{
+				`Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon`,
+				`Software\Classes\Applications\Explorer.exe\Drives\K\DefaultIcon`,
+				`Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultIcon`,
+			} {
+				if iKey, _, err := registry.CreateKey(registry.CURRENT_USER, subKey, registry.SET_VALUE); err == nil {
+					_ = iKey.SetStringValue("", iconWithIndex)
+					iKey.Close()
+				}
 			}
 			if iKeyLM, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon`, registry.SET_VALUE); err == nil {
-				_ = iKeyLM.SetStringValue("", iconPath)
+				_ = iKeyLM.SetStringValue("", iconWithIndex)
 				iKeyLM.Close()
-			}
-			if iKeyCls, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultIcon`, registry.SET_VALUE); err == nil {
-				_ = iKeyCls.SetStringValue("", iconPath)
-				iKeyCls.Close()
 			}
 
 			dstIco := filepath.Join(targetFolder, "app_icon.ico")
@@ -183,7 +191,7 @@ func ensureDriveKRegistry(vDrive string) {
 			}
 			autorunPath := filepath.Join(targetFolder, "autorun.inf")
 			_ = setFileNormal(autorunPath)
-			_ = os.WriteFile(autorunPath, []byte("[autorun]\r\nicon=app_icon.ico\r\nlabel=KiDrive\r\n"), 0o644)
+			_ = os.WriteFile(autorunPath, []byte("[autorun]\r\nicon=app_icon.ico,0\r\nlabel=KiDrive\r\n"), 0o644)
 			setFileHiddenAndSystem(autorunPath)
 		}
 	}
@@ -409,6 +417,35 @@ func (s *Service) syncFromVirtualDrive(ctx context.Context, vDrive string, lastQ
 					}
 				}
 			}
+		}
+
+		// 4. Mirror accessible datasets into vDrive
+		dRows, dErr := s.database.Read().QueryContext(ctx, `SELECT name, mount FROM datasets`)
+		if dErr == nil {
+			for dRows.Next() {
+				var dsName, dsMount string
+				if err := dRows.Scan(&dsName, &dsMount); err == nil && dsMount != "" {
+					dsClean := strings.TrimPrefix(filepath.ToSlash(dsName), "/")
+					parts := strings.Split(dsClean, "/")
+					leaf := parts[len(parts)-1]
+					targetDir := filepath.Join(vDrive, leaf)
+					if fi, err := os.Stat(dsMount); err == nil && fi.IsDir() {
+						_ = os.MkdirAll(targetDir, 0o755)
+						if entries, err := os.ReadDir(dsMount); err == nil {
+							for _, entry := range entries {
+								srcPath := filepath.Join(dsMount, entry.Name())
+								dstPath := filepath.Join(targetDir, entry.Name())
+								if entry.IsDir() {
+									_ = os.MkdirAll(dstPath, 0o755)
+								} else {
+									_ = storage.LinkOrCopy(srcPath, dstPath)
+								}
+							}
+						}
+					}
+				}
+			}
+			dRows.Close()
 		}
 
 		if len(toSyncDown) > 0 {

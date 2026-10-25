@@ -327,6 +327,44 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 					})
 				}
 			}
+
+			if len(allNodes) == 0 {
+				// Fallback to SQLite nodes table if dataset directory has no entries or is not mounted locally
+				targetName := strings.TrimPrefix(opts.ParentID, "dataset:")
+				slashParts := strings.Split(targetName, "/")
+				leafName := slashParts[len(slashParts)-1]
+				nRows, nErr := a.db.Read().QueryContext(r.Context(), `
+					SELECT n.id, n.name, n.type, n.size_bytes, COALESCE(n.mime_type, ''), n.created_at, n.updated_at
+					FROM nodes n
+					WHERE n.deleted_at IS NULL AND n.trashed_at IS NULL
+					  AND (n.parent_id = ? OR n.parent_id = ? OR n.parent_id IN (SELECT id FROM nodes WHERE name = ? OR name = ?))
+					ORDER BY n.type ASC, n.name ASC`, opts.ParentID, targetName, targetName, leafName)
+				if nErr == nil {
+					for nRows.Next() {
+						var nID, nName, nType, nMime string
+						var nSize, nCreated, nUpdated int64
+						if err := nRows.Scan(&nID, &nName, &nType, &nSize, &nMime, &nCreated, &nUpdated); err == nil {
+							cat := string(models.CategoryOf(models.NodeType(nType), nMime, nName))
+							allNodes = append(allNodes, nodeDTO{
+								ID:           nID,
+								ParentID:     opts.ParentID,
+								Name:         nName,
+								Type:         nType,
+								Category:     cat,
+								MimeType:     nMime,
+								SizeBytes:    nSize,
+								Role:         role,
+								HasThumbnail: cat == "image" || cat == "video",
+								Previewable:  cat == "image" || cat == "video" || cat == "audio",
+								CreatedAt:    nCreated,
+								UpdatedAt:    nUpdated,
+							})
+						}
+					}
+					nRows.Close()
+				}
+			}
+
 			setCachedDirList(dirCacheKey, allNodes)
 		}
 

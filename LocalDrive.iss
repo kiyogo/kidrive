@@ -66,11 +66,13 @@ Name: "{userappdata}\Microsoft\Windows\Network Shortcuts\KiyoDrive\target"; File
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "LocalDrive"; ValueData: """{app}\{#MyAppExeName}"""; Tasks: autostart; Flags: uninsdeletevalue
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel"; ValueType: string; ValueData: "KiDrive"; Tasks: kiyodrive; Flags: uninsdeletekey noerror
-Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico"; Tasks: kiyodrive; Flags: uninsdeletekey noerror
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico,0"; Tasks: kiyodrive; Flags: uninsdeletekey noerror
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel"; ValueType: string; ValueData: "KiDrive"; Tasks: kiyodrive; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico"; Tasks: kiyodrive; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico,0"; Tasks: kiyodrive; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Applications\Explorer.exe\Drives\K\DefaultLabel"; ValueType: string; ValueData: "KiDrive"; Tasks: kiyodrive; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Applications\Explorer.exe\Drives\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico,0"; Tasks: kiyodrive; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultLabel"; ValueType: string; ValueData: "KiDrive"; Tasks: kiyodrive; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico"; Tasks: kiyodrive; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico,0"; Tasks: kiyodrive; Flags: uninsdeletekey
 
 [Code]
 procedure SHChangeNotify(wEventId: LongInt; uFlags: Cardinal; dwItem1, dwItem2: LongInt);
@@ -105,7 +107,7 @@ begin
 
       IniFile := TargetDir + '\autorun.inf';
       IniContent := '[autorun]' + #13#10 +
-                    'icon=app_icon.ico' + #13#10 +
+                    'icon=app_icon.ico,0' + #13#10 +
                     'label=KiDrive' + #13#10;
       SaveStringToFile(IniFile, IniContent, False);
       Exec('attrib', '+h +s "' + IniFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);

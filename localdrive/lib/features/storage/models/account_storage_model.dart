@@ -20,6 +20,10 @@ class AccountStorageModel {
     required this.freeBytes,
     required this.usagePercent,
     this.serverTotalUsed = 0,
+    this.isUnlimited = false,
+    this.isOverQuota = false,
+    this.totalBytes = 0,
+    this.datasetName = '',
     required this.images,
     required this.videos,
     required this.documents,
@@ -33,6 +37,10 @@ class AccountStorageModel {
   final int freeBytes;
   final double usagePercent;
   final int serverTotalUsed;
+  final bool isUnlimited;
+  final bool isOverQuota;
+  final int totalBytes;
+  final String datasetName;
   final CategoryStat images;
   final CategoryStat videos;
   final CategoryStat documents;
@@ -42,12 +50,26 @@ class AccountStorageModel {
 
   factory AccountStorageModel.fromJson(Map<String, dynamic> json) {
     final cats = json['categories'] as Map<String, dynamic>? ?? {};
+    final quota = (json['quota_bytes'] as num?)?.toInt() ?? 0;
+    final total = (json['total_bytes'] as num?)?.toInt() ?? 0;
+    final used = (json['used_bytes'] as num?)?.toInt() ?? 0;
+    final isUnlimited = json['is_unlimited'] as bool? ?? (quota <= 0);
+    final isOverQuota = json['is_over_quota'] as bool? ?? (!isUnlimited && quota > 0 && used > quota);
+    final effectiveTotal = quota > 0 ? quota : total;
+    var free = (json['free_bytes'] as num?)?.toInt() ?? -1;
+    if (free < 0) {
+      free = effectiveTotal > used ? (effectiveTotal - used) : 0;
+    }
     return AccountStorageModel(
-      quotaBytes: (json['quota_bytes'] as num?)?.toInt() ?? (10 * 1024 * 1024 * 1024),
-      usedBytes: (json['used_bytes'] as num?)?.toInt() ?? 0,
-      freeBytes: (json['free_bytes'] as num?)?.toInt() ?? (10 * 1024 * 1024 * 1024),
+      quotaBytes: quota,
+      usedBytes: used,
+      freeBytes: free,
       usagePercent: (json['usage_percent'] as num?)?.toDouble() ?? 0.0,
       serverTotalUsed: (json['server_total_used'] as num?)?.toInt() ?? 0,
+      isUnlimited: isUnlimited,
+      isOverQuota: isOverQuota,
+      totalBytes: total,
+      datasetName: json['dataset_name'] as String? ?? '',
       images: CategoryStat.fromJson(cats['images'] as Map<String, dynamic>?),
       videos: CategoryStat.fromJson(cats['videos'] as Map<String, dynamic>?),
       documents: CategoryStat.fromJson(cats['documents'] as Map<String, dynamic>?),

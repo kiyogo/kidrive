@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -96,6 +97,26 @@ func userBody(u models.User) *meBody {
 	}
 }
 
+func (a *API) enrichUserBody(ctx context.Context, u models.User) *meBody {
+	body := userBody(u)
+	used, limit, _, _, _ := a.resolveUserStorageDataset(ctx, u)
+	if used > 0 || limit > 0 {
+		body.QuotaBytesUsed = used
+		body.QuotaBytes = limit
+	}
+	return body
+}
+
+func (a *API) tokenBodyWithContext(ctx context.Context, pair auth.TokenPair) tokenResponse {
+	return tokenResponse{
+		AccessToken:  pair.AccessToken,
+		RefreshToken: pair.RefreshToken,
+		ExpiresAt:    pair.ExpiresAt.UnixMilli(),
+		SessionID:    pair.SessionID,
+		User:         a.enrichUserBody(ctx, pair.User),
+	}
+}
+
 func tokenBody(pair auth.TokenPair) tokenResponse {
 	return tokenResponse{
 		AccessToken:  pair.AccessToken,
@@ -141,7 +162,7 @@ func (a *API) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.refreshDiscovery(r.Context())
-	writeJSON(w, http.StatusCreated, tokenBody(pair))
+	writeJSON(w, http.StatusCreated, a.tokenBodyWithContext(r.Context(), pair))
 }
 
 type registerRequest struct {
@@ -166,7 +187,7 @@ func (a *API) handleRegister(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, tokenBody(pair))
+	writeJSON(w, http.StatusCreated, a.tokenBodyWithContext(r.Context(), pair))
 }
 
 type loginRequest struct {
@@ -198,7 +219,7 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, tokenBody(result.Tokens))
+	writeJSON(w, http.StatusOK, a.tokenBodyWithContext(r.Context(), result.Tokens))
 }
 
 type refreshRequest struct {
@@ -215,7 +236,7 @@ func (a *API) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, tokenBody(pair))
+	writeJSON(w, http.StatusOK, a.tokenBodyWithContext(r.Context(), pair))
 }
 
 func (a *API) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
@@ -226,7 +247,7 @@ func (a *API) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if pair != nil {
-		body := tokenBody(*pair)
+		body := a.tokenBodyWithContext(r.Context(), *pair)
 		body.Status = string(status)
 		writeJSON(w, http.StatusOK, body)
 		return
@@ -254,13 +275,7 @@ func (a *API) handleMe(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
-	body := userBody(fresh)
-	used, limit, _, _, _ := a.resolveUserStorageDataset(r.Context(), fresh)
-	if used > 0 || limit > 0 {
-		body.QuotaBytesUsed = used
-		body.QuotaBytes = limit
-	}
-	writeJSON(w, http.StatusOK, body)
+	writeJSON(w, http.StatusOK, a.enrichUserBody(r.Context(), fresh))
 }
 
 type changePasswordRequest struct {
