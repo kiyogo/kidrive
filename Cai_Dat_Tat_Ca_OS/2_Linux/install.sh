@@ -195,7 +195,16 @@ main() {
     fi
   fi
   modprobe zfs 2>/dev/null || true
-  zfs mount -a 2>/dev/null || true
+  if command -v zpool >/dev/null 2>&1; then
+    zpool import -f -a 2>/dev/null || true
+    zfs mount -a 2>/dev/null || true
+    zfs set readonly=off DATA 2>/dev/null || true
+    for p in $(zpool list -H -o name 2>/dev/null); do
+      zfs set readonly=off "$p" 2>/dev/null || true
+    done
+  fi
+  mount -o remount,rw /mnt/zfs-recovery 2>/dev/null || true
+  mount -o remount,rw /mnt/zfs-recovery/DATA 2>/dev/null || true
 
   # Cài đặt và cấu hình dịch vụ chia sẻ mạng nội bộ Samba (SMB) với quyền Guest
   if ! command -v smbd >/dev/null 2>&1; then
@@ -225,7 +234,7 @@ main() {
 
   # Tự động liên kết các tập dữ liệu thực (1DATA, DaoKy_5, Long_4, NgLoc_6, NgSon_1) vào KiyoVN bằng bind mount
   DATASET_NAMES=("1DATA" "DaoKy_5" "Long_4" "NgLoc_6" "NgSon_1")
-  ROOT_CANDIDATES=("/DATA/KiyoVN" "/DATA" "/mnt/DATA/KiyoVN" "/mnt/DATA" "/mnt/DỮ LIỆU/KiyoVN" "/mnt/DỮ LIỆU" "/mnt/zfs-recovery")
+  ROOT_CANDIDATES=("/DATA/KiyoVN" "/DATA" "/mnt/DATA/KiyoVN" "/mnt/DATA" "/mnt/DỮ LIỆU/KiyoVN" "/mnt/DỮ LIỆU" "/mnt/zfs-recovery/DATA" "/mnt/zfs-recovery" "/mnt" "/srv" "/var" "/home")
 
   for ds in "${DATASET_NAMES[@]}"; do
     if [ -d "$TARGET_SHARE_DIR/$ds" ] && [ ! -L "$TARGET_SHARE_DIR/$ds" ] && [ "$(ls -A "$TARGET_SHARE_DIR/$ds" 2>/dev/null)" ]; then
@@ -237,10 +246,13 @@ main() {
       if [ -d "$root/$ds" ] && [ ! -L "$root/$ds" ] && [ "$root/$ds" != "$TARGET_SHARE_DIR/$ds" ]; then
         FOUND_PATH="$root/$ds"
         break
+      elif [ -d "$root/DATA/$ds" ] && [ ! -L "$root/DATA/$ds" ] && [ "$root/DATA/$ds" != "$TARGET_SHARE_DIR/$ds" ]; then
+        FOUND_PATH="$root/DATA/$ds"
+        break
       fi
     done
     if [ -z "$FOUND_PATH" ]; then
-      FOUND_PATH=$(find /DATA /mnt -maxdepth 3 -type d -name "$ds" 2>/dev/null | grep -v "$TARGET_SHARE_DIR" | head -n 1)
+      FOUND_PATH=$(find /DATA /mnt /srv /var /home -maxdepth 3 -type d -name "$ds" 2>/dev/null | grep -v "$TARGET_SHARE_DIR" | head -n 1)
     fi
 
     if [ -n "$FOUND_PATH" ]; then
