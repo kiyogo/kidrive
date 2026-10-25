@@ -299,7 +299,8 @@ class Client {
         headers,
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
         signal: options.signal,
-      });
+        priority: "high",
+      } as any);
     } catch (cause: any) {
       if (options.signal?.aborted || cause?.name === "AbortError") {
         throw cause;

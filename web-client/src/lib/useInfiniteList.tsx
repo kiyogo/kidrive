@@ -97,6 +97,9 @@ export function useInfiniteList<T>({
   const onItemsUpdatedRef = useRef(onItemsUpdated);
   onItemsUpdatedRef.current = onItemsUpdated;
 
+  const initialItemsRef = useRef(initialItems);
+  initialItemsRef.current = initialItems;
+
   const loadBatch = useCallback(
     async (isInitial: boolean) => {
       if (!enabled) return;
@@ -105,7 +108,7 @@ export function useInfiniteList<T>({
         if (abortControllerRef.current) {
           abortControllerRef.current.abort();
         }
-        if (!items.length) {
+        if (!initialItemsRef.current || initialItemsRef.current.length === 0) {
           setLoading(true);
         }
         setError(null);
@@ -216,6 +219,14 @@ export function useInfiniteList<T>({
     if (!enabled) {
       setLoading(false);
       return;
+    }
+    const init = initialItemsRef.current;
+    if (init && init.length > 0) {
+      setItems(init);
+      setLoading(false);
+    } else {
+      setItems([]);
+      setLoading(true);
     }
     void loadBatch(true);
 

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -719,12 +720,15 @@ func syncSystemNetworkShare(name string, path string, readOnly bool, guestOk boo
 		ensureDatasetsLinkedToShare(trimmedPath)
 	}
 
-	// 5. Ensure firewall allows Samba ports (445, 139)
+	// 5. Update /etc/samba/smb.conf natively for rock-solid SMB guest access
+	updateLinuxSmbConf(trimmedName, trimmedPath, readOnly)
+
+	// 6. Ensure firewall allows Samba ports (445, 139, 137:138)
 	_ = exec.Command("ufw", "allow", "445/tcp").Run()
 	_ = exec.Command("ufw", "allow", "139/tcp").Run()
 	_ = exec.Command("ufw", "allow", "137:138/udp").Run()
 
-	// 6. Reload Samba service
+	// 7. Reload Samba service
 	_ = exec.Command("smbcontrol", "smbd", "reload-config").Run()
 	_ = exec.Command("systemctl", "reload", "smbd").Run()
 	_ = exec.Command("systemctl", "restart", "smbd").Run()
@@ -732,22 +736,79 @@ func syncSystemNetworkShare(name string, path string, readOnly bool, guestOk boo
 	return nil
 }
 
+func updateLinuxSmbConf(shareName, sharePath string, readOnly bool) {
+	confPath := "/etc/samba/smb.conf"
+	data, err := os.ReadFile(confPath)
+	if err != nil {
+		return
+	}
+	content := string(data)
+
+	// Ensure [global] contains necessary wide links and guest permissions
+	if !strings.Contains(content, "guest account = root") {
+		content = strings.Replace(content, "[global]", "[global]\n   guest account = root\n   map to guest = Bad User\n   follow symlinks = yes\n   wide links = yes\n   unix extensions = no\n   allow insecure wide links = yes", 1)
+	}
+
+	// Remove existing share section if present
+	re := regexp.MustCompile(fmt.Sprintf(`(?ms)^\[%s\].*?(?=^\[|\z)`, regexp.QuoteMeta(shareName)))
+	content = re.ReplaceAllString(content, "")
+
+	readOnlyStr := "no"
+	writableStr := "yes"
+	if readOnly {
+		readOnlyStr = "yes"
+		writableStr = "no"
+	}
+
+	newSection := fmt.Sprintf(`[%s]
+   comment = LocalDrive %s Share
+   path = %s
+   browseable = yes
+   writable = %s
+   guest ok = yes
+   guest only = yes
+   read only = %s
+   force user = root
+   create mask = 0777
+   directory mask = 0777
+   follow symlinks = yes
+   wide links = yes
+
+`, shareName, shareName, sharePath, writableStr, readOnlyStr)
+
+	content = strings.TrimSpace(content) + "\n\n" + newSection
+	_ = os.WriteFile(confPath, []byte(content), 0644)
+}
+
 func ensureDatasetsLinkedToShare(sharePath string) {
 	_ = os.MkdirAll(sharePath, 0777)
+	_ = exec.Command("chmod", "-R", "777", sharePath).Run()
 	datasets := []string{"1DATA", "DaoKy_5", "Long_4", "NgLoc_6", "NgSon_1"}
-	roots := []string{"/DATA/KiyoVN", "/mnt/DATA/KiyoVN", "/DATA", "/mnt/DATA", "/mnt/DỮ LIỆU", "/mnt/zfs-recovery"}
+	roots := []string{"/DATA/KiyoVN", "/mnt/DATA/KiyoVN", "/DATA", "/mnt/DATA", "/mnt/DỮ LIỆU/KiyoVN", "/mnt/DỮ LIỆU", "/mnt/zfs-recovery"}
 	for _, ds := range datasets {
 		targetLink := filepath.Join(sharePath, ds)
-		if fi, err := os.Stat(targetLink); err == nil && fi.IsDir() {
+		// Check if targetLink already has files and is not empty
+		if entries, err := os.ReadDir(targetLink); err == nil && len(entries) > 0 {
 			continue
 		}
 		for _, r := range roots {
 			cand := filepath.Join(r, ds)
 			if cfi, cErr := os.Stat(cand); cErr == nil && cfi.IsDir() {
+				if filepath.Clean(cand) == filepath.Clean(targetLink) {
+					break
+				}
 				_ = os.Remove(targetLink)
-				_ = os.Symlink(cand, targetLink)
 				_ = os.MkdirAll(targetLink, 0777)
 				_ = exec.Command("mount", "--bind", cand, targetLink).Run()
+				// Add to /etc/fstab if not present
+				if fstabData, err := os.ReadFile("/etc/fstab"); err == nil {
+					if !strings.Contains(string(fstabData), targetLink) {
+						if f, err := os.OpenFile("/etc/fstab", os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+							_, _ = f.WriteString(fmt.Sprintf("%s %s none bind 0 0\n", cand, targetLink))
+							_ = f.Close()
+						}
+					}
+				}
 				break
 			}
 		}
@@ -766,6 +827,16 @@ func removeSystemNetworkShare(name string) {
 
 // SyncAllActiveNetworkShares queries all active shares in the database and re-publishes them to the OS.
 func (a *API) SyncAllActiveNetworkShares(ctx context.Context) {
+	if runtime.GOOS == "linux" {
+		kiyoDir := "/DATA/KiyoVN"
+		_ = os.MkdirAll(kiyoDir, 0777)
+		ensureDatasetsLinkedToShare(kiyoDir)
+		_ = syncSystemNetworkShare("KiyoVN", kiyoDir, false, true, true)
+		if _, err := os.Stat("/DATA"); err == nil {
+			_ = syncSystemNetworkShare("DATA", "/DATA", false, true, true)
+		}
+	}
+
 	rows, err := a.db.Read().QueryContext(ctx, `SELECT name, path, read_only, guest_ok FROM network_shares WHERE status = 'active'`)
 	if err != nil {
 		return

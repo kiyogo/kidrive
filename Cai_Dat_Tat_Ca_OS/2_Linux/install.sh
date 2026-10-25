@@ -195,46 +195,97 @@ if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>
   firewall-cmd --reload >/dev/null 2>&1 || true
 fi
 
-# Tạo thư mục chia sẻ thực tế
-TARGET_SHARE_DIR="/mnt/DỮ LIỆU/KiyoVN"
+# Xác định thư mục chia sẻ mạng nội bộ thực tế
+TARGET_SHARE_DIR="/DATA/KiyoVN"
+if [ -d "/DATA/KiyoVN" ]; then
+  TARGET_SHARE_DIR="/DATA/KiyoVN"
+elif [ -d "/mnt/DATA/KiyoVN" ]; then
+  TARGET_SHARE_DIR="/mnt/DATA/KiyoVN"
+fi
 mkdir -p "$TARGET_SHARE_DIR" 2>/dev/null || true
-chmod 777 "$TARGET_SHARE_DIR" 2>/dev/null || true
+chmod -R 777 "$TARGET_SHARE_DIR" 2>/dev/null || true
 mkdir -p /var/lib/samba/usershares 2>/dev/null || true
 chmod 1777 /var/lib/samba/usershares 2>/dev/null || true
 
-# Tự động liên kết các tập dữ liệu thực (1DATA, DaoKy_5, Long_4, NgLoc_6, NgSon_1) vào KiyoVN
+# Tự động liên kết các tập dữ liệu thực (1DATA, DaoKy_5, Long_4, NgLoc_6, NgSon_1) vào KiyoVN bằng bind mount (không dùng symlink)
 DATASET_NAMES=("1DATA" "DaoKy_5" "Long_4" "NgLoc_6" "NgSon_1")
-ROOT_CANDIDATES=("/DATA/KiyoVN" "/mnt/DATA/KiyoVN" "/DATA" "/mnt/DATA" "/mnt/DỮ LIỆU" "/mnt/zfs-recovery")
+ROOT_CANDIDATES=("/DATA/KiyoVN" "/DATA" "/mnt/DATA/KiyoVN" "/mnt/DATA" "/mnt/DỮ LIỆU/KiyoVN" "/mnt/DỮ LIỆU" "/mnt/zfs-recovery")
 
 for ds in "${DATASET_NAMES[@]}"; do
+  # Nếu thư mục đích đã có sẵn nội dung thì giữ nguyên
+  if [ -d "$TARGET_SHARE_DIR/$ds" ] && [ ! -L "$TARGET_SHARE_DIR/$ds" ] && [ "$(ls -A "$TARGET_SHARE_DIR/$ds" 2>/dev/null)" ]; then
+    continue
+  fi
+
   FOUND_PATH=""
   for root in "${ROOT_CANDIDATES[@]}"; do
-    if [ -d "$root/$ds" ]; then
+    if [ -d "$root/$ds" ] && [ ! -L "$root/$ds" ] && [ "$root/$ds" != "$TARGET_SHARE_DIR/$ds" ]; then
       FOUND_PATH="$root/$ds"
       break
     fi
   done
   if [ -z "$FOUND_PATH" ]; then
-    FOUND_PATH=$(find /DATA /mnt -maxdepth 3 -type d -name "$ds" 2>/dev/null | head -n 1)
+    FOUND_PATH=$(find /DATA /mnt -maxdepth 3 -type d -name "$ds" 2>/dev/null | grep -v "$TARGET_SHARE_DIR" | head -n 1)
   fi
-  if [ -n "$FOUND_PATH" ] && [ "$FOUND_PATH" != "$TARGET_SHARE_DIR/$ds" ]; then
-    rm -rf "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
-    ln -sfn "$FOUND_PATH" "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
+
+  if [ -n "$FOUND_PATH" ]; then
+    # Gỡ bỏ symlink cũ nếu có để tránh lỗi Samba Wide Links
+    if [ -L "$TARGET_SHARE_DIR/$ds" ]; then
+      rm -f "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
+    fi
     mkdir -p "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
-    mount --bind "$FOUND_PATH" "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
+    chmod 777 "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
+
+    # Thực hiện bind mount thực tế
+    mountpoint -q "$TARGET_SHARE_DIR/$ds" || mount --bind "$FOUND_PATH" "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
+
+    # Ghi vào /etc/fstab để duy trì sau khi khởi động lại máy
+    if [ -f /etc/fstab ] && ! grep -q "$TARGET_SHARE_DIR/$ds" /etc/fstab 2>/dev/null; then
+      echo "$FOUND_PATH $TARGET_SHARE_DIR/$ds none bind 0 0" >> /etc/fstab 2>/dev/null || true
+    fi
   fi
 done
 
-# Cấu hình Samba hỗ trợ Guest Access (Không cần mật khẩu đăng nhập mạng nội bộ)
+# Cấu hình Samba hỗ trợ Guest Access hoàn toàn (Đảm bảo 100% không bị thư mục trống hoặc hỏi mật khẩu)
+mkdir -p /etc/samba
 if [ -f /etc/samba/smb.conf ]; then
-  if ! grep -q "usershare path" /etc/samba/smb.conf; then
-    sed -i '/\[global\]/a \   usershare path = /var/lib/samba/usershares\n   usershare max shares = 100\n   usershare allow guests = yes\n   usershare owner only = false\n   map to guest = Bad User\n   follow symlinks = yes\n   wide links = yes\n   unix extensions = no\n   allow insecure wide links = yes' /etc/samba/smb.conf
+  # Làm sạch các section KiyoVN và DATA cũ khỏi smb.conf
+  python3 -c '
+import re
+try:
+    with open("/etc/samba/smb.conf", "r") as f:
+        content = f.read()
+    content = re.sub(r"(?ms)^\[(?:KiyoVN|DATA)\].*?(?=^\[|\Z)", "", content)
+    with open("/etc/samba/smb.conf", "w") as f:
+        f.write(content.strip() + "\n")
+except Exception:
+    pass
+' 2>/dev/null || true
+
+  # Cập nhật [global] để cho phép guest root và wide links
+  if ! grep -q "guest account = root" /etc/samba/smb.conf 2>/dev/null; then
+    sed -i '/\[global\]/a \   usershare path = /var/lib/samba/usershares\n   usershare max shares = 100\n   usershare allow guests = yes\n   usershare owner only = false\n   map to guest = Bad User\n   guest account = root\n   follow symlinks = yes\n   wide links = yes\n   unix extensions = no\n   allow insecure wide links = yes' /etc/samba/smb.conf 2>/dev/null || true
   fi
-  if ! grep -q "\[KiyoVN\]" /etc/samba/smb.conf; then
-    cat << 'EOF' >> /etc/samba/smb.conf
+
+  cat << EOF >> /etc/samba/smb.conf
 
 [KiyoVN]
-   path = /mnt/DỮ LIỆU/KiyoVN
+   comment = LocalDrive KiyoVN Share
+   path = $TARGET_SHARE_DIR
+   browseable = yes
+   writable = yes
+   guest ok = yes
+   guest only = yes
+   read only = no
+   force user = root
+   create mask = 0777
+   directory mask = 0777
+   follow symlinks = yes
+   wide links = yes
+
+[DATA]
+   comment = LocalDrive DATA Root
+   path = /DATA
    browseable = yes
    writable = yes
    guest ok = yes
@@ -246,16 +297,14 @@ if [ -f /etc/samba/smb.conf ]; then
    follow symlinks = yes
    wide links = yes
 EOF
-  fi
 else
-  mkdir -p /etc/samba
-  cat << 'EOF' > /etc/samba/smb.conf
+  cat << EOF > /etc/samba/smb.conf
 [global]
    workgroup = WORKGROUP
    server string = LocalDrive NAS
    security = user
    map to guest = Bad User
-   guest account = nobody
+   guest account = root
    usershare path = /var/lib/samba/usershares
    usershare max shares = 100
    usershare allow guests = yes
@@ -266,7 +315,22 @@ else
    allow insecure wide links = yes
 
 [KiyoVN]
-   path = /mnt/DỮ LIỆU/KiyoVN
+   comment = LocalDrive KiyoVN Share
+   path = $TARGET_SHARE_DIR
+   browseable = yes
+   writable = yes
+   guest ok = yes
+   guest only = yes
+   read only = no
+   force user = root
+   create mask = 0777
+   directory mask = 0777
+   follow symlinks = yes
+   wide links = yes
+
+[DATA]
+   comment = LocalDrive DATA Root
+   path = /DATA
    browseable = yes
    writable = yes
    guest ok = yes
@@ -287,7 +351,7 @@ fi
 
 # Kích hoạt và khởi động lại dịch vụ Samba
 systemctl enable smbd 2>/dev/null || systemctl enable smb 2>/dev/null || true
-systemctl restart smbd 2>/dev/null || systemctl restart smb 2>/dev/null || service smbd restart 2>/dev/null || true
+systemctl restart smbd smb nmbd 2>/dev/null || systemctl restart smbd 2>/dev/null || systemctl restart smb 2>/dev/null || service smbd restart 2>/dev/null || true
 
 # 7. Khởi tạo cấu hình ban đầu nếu chưa có (Tuyệt đối không ghi đè cấu hình cũ)
 ENV_FILE="$INSTALL_DIR/.env"

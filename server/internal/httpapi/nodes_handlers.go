@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -56,7 +57,7 @@ func getCachedDirList(key string) ([]nodeDTO, bool) {
 	dirListCacheMu.RLock()
 	defer dirListCacheMu.RUnlock()
 	entry, ok := dirListCache[key]
-	if ok && time.Since(entry.timestamp) < 60*time.Second {
+	if ok && time.Since(entry.timestamp) < 15*time.Minute {
 		res := make([]nodeDTO, len(entry.nodes))
 		copy(res, entry.nodes)
 		return res, true
@@ -293,46 +294,93 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 			entries, err := os.ReadDir(cleanTarget)
 			if err == nil {
 				isSingleRoot := !hasFullRoot && len(userRoots) == 1 && strings.EqualFold(canonicalPath, userRoots[0])
+				validEntries := make([]fs.DirEntry, 0, len(entries))
 				for _, entry := range entries {
 					if childDsNames[strings.ToLower(entry.Name())] || isIgnoredFolder(entry.Name()) {
 						continue
 					}
-					info, err := entry.Info()
-					if err != nil {
-						continue
-					}
-					itemType := "file"
-					mimeType := mime.TypeByExtension(filepath.Ext(entry.Name()))
-					if entry.IsDir() {
-						itemType = "folder"
-						mimeType = "application/x-directory"
-					} else if mimeType == "" {
-						mimeType = "application/octet-stream"
-					}
-					relItemPath := filepath.ToSlash(filepath.Join(canonicalPath, entry.Name()))
-					relItemPath = strings.TrimPrefix(relItemPath, "/")
-					category := string(models.CategoryOf(models.NodeType(itemType), mimeType, entry.Name()))
+					validEntries = append(validEntries, entry)
+				}
 
-					parentIDForNode := opts.ParentID
-					if isSingleRoot {
-						parentIDForNode = "" // Đặt rỗng để UI hiểu các tệp này hiển thị ở cấp gốc Tệp của tôi
+				totalValid := len(validEntries)
+				parsedNodes := make([]nodeDTO, totalValid)
+				hasNode := make([]bool, totalValid)
+
+				workers := runtime.NumCPU() * 4
+				if workers < 8 {
+					workers = 8
+				}
+				if workers > 32 {
+					workers = 32
+				}
+
+				chunkSize := (totalValid + workers - 1) / workers
+				if chunkSize < 1 {
+					chunkSize = 1
+				}
+
+				var wg sync.WaitGroup
+				for w := 0; w < workers; w++ {
+					startIdx := w * chunkSize
+					if startIdx >= totalValid {
+						break
+					}
+					endIdx := startIdx + chunkSize
+					if endIdx > totalValid {
+						endIdx = totalValid
 					}
 
-					hasThumb := category == "image" || category == "video"
-					allNodes = append(allNodes, nodeDTO{
-						ID:           fmt.Sprintf("dataset:%s", relItemPath),
-						ParentID:     parentIDForNode,
-						Name:         entry.Name(),
-						Type:         itemType,
-						Category:     category,
-						MimeType:     mimeType,
-						SizeBytes:    info.Size(),
-						Role:         role,
-						HasThumbnail: hasThumb,
-						Previewable:  category == "image" || category == "video" || category == "audio",
-						CreatedAt:    info.ModTime().UnixMilli(),
-						UpdatedAt:    info.ModTime().UnixMilli(),
-					})
+					wg.Add(1)
+					go func(start, end int) {
+						defer wg.Done()
+						for i := start; i < end; i++ {
+							entry := validEntries[i]
+							info, err := entry.Info()
+							if err != nil {
+								continue
+							}
+							itemType := "file"
+							mimeType := mime.TypeByExtension(filepath.Ext(entry.Name()))
+							if entry.IsDir() {
+								itemType = "folder"
+								mimeType = "application/x-directory"
+							} else if mimeType == "" {
+								mimeType = "application/octet-stream"
+							}
+							relItemPath := filepath.ToSlash(filepath.Join(canonicalPath, entry.Name()))
+							relItemPath = strings.TrimPrefix(relItemPath, "/")
+							category := string(models.CategoryOf(models.NodeType(itemType), mimeType, entry.Name()))
+
+							parentIDForNode := opts.ParentID
+							if isSingleRoot {
+								parentIDForNode = "" // Đặt rỗng để UI hiểu các tệp này hiển thị ở cấp gốc Tệp của tôi
+							}
+
+							hasThumb := category == "image" || category == "video"
+							parsedNodes[i] = nodeDTO{
+								ID:           fmt.Sprintf("dataset:%s", relItemPath),
+								ParentID:     parentIDForNode,
+								Name:         entry.Name(),
+								Type:         itemType,
+								Category:     category,
+								MimeType:     mimeType,
+								SizeBytes:    info.Size(),
+								Role:         role,
+								HasThumbnail: hasThumb,
+								Previewable:  category == "image" || category == "video" || category == "audio",
+								CreatedAt:    info.ModTime().UnixMilli(),
+								UpdatedAt:    info.ModTime().UnixMilli(),
+							}
+							hasNode[i] = true
+						}
+					}(startIdx, endIdx)
+				}
+				wg.Wait()
+
+				for i := 0; i < totalValid; i++ {
+					if hasNode[i] {
+						allNodes = append(allNodes, parsedNodes[i])
+					}
 				}
 			}
 

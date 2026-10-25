@@ -54,6 +54,8 @@ const glyphForCategory: Record<string, Glyph> = {
 
 
 
+const browserFolderCache = new Map<string, { nodes: NodeModel[]; timestamp: number }>();
+
 type ClipboardState = { action: "cut" | "copy"; nodes: NodeModel[] } | null;
 let globalClipboard: ClipboardState = null;
 const clipboardListeners = new Set<() => void>();
@@ -592,6 +594,9 @@ export function FilesBrowser({
     }
   };
 
+  const folderCacheKey = `${folderId || "root"}:${filter}:${query}:${sortBy}:${sortDir}`;
+  const cachedFolder = browserFolderCache.get(folderCacheKey);
+
   const {
     items: rawNodes,
     setItems: setNodes,
@@ -604,6 +609,12 @@ export function FilesBrowser({
   } = useInfiniteList<NodeModel>({
     pageSize: 50,
     getItemKey: (node) => node.id,
+    initialItems: cachedFolder?.nodes,
+    onItemsUpdated: (updated) => {
+      if (updated && updated.length > 0) {
+        browserFolderCache.set(folderCacheKey, { nodes: updated, timestamp: Date.now() });
+      }
+    },
     deps: [folderId, filter, query, sortBy, sortDir, isForbidden, hasAssignedCategory],
     fetchPage: async ({ offset, limit, signal }) => {
       if (isForbidden || !hasAssignedCategory) {
@@ -703,20 +714,30 @@ export function FilesBrowser({
       }
     });
 
-    const onPermsUpdated = () => scheduleReload();
-    const onDatasetsUpdated = () => scheduleReload();
+    const onPermsUpdated = () => {
+      browserFolderCache.clear();
+      scheduleReload();
+    };
+    const onDatasetsUpdated = () => {
+      browserFolderCache.clear();
+      scheduleReload();
+    };
+    const onNodesChanged = () => {
+      browserFolderCache.clear();
+      scheduleReload();
+    };
     window.addEventListener("ld_permissions_updated", onPermsUpdated);
     window.addEventListener("ld_datasets_updated", onDatasetsUpdated);
-    window.addEventListener("ld_nodes_changed", scheduleReload);
-    window.addEventListener("ld_server_changed", scheduleReload);
+    window.addEventListener("ld_nodes_changed", onNodesChanged);
+    window.addEventListener("ld_server_changed", onNodesChanged);
 
     return () => {
       if (reloadTimer) clearTimeout(reloadTimer);
       unbindWs();
       window.removeEventListener("ld_permissions_updated", onPermsUpdated);
       window.removeEventListener("ld_datasets_updated", onDatasetsUpdated);
-      window.removeEventListener("ld_nodes_changed", scheduleReload);
-      window.removeEventListener("ld_server_changed", scheduleReload);
+      window.removeEventListener("ld_nodes_changed", onNodesChanged);
+      window.removeEventListener("ld_server_changed", onNodesChanged);
     };
   }, [load]);
 
@@ -2381,6 +2402,8 @@ const Tile = React.memo(function Tile({
               alt=""
               loading="lazy"
               decoding="async"
+              // @ts-ignore
+              fetchPriority="low"
               onError={(e) => {
                 e.currentTarget.style.display = "none";
               }}
@@ -2773,6 +2796,8 @@ const Row = React.memo(function Row({
             alt=""
             loading="lazy"
             decoding="async"
+            // @ts-ignore
+            fetchPriority="low"
             onError={(e) => {
               e.currentTarget.style.display = "none";
             }}
