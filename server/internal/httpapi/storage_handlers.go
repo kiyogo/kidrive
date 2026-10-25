@@ -23,6 +23,7 @@ import (
 
 	"github.com/MultiX0/LocalDrive/server/internal/audit"
 	"github.com/MultiX0/LocalDrive/server/internal/db"
+	"github.com/MultiX0/LocalDrive/server/internal/files"
 	mw "github.com/MultiX0/LocalDrive/server/internal/middleware"
 	"github.com/MultiX0/LocalDrive/server/internal/models"
 )
@@ -630,6 +631,40 @@ func syncSystemNetworkShare(name string, path string, readOnly bool, guestOk boo
 	if trimmedName == "" || trimmedPath == "" {
 		return nil
 	}
+
+	if runtime.GOOS == "windows" {
+		// Resolve non-Windows or virtual paths (e.g., "/DATA/KiyoVN" or "Dữ liệu/KiyoVN")
+		if filepath.VolumeName(trimmedPath) == "" {
+			cleanP := strings.Trim(filepath.ToSlash(trimmedPath), "/")
+			found := false
+			norm := strings.TrimPrefix(cleanP, "DATA/")
+			norm = strings.TrimPrefix(norm, "data/")
+			norm = strings.TrimPrefix(norm, "Dữ liệu/")
+			norm = strings.TrimPrefix(norm, "DỮ LIỆU/")
+
+			// 1. Try E:\DATA\<subpath>, D:\DATA\<subpath>, C:\DATA\<subpath>
+			for _, base := range []string{"E:\\DATA", "D:\\DATA", "C:\\DATA"} {
+				cand := filepath.Join(base, filepath.FromSlash(norm))
+				if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
+					trimmedPath = cand
+					found = true
+					break
+				}
+			}
+			// 2. If not found, create in E:\DATA or Local Drive
+			if !found {
+				if fi, err := os.Stat("E:\\DATA"); err == nil && fi.IsDir() {
+					trimmedPath = filepath.Join("E:\\DATA", filepath.FromSlash(norm))
+				} else if userProfile := os.Getenv("USERPROFILE"); userProfile != "" {
+					trimmedPath = filepath.Join(userProfile, "Local Drive", filepath.Base(cleanP))
+				} else {
+					trimmedPath = filepath.Clean("C:\\DATA\\" + filepath.Base(cleanP))
+				}
+			}
+		}
+		trimmedPath = filepath.Clean(filepath.FromSlash(trimmedPath))
+	}
+
 	// Ensure directory exists physically
 	_ = os.MkdirAll(trimmedPath, 0755)
 
@@ -640,19 +675,54 @@ func syncSystemNetworkShare(name string, path string, readOnly bool, guestOk boo
 	}
 
 	// On Windows, use 'net share'
-	// First delete existing share with same name (if any) to prevent conflict
-	_ = exec.Command("net", "share", trimmedName, "/DELETE", "/Y").Run()
+	if runtime.GOOS == "windows" {
+		// First delete existing share with same name (if any) to prevent conflict
+		_ = exec.Command("net", "share", trimmedName, "/DELETE", "/Y").Run()
 
-	perm := "FULL"
-	if readOnly {
-		perm = "READ"
+		perm := "FULL"
+		if readOnly {
+			perm = "READ"
+		}
+		grantArg := fmt.Sprintf("/GRANT:Everyone,%s", perm)
+		cmd := exec.Command("net", "share", fmt.Sprintf("%s=%s", trimmedName, trimmedPath), grantArg, "/Y")
+		_ = cmd.Run()
+
+		// Also try PowerShell New-SmbShare as fallback
+		psCmd := fmt.Sprintf(`if (!(Get-SmbShare -Name '%s' -ErrorAction SilentlyContinue)) { New-SmbShare -Name '%s' -Path '%s' -FullAccess 'Everyone' -ErrorAction SilentlyContinue }; net share %s="%s" /GRANT:Everyone,%s /Y`,
+			trimmedName, trimmedName, trimmedPath, trimmedName, trimmedPath, perm)
+		_ = exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", psCmd).Run()
+		return nil
 	}
-	grantArg := fmt.Sprintf("/GRANT:Everyone,%s", perm)
-	cmd := exec.Command("net", "share", fmt.Sprintf("%s=%s", trimmedName, trimmedPath), grantArg)
-	_ = cmd.Run()
 
-	// Also try net usershare on Linux if available
-	_ = exec.Command("net", "usershare", "add", trimmedName, trimmedPath, "", "Everyone:F", "guest_ok=y").Run()
+	// On Linux, publish Samba share with full guest access
+	// 1. Ensure usershare directory exists
+	_ = os.MkdirAll("/var/lib/samba/usershares", 01777)
+
+	// 2. Add usershare via net usershare
+	roStr := "Everyone:F"
+	if readOnly {
+		roStr = "Everyone:R"
+	}
+	_ = exec.Command("net", "usershare", "add", trimmedName, trimmedPath, "LocalDrive Network Share", roStr, "guest_ok=y").Run()
+
+	// 3. Directly create usershare configuration file to guarantee guest access without password
+	usershareFile := filepath.Join("/var/lib/samba/usershares", strings.ToLower(trimmedName))
+	uAcl := "Everyone:F"
+	if readOnly {
+		uAcl = "Everyone:R"
+	}
+	cfgContent := fmt.Sprintf("# LocalDrive Auto-generated Share\npath=%s\ncomment=LocalDrive Network Share\nusershare_acl=%s\nguest_ok=y\n", trimmedPath, uAcl)
+	_ = os.WriteFile(usershareFile, []byte(cfgContent), 0644)
+
+	// 4. Ensure firewall allows Samba ports (445, 139)
+	_ = exec.Command("ufw", "allow", "445/tcp").Run()
+	_ = exec.Command("ufw", "allow", "139/tcp").Run()
+	_ = exec.Command("ufw", "allow", "137:138/udp").Run()
+
+	// 5. Reload Samba service
+	_ = exec.Command("smbcontrol", "smbd", "reload-config").Run()
+	_ = exec.Command("systemctl", "reload", "smbd").Run()
+	_ = exec.Command("systemctl", "restart", "smbd").Run()
 
 	return nil
 }
@@ -663,7 +733,28 @@ func removeSystemNetworkShare(name string) {
 		return
 	}
 	_ = exec.Command("net", "share", trimmedName, "/DELETE", "/Y").Run()
+	_ = exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", fmt.Sprintf("Remove-SmbShare -Name '%s' -Force -ErrorAction SilentlyContinue", trimmedName)).Run()
 	_ = exec.Command("net", "usershare", "delete", trimmedName).Run()
+}
+
+// SyncAllActiveNetworkShares queries all active shares in the database and re-publishes them to the OS.
+func (a *API) SyncAllActiveNetworkShares(ctx context.Context) {
+	rows, err := a.db.Read().QueryContext(ctx, `SELECT name, path, read_only, guest_ok FROM network_shares WHERE status = 'active'`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, p string
+		var ro, goK int
+		if err := rows.Scan(&name, &p, &ro, &goK); err == nil {
+			realP := a.resolveRealMountPath(p, p)
+			if realP == "" {
+				realP = p
+			}
+			_ = syncSystemNetworkShare(name, realP, ro == 1, goK == 1, true)
+		}
+	}
 }
 
 func (a *API) handleCreateNetworkShare(w http.ResponseWriter, r *http.Request) {
@@ -2256,6 +2347,36 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 		"/" + leaf,
 	)
 
+	// Kiểm tra nếu nằm trong Virtual Drive Folder (Windows Local Drive)
+	if vdf := files.GetVirtualDriveFolder(); vdf != "" {
+		candidateSet = append(candidateSet,
+			filepath.Join(vdf, leaf),
+			filepath.Join(vdf, trimmedName),
+			filepath.Join(vdf, trimmedSlash),
+		)
+		if vdfEntries, err := os.ReadDir(vdf); err == nil {
+			for _, ve := range vdfEntries {
+				if ve.IsDir() {
+					if strings.EqualFold(ve.Name(), leaf) {
+						candidateSet = append(candidateSet, filepath.Join(vdf, ve.Name()))
+					}
+					candidateSet = append(candidateSet,
+						filepath.Join(vdf, ve.Name(), leaf),
+					)
+				}
+			}
+		}
+	}
+
+	// Kiểm tra nếu nằm trong Google Drive G:\My Drive
+	gMyDrive := "G:\\My Drive"
+	if fi, err := os.Stat(gMyDrive); err == nil && fi.IsDir() {
+		candidateSet = append(candidateSet,
+			filepath.Join(gMyDrive, leaf),
+			filepath.Join(gMyDrive, trimmedName),
+		)
+	}
+
 	// Kiểm tra nếu nằm trong bất kỳ thư mục con nào của /mnt
 	if entries, err := os.ReadDir("/mnt"); err == nil {
 		for _, e := range entries {
@@ -2387,8 +2508,10 @@ func (a *API) getDatasetMount(ctx context.Context, nameOrID string) (string, str
 func (a *API) resolveDatasetTarget(ctx context.Context, rawID string) (canonicalPath string, dsName string, subpath string, mountPath string, err error) {
 	raw := strings.TrimSpace(rawID)
 	raw = strings.TrimPrefix(raw, "dataset:")
+	if unescaped, uErr := url.PathUnescape(raw); uErr == nil {
+		raw = unescaped
+	}
 	raw = strings.ReplaceAll(raw, "\\", "/")
-	raw = strings.ReplaceAll(raw, ":", "/")
 	clean := filepath.ToSlash(filepath.Clean("/" + raw))
 	clean = strings.TrimPrefix(clean, "/")
 	clean = strings.TrimSuffix(clean, "/")
@@ -2396,12 +2519,31 @@ func (a *API) resolveDatasetTarget(ctx context.Context, rawID string) (canonical
 		return "", "", "", "", fmt.Errorf("đường dẫn rỗng")
 	}
 
-	if unescaped, uErr := url.PathUnescape(clean); uErr == nil {
-		clean = unescaped
+	// 0. Hỗ trợ localdrive (Virtual Drive Folder trên Windows) và library
+	parts := strings.Split(clean, "/")
+	if parts[0] == "localdrive" {
+		if vdf := files.GetVirtualDriveFolder(); vdf != "" {
+			dsName = "localdrive"
+			subpath = strings.Join(parts[1:], "/")
+			mountPath = filepath.Clean(filepath.Join(vdf, subpath))
+			canonicalPath = clean
+			return canonicalPath, dsName, subpath, mountPath, nil
+		}
+	}
+	if strings.HasPrefix(parts[0], "library:") {
+		libID := strings.TrimPrefix(parts[0], "library:")
+		if a.libs != nil {
+			if lib, lErr := a.libs.Get(libID); lErr == nil && lib.RootPath != "" {
+				dsName = parts[0]
+				subpath = strings.Join(parts[1:], "/")
+				mountPath = filepath.Clean(filepath.Join(lib.RootPath, subpath))
+				canonicalPath = clean
+				return canonicalPath, dsName, subpath, mountPath, nil
+			}
+		}
 	}
 
 	// 1. Thử tìm dataset khớp dài nhất trong bảng datasets
-	parts := strings.Split(clean, "/")
 	for i := len(parts); i >= 1; i-- {
 		testDs := strings.Join(parts[:i], "/")
 		var foundName, foundMount string

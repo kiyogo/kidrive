@@ -396,6 +396,9 @@ class ApiClient {
     }
   }
 
+  /// Public method to proactively refresh tokens
+  Future<bool> refreshSession() => _refreshOnce();
+
   /// Only one refresh runs at a time; every request that hit a 401 together
   /// waits on the same result rather than each rotating the token.
   Future<bool> _refreshOnce() {

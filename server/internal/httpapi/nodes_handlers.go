@@ -39,9 +39,10 @@ type mediaCacheEntry struct {
 }
 
 var (
-	datasetThumbGroup singleflight.Group
-	datasetThumbSem   = make(chan struct{}, 8) // max 8 concurrent thumbnail jobs to prevent CPU starvation
-	mediaScanGroup    singleflight.Group
+	datasetThumbGroup     singleflight.Group
+	datasetImageThumbSem = make(chan struct{}, 32) // max 32 concurrent image thumbnail jobs
+	datasetVideoThumbSem = make(chan struct{}, 4)  // max 4 concurrent video ffmpeg frame extraction jobs
+	mediaScanGroup        singleflight.Group
 
 	dirListCacheMu sync.RWMutex
 	dirListCache   = make(map[string]dirListCacheEntry)
@@ -74,20 +75,26 @@ func getCachedMediaList(key string) ([]nodeDTO, bool) {
 	mediaCacheMu.RLock()
 	defer mediaCacheMu.RUnlock()
 	entry, ok := mediaCache[key]
-	if ok && time.Since(entry.timestamp) < 5*time.Minute {
-		res := make([]nodeDTO, len(entry.nodes))
-		copy(res, entry.nodes)
-		return res, true
+	if ok && time.Since(entry.timestamp) < 24*time.Hour {
+		return entry.nodes, true
 	}
 	return nil, false
+}
+
+func isMediaCacheStale(key string) bool {
+	mediaCacheMu.RLock()
+	defer mediaCacheMu.RUnlock()
+	entry, ok := mediaCache[key]
+	if !ok {
+		return true
+	}
+	return time.Since(entry.timestamp) > 30*time.Minute
 }
 
 func setCachedMediaList(key string, nodes []nodeDTO) {
 	mediaCacheMu.Lock()
 	defer mediaCacheMu.Unlock()
-	res := make([]nodeDTO, len(nodes))
-	copy(res, nodes)
-	mediaCache[key] = mediaCacheEntry{nodes: res, timestamp: time.Now()}
+	mediaCache[key] = mediaCacheEntry{nodes: nodes, timestamp: time.Now()}
 }
 
 func getCachedMediaScan(key string) ([]nodeDTO, bool) {
@@ -337,8 +344,9 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 					SELECT n.id, n.name, n.type, n.size_bytes, COALESCE(n.mime_type, ''), n.created_at, n.updated_at
 					FROM nodes n
 					WHERE n.deleted_at IS NULL AND n.trashed_at IS NULL
-					  AND (n.parent_id = ? OR n.parent_id = ? OR n.parent_id IN (SELECT id FROM nodes WHERE name = ? OR name = ?))
-					ORDER BY n.type ASC, n.name ASC`, opts.ParentID, targetName, targetName, leafName)
+					  AND (n.parent_id = ? OR n.parent_id = ? 
+					       OR n.parent_id IN (SELECT id FROM nodes WHERE LOWER(name) = LOWER(?) OR LOWER(name) = LOWER(?) OR id = ?))
+					ORDER BY n.type ASC, n.name ASC`, opts.ParentID, targetName, targetName, leafName, targetName)
 				if nErr == nil {
 					for nRows.Next() {
 						var nID, nName, nType, nMime string
@@ -526,8 +534,17 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			var combinedNodes []nodeDTO
-			combinedNodes = append(combinedNodes, rootDsNodes...)
+			// Filter and prioritize: ONLY show the 5 allowed roots at root of Tệp của tôi
+			allowedRoots := map[string]bool{
+				"1DATA":   true,
+				"DaoKy_5": true,
+				"Long_4":  true,
+				"NgLoc_6": true,
+				"NgSon_1": true,
+			}
+			var finalRootNodes []nodeDTO
+			seenNames := make(map[string]bool)
+
 			dbList, dbErr := a.files.List(r.Context(), userID, files.ListOptions{
 				ParentID: "",
 				Filter:   "none",
@@ -538,15 +555,40 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 				SortDesc: opts.SortDesc,
 			})
 			if dbErr == nil && len(dbList) > 0 {
-				combinedNodes = append(combinedNodes, nodeViews(dbList, userID)...)
+				for _, n := range nodeViews(dbList, userID) {
+					if allowedRoots[n.Name] && !seenNames[strings.ToLower(n.Name)] {
+						finalRootNodes = append(finalRootNodes, n)
+						seenNames[strings.ToLower(n.Name)] = true
+					}
+				}
 			}
 
+			// If any of the 5 allowed roots is not yet in dbList, add from rootDsNodes
+			for _, n := range rootDsNodes {
+				targetName := ""
+				for allowed := range allowedRoots {
+					if strings.EqualFold(n.Name, allowed) || (strings.EqualFold(n.Name, "1data") && allowed == "1DATA") {
+						targetName = allowed
+						break
+					}
+				}
+				if targetName != "" && !seenNames[strings.ToLower(targetName)] {
+					n.Name = targetName
+					finalRootNodes = append(finalRootNodes, n)
+					seenNames[strings.ToLower(targetName)] = true
+				}
+			}
+
+			sort.Slice(finalRootNodes, func(i, j int) bool {
+				return strings.ToLower(finalRootNodes[i].Name) < strings.ToLower(finalRootNodes[j].Name)
+			})
+
 			writeJSON(w, http.StatusOK, map[string]any{
-				"nodes":       combinedNodes,
+				"nodes":       finalRootNodes,
 				"limit":       opts.Limit,
 				"offset":      opts.Offset,
 				"has_more":    false,
-				"next_offset": len(combinedNodes),
+				"next_offset": len(finalRootNodes),
 			})
 			return
 		}
@@ -1130,340 +1172,25 @@ func sanitizeFilename(name string) string {
 }
 
 func (a *API) handleMediaNodes(w http.ResponseWriter, r *http.Request, userID string, opts files.ListOptions, userRoots []string, hasFullRoot bool) {
-	isImg := opts.Filter == "image" || opts.Filter == "images" || opts.Filter == "gallery"
 	cacheKey := fmt.Sprintf("%s:%s", userID, opts.Filter)
 	var mediaNodes []nodeDTO
 
 	cached, found := getCachedMediaList(cacheKey)
 	if found {
 		mediaNodes = cached
+		if isMediaCacheStale(cacheKey) {
+			if u, ok := mw.UserFrom(r.Context()); ok {
+				bgCtx := mw.WithUser(context.Background(), u)
+				bgReq := r.Clone(bgCtx)
+				go func() {
+					_, _ = a.scanAndCacheMediaNodes(bgReq, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
+				}()
+			}
+		}
 	} else {
-		res, err, _ := mediaScanGroup.Do(cacheKey, func() (any, error) {
-			if c, ok := getCachedMediaList(cacheKey); ok {
-				return c, nil
-			}
-
-			scanCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-
-			type scanTarget struct {
-				canonical string
-				mount     string
-				role      string
-			}
-			var targets []scanTarget
-			seenMounts := make(map[string]bool)
-
-			addMountTarget := func(canonical, mount, role string) {
-				cleanMount := filepath.Clean(mount)
-				normMount := strings.ToLower(cleanMount)
-				if seenMounts[normMount] {
-					return
-				}
-				if fi, err := os.Stat(cleanMount); err == nil && fi.IsDir() {
-					seenMounts[normMount] = true
-					targets = append(targets, scanTarget{canonical: canonical, mount: cleanMount, role: role})
-				}
-			}
-
-			addDatasetRootTarget := func(root, role string) {
-				cleanRoot := strings.Trim(strings.TrimSpace(root), "/")
-				if cleanRoot == "" {
-					return
-				}
-				// 1. Thử qua resolveDatasetTarget
-				canonical, _, _, mount, err := a.resolveDatasetTarget(scanCtx, "dataset:"+cleanRoot)
-				if err == nil && mount != "" {
-					if fi, sErr := os.Stat(mount); sErr == nil && fi.IsDir() {
-						addMountTarget(canonical, mount, role)
-						return
-					}
-				}
-				// 2. Thử qua resolveRealMountPath
-				realMount := a.resolveRealMountPath(cleanRoot, "")
-				if realMount != "" {
-					if fi, sErr := os.Stat(realMount); sErr == nil && fi.IsDir() {
-						addMountTarget(cleanRoot, realMount, role)
-						return
-					}
-				}
-				// 3. Quét dưới các dataset đã biết
-				if dRows, qErr := a.db.Read().QueryContext(scanCtx, `SELECT name, mount FROM datasets WHERE status != 'deleted'`); qErr == nil {
-					defer dRows.Close()
-					for dRows.Next() {
-						var dName, dMount string
-						if dRows.Scan(&dName, &dMount) == nil {
-							base := a.resolveRealMountPath(dName, dMount)
-							if base != "" {
-								cand := filepath.Join(base, cleanRoot)
-								if fi, sErr := os.Stat(cand); sErr == nil && fi.IsDir() {
-									addMountTarget(filepath.ToSlash(filepath.Join(dName, cleanRoot)), cand, role)
-									return
-								}
-							}
-						}
-					}
-				}
-				// 4. Quét dưới /mnt
-				if mntEntries, mErr := os.ReadDir("/mnt"); mErr == nil {
-					for _, me := range mntEntries {
-						if me.IsDir() {
-							cand := filepath.Join("/mnt", me.Name(), cleanRoot)
-							if fi, sErr := os.Stat(cand); sErr == nil && fi.IsDir() {
-								addMountTarget(filepath.ToSlash(filepath.Join(me.Name(), cleanRoot)), cand, role)
-								return
-							}
-						}
-					}
-				}
-			}
-
-			// 1. Quét tất cả các danh mục chỉ định cụ thể của người dùng (userRoots)
-			for _, root := range userRoots {
-				role, accessErr := a.checkDatasetAccess(r, root, false)
-				if accessErr != nil {
-					continue
-				}
-				addDatasetRootTarget(root, role)
-			}
-
-			// 2. Quét toàn bộ các tập dữ liệu (datasets) trong CSDL mà tài khoản có quyền truy cập
-			dRows, err := a.db.Read().QueryContext(scanCtx,
-				`SELECT name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY name ASC`)
-			if err == nil {
-				defer dRows.Close()
-				for dRows.Next() {
-					var dName, dPool, dMount string
-					if err := dRows.Scan(&dName, &dPool, &dMount); err == nil {
-						role, accessErr := a.checkDatasetAccess(r, dName, false)
-						if accessErr != nil {
-							continue
-						}
-						realMount := a.resolveRealMountPath(dName, dMount)
-						if realMount != "" {
-							addMountTarget(dName, realMount, role)
-						}
-					}
-				}
-			}
-
-			// 3. Quét toàn bộ các mảng lưu trữ (storage_pools) mà tài khoản có quyền
-			pRows, err := a.db.Read().QueryContext(scanCtx, `SELECT name FROM storage_pools WHERE status != 'deleted'`)
-			if err == nil {
-				defer pRows.Close()
-				for pRows.Next() {
-					var pName string
-					if err := pRows.Scan(&pName); err == nil {
-						role, accessErr := a.checkDatasetAccess(r, pName, false)
-						if accessErr != nil {
-							continue
-						}
-						realMount := a.resolveRealMountPath(pName, "/mnt/"+pName)
-						if realMount != "" {
-							addMountTarget(pName, realMount, role)
-						}
-					}
-				}
-			}
-
-			// 4. Nếu có công cụ OpenZFS, kiểm tra trực tiếp tất cả datasets thực tế đang mount trên hệ thống
-			if hasZFSTools() {
-				if out, err := exec.Command("zfs", "list", "-H", "-o", "name,mountpoint").Output(); err == nil {
-					scanner := bufio.NewScanner(strings.NewReader(string(out)))
-					for scanner.Scan() {
-						parts := strings.Split(scanner.Text(), "\t")
-						if len(parts) >= 2 {
-							zName := strings.TrimSpace(parts[0])
-							zMount := strings.TrimSpace(parts[1])
-							if zMount != "" && zMount != "none" && zMount != "legacy" && !strings.Contains(zMount, "zfs-recovery") {
-								role, accessErr := a.checkDatasetAccess(r, zName, false)
-								if accessErr == nil {
-									addMountTarget(zName, zMount, role)
-								}
-							}
-						}
-					}
-				}
-			}
-
-			// 5. Quét tất cả các thư mục có sẵn trong /mnt (TrueNAS / Linux mount point tiêu chuẩn)
-			if mntEntries, err := os.ReadDir("/mnt"); err == nil {
-				for _, me := range mntEntries {
-					if me.IsDir() {
-						mPath := filepath.Join("/mnt", me.Name())
-						role, accessErr := a.checkDatasetAccess(r, me.Name(), false)
-						if accessErr == nil {
-							addMountTarget(me.Name(), mPath, role)
-						}
-					}
-				}
-			}
-
-			// 6. Quét các thư mục chia sẻ mạng (network_shares) trong CSDL
-			sRows, sErr := a.db.Read().QueryContext(scanCtx, `SELECT name, path FROM network_shares WHERE status != 'deleted'`)
-			if sErr == nil {
-				defer sRows.Close()
-				for sRows.Next() {
-					var sName, sPath string
-					if sRows.Scan(&sName, &sPath) == nil {
-						role, accessErr := a.checkDatasetAccess(r, sName, false)
-						if accessErr == nil {
-							realP := a.resolveRealMountPath(sName, sPath)
-							if realP != "" {
-								addMountTarget(sName, realP, role)
-							}
-						}
-					}
-				}
-			}
-
-			// 7. Quét các thư viện lưu trữ (libraries)
-			if a.libs != nil {
-				if libList, lErr := a.libs.List(scanCtx); lErr == nil {
-					for _, lib := range libList {
-						if lib.Online() && lib.RootPath != "" {
-							role := "viewer"
-							if hasFullRoot {
-								role = "admin"
-							}
-							addMountTarget("library:"+lib.ID, lib.RootPath, role)
-						}
-					}
-				}
-			}
-
-			// 8. Quét Virtual Drive folder nếu có (trên Windows / client server)
-			if vdf := files.GetVirtualDriveFolder(); vdf != "" {
-				role := "viewer"
-				if hasFullRoot {
-					role = "admin"
-				}
-				addMountTarget("localdrive", vdf, role)
-			}
-
-			// Tối ưu hóa: Loại bỏ các target con nếu target cha đã có trong danh sách
-			sort.Slice(targets, func(i, j int) bool {
-				return len(targets[i].mount) < len(targets[j].mount)
-			})
-			var uniqueTargets []scanTarget
-			for _, t := range targets {
-				tNorm := strings.ToLower(filepath.Clean(t.mount))
-				isSub := false
-				for _, u := range uniqueTargets {
-					uNorm := strings.ToLower(filepath.Clean(u.mount))
-					if tNorm == uNorm || strings.HasPrefix(tNorm, uNorm+string(filepath.Separator)) {
-						isSub = true
-						break
-					}
-				}
-				if !isSub {
-					uniqueTargets = append(uniqueTargets, t)
-				}
-			}
-			targets = uniqueTargets
-
-			var scannedNodes []nodeDTO
-			seenFiles := make(map[string]bool)
-
-			for _, tgt := range targets {
-				cleanMount := filepath.Clean(tgt.mount)
-				_ = filepath.WalkDir(cleanMount, func(path string, d fs.DirEntry, walkErr error) error {
-					if walkErr != nil || d == nil {
-						return nil
-					}
-					if d.IsDir() {
-						lowerName := strings.ToLower(d.Name())
-						if strings.HasPrefix(lowerName, "$") || strings.EqualFold(lowerName, "System Volume Information") || strings.EqualFold(lowerName, "$recycle.bin") {
-							return filepath.SkipDir
-						}
-						switch lowerName {
-						case "node_modules", ".git", ".next", ".cache", "dist-inno", "dist-installer", "release-installer", "release_assets", ".dart_tool", ".gradle", "windows-installer", "windows-app", "appdata", "windows", "program files", "program files (x86)", "programdata", "proc", "sys", "dev", "run", "var", "etc", "usr", "boot":
-							return filepath.SkipDir
-						}
-						return nil
-					}
-					normFilePath := strings.ToLower(filepath.Clean(path))
-					if seenFiles[normFilePath] {
-						return nil
-					}
-					ext := strings.ToLower(filepath.Ext(d.Name()))
-					var matchedCategory string
-					var mimeType string
-					if isImg {
-						switch ext {
-						case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".bmp", ".tiff", ".tif", ".svg", ".ico", ".avif", ".raw", ".cr2", ".nef", ".arw", ".dng", ".psd", ".ai", ".jfif", ".jpe":
-							matchedCategory = "image"
-							mimeType = mime.TypeByExtension(ext)
-							if mimeType == "" {
-								mimeType = "image/" + strings.TrimPrefix(ext, ".")
-							}
-						}
-					} else {
-						// Tuyệt đối không lấy file .ts hoặc .tsx cho video!
-						if ext != ".ts" && ext != ".tsx" {
-							switch ext {
-							case ".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v", ".3gp", ".m2ts", ".mts", ".vob", ".ogv", ".rmvb", ".rm", ".asf", ".divx":
-								matchedCategory = "video"
-								mimeType = mime.TypeByExtension(ext)
-								if mimeType == "" {
-									mimeType = "video/" + strings.TrimPrefix(ext, ".")
-								}
-							}
-						}
-					}
-					if matchedCategory == "" {
-						return nil
-					}
-					info, err := d.Info()
-					if err != nil {
-						return nil
-					}
-					seenFiles[normFilePath] = true
-					rel, rErr := filepath.Rel(cleanMount, path)
-					if rErr != nil {
-						return nil
-					}
-					relItemPath := filepath.ToSlash(filepath.Join(tgt.canonical, rel))
-					relItemPath = strings.TrimPrefix(relItemPath, "/")
-					scannedNodes = append(scannedNodes, nodeDTO{
-						ID:           fmt.Sprintf("dataset:%s", relItemPath),
-						ParentID:     fmt.Sprintf("dataset:%s", tgt.canonical),
-						Name:         d.Name(),
-						Type:         "file",
-						Category:     matchedCategory,
-						MimeType:     mimeType,
-						SizeBytes:    info.Size(),
-						Role:         tgt.role,
-						HasThumbnail: true,
-						Previewable:  true,
-						CreatedAt:    info.ModTime().UnixMilli(),
-						UpdatedAt:    info.ModTime().UnixMilli(),
-					})
-					return nil
-				})
-			}
-
-			// Kết hợp với các tệp có sẵn trong SQLite database
-			dbList, dbErr := a.files.List(scanCtx, userID, files.ListOptions{
-				Filter:   opts.Filter,
-				Limit:    100000,
-				AllUsers: hasFullRoot,
-			})
-			if dbErr == nil {
-				for _, v := range nodeViews(dbList, userID) {
-					// Bỏ qua .ts và .tsx nếu là video
-					if !isImg && (strings.HasSuffix(strings.ToLower(v.Name), ".ts") || strings.HasSuffix(strings.ToLower(v.Name), ".tsx")) {
-						continue
-					}
-					scannedNodes = append(scannedNodes, v)
-				}
-			}
-
-			setCachedMediaList(cacheKey, scannedNodes)
-			return scannedNodes, nil
-		})
-		if err == nil && res != nil {
-			mediaNodes = res.([]nodeDTO)
+		scanned, err := a.scanAndCacheMediaNodes(r, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
+		if err == nil {
+			mediaNodes = scanned
 		}
 	}
 
@@ -1476,22 +1203,39 @@ func (a *API) handleMediaNodes(w http.ResponseWriter, r *http.Request, userID st
 				filtered = append(filtered, item)
 			}
 		}
-	} else {
-		filtered = mediaNodes
-	}
-
-	sort.Slice(filtered, func(i, j int) bool {
-		if opts.SortBy == "name" {
-			if opts.SortDesc {
-				return strings.ToLower(filtered[i].Name) > strings.ToLower(filtered[j].Name)
+		sort.Slice(filtered, func(i, j int) bool {
+			if opts.SortBy == "name" {
+				if opts.SortDesc {
+					return strings.ToLower(filtered[i].Name) > strings.ToLower(filtered[j].Name)
+				}
+				return strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
 			}
-			return strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
+			if opts.SortDesc {
+				return filtered[i].UpdatedAt > filtered[j].UpdatedAt
+			}
+			return filtered[i].UpdatedAt < filtered[j].UpdatedAt
+		})
+	} else {
+		// Default sort order (UpdatedAt desc) is ALREADY applied during cache construction!
+		if (opts.SortBy == "" || opts.SortBy == "updated" || opts.SortBy == "taken" || opts.SortBy == "created") && opts.SortDesc {
+			filtered = mediaNodes
+		} else {
+			filtered = make([]nodeDTO, len(mediaNodes))
+			copy(filtered, mediaNodes)
+			sort.Slice(filtered, func(i, j int) bool {
+				if opts.SortBy == "name" {
+					if opts.SortDesc {
+						return strings.ToLower(filtered[i].Name) > strings.ToLower(filtered[j].Name)
+					}
+					return strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
+				}
+				if opts.SortDesc {
+					return filtered[i].UpdatedAt > filtered[j].UpdatedAt
+				}
+				return filtered[i].UpdatedAt < filtered[j].UpdatedAt
+			})
 		}
-		if opts.SortDesc {
-			return filtered[i].UpdatedAt > filtered[j].UpdatedAt
-		}
-		return filtered[i].UpdatedAt < filtered[j].UpdatedAt
-	})
+	}
 
 	total := len(filtered)
 	start := opts.Offset
@@ -1511,6 +1255,343 @@ func (a *API) handleMediaNodes(w http.ResponseWriter, r *http.Request, userID st
 		"next_offset": end,
 		"total":       total,
 	})
+}
+
+func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter string, userRoots []string, hasFullRoot bool) ([]nodeDTO, error) {
+	isImg := filter == "image" || filter == "images" || filter == "gallery"
+	res, err, _ := mediaScanGroup.Do(cacheKey, func() (any, error) {
+		if c, ok := getCachedMediaList(cacheKey); ok && !isMediaCacheStale(cacheKey) {
+			return c, nil
+		}
+
+		scanCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		type scanTarget struct {
+			canonical string
+			mount     string
+			role      string
+		}
+		var targets []scanTarget
+		seenMounts := make(map[string]bool)
+
+		addMountTarget := func(canonical, mount, role string) {
+			cleanMount := filepath.Clean(mount)
+			normMount := strings.ToLower(cleanMount)
+			if seenMounts[normMount] {
+				return
+			}
+			if fi, err := os.Stat(cleanMount); err == nil && fi.IsDir() {
+				seenMounts[normMount] = true
+				targets = append(targets, scanTarget{canonical: canonical, mount: cleanMount, role: role})
+			}
+		}
+
+		addDatasetRootTarget := func(root, role string) {
+			cleanRoot := strings.Trim(strings.TrimSpace(root), "/")
+			if cleanRoot == "" {
+				return
+			}
+			// 1. Thử qua resolveDatasetTarget
+			canonical, _, _, mount, err := a.resolveDatasetTarget(scanCtx, "dataset:"+cleanRoot)
+			if err == nil && mount != "" {
+				if fi, sErr := os.Stat(mount); sErr == nil && fi.IsDir() {
+					addMountTarget(canonical, mount, role)
+					return
+				}
+			}
+			// 2. Thử qua resolveRealMountPath
+			realMount := a.resolveRealMountPath(cleanRoot, "")
+			if realMount != "" {
+				if fi, sErr := os.Stat(realMount); sErr == nil && fi.IsDir() {
+					addMountTarget(cleanRoot, realMount, role)
+					return
+				}
+			}
+			// 3. Quét dưới các dataset đã biết
+			if dRows, qErr := a.db.Read().QueryContext(scanCtx, `SELECT name, mount FROM datasets WHERE status != 'deleted'`); qErr == nil {
+				defer dRows.Close()
+				for dRows.Next() {
+					var dName, dMount string
+					if dRows.Scan(&dName, &dMount) == nil {
+						base := a.resolveRealMountPath(dName, dMount)
+						if base != "" {
+							cand := filepath.Join(base, cleanRoot)
+							if fi, sErr := os.Stat(cand); sErr == nil && fi.IsDir() {
+								addMountTarget(filepath.ToSlash(filepath.Join(dName, cleanRoot)), cand, role)
+								return
+							}
+						}
+					}
+				}
+			}
+			// 4. Quét dưới /mnt
+			if mntEntries, mErr := os.ReadDir("/mnt"); mErr == nil {
+				for _, me := range mntEntries {
+					if me.IsDir() {
+						cand := filepath.Join("/mnt", me.Name(), cleanRoot)
+						if fi, sErr := os.Stat(cand); sErr == nil && fi.IsDir() {
+							addMountTarget(filepath.ToSlash(filepath.Join(me.Name(), cleanRoot)), cand, role)
+							return
+						}
+					}
+				}
+			}
+		}
+
+		// 1. Quét tất cả các danh mục chỉ định cụ thể của người dùng (userRoots)
+		for _, root := range userRoots {
+			role, accessErr := a.checkDatasetAccess(r, root, false)
+			if accessErr != nil {
+				continue
+			}
+			addDatasetRootTarget(root, role)
+		}
+
+		// 2. Quét toàn bộ các tập dữ liệu (datasets) trong CSDL mà tài khoản có quyền truy cập
+		dRows, err := a.db.Read().QueryContext(scanCtx,
+			`SELECT name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY name ASC`)
+		if err == nil {
+			defer dRows.Close()
+			for dRows.Next() {
+				var dName, dPool, dMount string
+				if err := dRows.Scan(&dName, &dPool, &dMount); err == nil {
+					role, accessErr := a.checkDatasetAccess(r, dName, false)
+					if accessErr != nil {
+						continue
+					}
+					realMount := a.resolveRealMountPath(dName, dMount)
+					if realMount != "" {
+						addMountTarget(dName, realMount, role)
+					}
+				}
+			}
+		}
+
+		// 3. Quét toàn bộ các mảng lưu trữ (storage_pools) mà tài khoản có quyền
+		pRows, err := a.db.Read().QueryContext(scanCtx, `SELECT name FROM storage_pools WHERE status != 'deleted'`)
+		if err == nil {
+			defer pRows.Close()
+			for pRows.Next() {
+				var pName string
+				if err := pRows.Scan(&pName); err == nil {
+					role, accessErr := a.checkDatasetAccess(r, pName, false)
+					if accessErr != nil {
+						continue
+					}
+					realMount := a.resolveRealMountPath(pName, "/mnt/"+pName)
+					if realMount != "" {
+						addMountTarget(pName, realMount, role)
+					}
+				}
+			}
+		}
+
+		// 4. Nếu có công cụ OpenZFS, kiểm tra trực tiếp tất cả datasets thực tế đang mount trên hệ thống
+		if hasZFSTools() {
+			if out, err := exec.Command("zfs", "list", "-H", "-o", "name,mountpoint").Output(); err == nil {
+				scanner := bufio.NewScanner(strings.NewReader(string(out)))
+				for scanner.Scan() {
+					parts := strings.Split(scanner.Text(), "\t")
+					if len(parts) >= 2 {
+						zName := strings.TrimSpace(parts[0])
+						zMount := strings.TrimSpace(parts[1])
+						if zMount != "" && zMount != "none" && zMount != "legacy" && !strings.Contains(zMount, "zfs-recovery") {
+							role, accessErr := a.checkDatasetAccess(r, zName, false)
+							if accessErr == nil {
+								addMountTarget(zName, zMount, role)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 5. Quét tất cả các thư mục có sẵn trong /mnt (TrueNAS / Linux mount point tiêu chuẩn)
+		if mntEntries, err := os.ReadDir("/mnt"); err == nil {
+			for _, me := range mntEntries {
+				if me.IsDir() {
+					mPath := filepath.Join("/mnt", me.Name())
+					role, accessErr := a.checkDatasetAccess(r, me.Name(), false)
+					if accessErr == nil {
+						addMountTarget(me.Name(), mPath, role)
+					}
+				}
+			}
+		}
+
+		// 6. Quét các thư mục chia sẻ mạng (network_shares) trong CSDL
+		sRows, sErr := a.db.Read().QueryContext(scanCtx, `SELECT name, path FROM network_shares WHERE status != 'deleted'`)
+		if sErr == nil {
+			defer sRows.Close()
+			for sRows.Next() {
+				var sName, sPath string
+				if sRows.Scan(&sName, &sPath) == nil {
+					role, accessErr := a.checkDatasetAccess(r, sName, false)
+					if accessErr == nil {
+						realP := a.resolveRealMountPath(sName, sPath)
+						if realP != "" {
+							addMountTarget(sName, realP, role)
+						}
+					}
+				}
+			}
+		}
+
+		// 7. Quét các thư viện lưu trữ (libraries)
+		if a.libs != nil {
+			if libList, lErr := a.libs.List(scanCtx); lErr == nil {
+				for _, lib := range libList {
+					if lib.Online() && lib.RootPath != "" {
+						role := "viewer"
+						if hasFullRoot {
+							role = "admin"
+						}
+						addMountTarget("library:"+lib.ID, lib.RootPath, role)
+					}
+				}
+			}
+		}
+
+		// 8. Quét Virtual Drive folder nếu có (trên Windows / client server)
+		if vdf := files.GetVirtualDriveFolder(); vdf != "" {
+			role := "viewer"
+			if hasFullRoot {
+				role = "admin"
+			}
+			addMountTarget("localdrive", vdf, role)
+		}
+
+		// Tối ưu hóa: Loại bỏ các target con nếu target cha đã có trong danh sách
+		sort.Slice(targets, func(i, j int) bool {
+			return len(targets[i].mount) < len(targets[j].mount)
+		})
+		var uniqueTargets []scanTarget
+		for _, t := range targets {
+			tNorm := strings.ToLower(filepath.Clean(t.mount))
+			isSub := false
+			for _, u := range uniqueTargets {
+				uNorm := strings.ToLower(filepath.Clean(u.mount))
+				if tNorm == uNorm || strings.HasPrefix(tNorm, uNorm+string(filepath.Separator)) {
+					isSub = true
+					break
+				}
+			}
+			if !isSub {
+				uniqueTargets = append(uniqueTargets, t)
+			}
+		}
+		targets = uniqueTargets
+
+		var scannedNodes []nodeDTO
+		seenFiles := make(map[string]bool)
+
+		for _, tgt := range targets {
+			cleanMount := filepath.Clean(tgt.mount)
+			_ = filepath.WalkDir(cleanMount, func(path string, d fs.DirEntry, walkErr error) error {
+				if walkErr != nil || d == nil {
+					return nil
+				}
+				if d.IsDir() {
+					lowerName := strings.ToLower(d.Name())
+					if strings.HasPrefix(lowerName, "$") || strings.EqualFold(lowerName, "System Volume Information") || strings.EqualFold(lowerName, "$recycle.bin") || strings.Contains(lowerName, "google drive") {
+						return filepath.SkipDir
+					}
+					switch lowerName {
+					case "node_modules", ".git", ".next", ".cache", "dist-inno", "dist-installer", "release-installer", "release_assets", ".dart_tool", ".gradle", "windows-installer", "windows-app", "appdata", "windows", "program files", "program files (x86)", "programdata", "proc", "sys", "dev", "run", "var", "etc", "usr", "boot", "build", "bin", "obj", "intermediates", "target", "vendor", "dist":
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				normFilePath := strings.ToLower(filepath.Clean(path))
+				if seenFiles[normFilePath] {
+					return nil
+				}
+				ext := strings.ToLower(filepath.Ext(d.Name()))
+				var matchedCategory string
+				var mimeType string
+				if isImg {
+					switch ext {
+					case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".bmp", ".tiff", ".tif", ".svg", ".ico", ".avif", ".raw", ".cr2", ".nef", ".arw", ".dng", ".psd", ".ai", ".jfif", ".jpe":
+						matchedCategory = "image"
+						mimeType = mime.TypeByExtension(ext)
+						if mimeType == "" {
+							mimeType = "image/" + strings.TrimPrefix(ext, ".")
+						}
+					}
+				} else {
+					// Tuyệt đối không lấy file .ts hoặc .tsx cho video!
+					if ext != ".ts" && ext != ".tsx" {
+						switch ext {
+						case ".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v", ".3gp", ".m2ts", ".mts", ".vob", ".ogv", ".rmvb", ".rm", ".asf", ".divx":
+							matchedCategory = "video"
+							mimeType = mime.TypeByExtension(ext)
+							if mimeType == "" {
+								mimeType = "video/" + strings.TrimPrefix(ext, ".")
+							}
+						}
+					}
+				}
+				if matchedCategory == "" {
+					return nil
+				}
+				info, err := d.Info()
+				if err != nil {
+					return nil
+				}
+				seenFiles[normFilePath] = true
+				rel, rErr := filepath.Rel(cleanMount, path)
+				if rErr != nil {
+					return nil
+				}
+				relItemPath := filepath.ToSlash(filepath.Join(tgt.canonical, rel))
+				relItemPath = strings.TrimPrefix(relItemPath, "/")
+				scannedNodes = append(scannedNodes, nodeDTO{
+					ID:           fmt.Sprintf("dataset:%s", relItemPath),
+					ParentID:     fmt.Sprintf("dataset:%s", tgt.canonical),
+					Name:         d.Name(),
+					Type:         "file",
+					Category:     matchedCategory,
+					MimeType:     mimeType,
+					SizeBytes:    info.Size(),
+					Role:         tgt.role,
+					HasThumbnail: true,
+					Previewable:  true,
+					CreatedAt:    info.ModTime().UnixMilli(),
+					UpdatedAt:    info.ModTime().UnixMilli(),
+				})
+				return nil
+			})
+		}
+
+		// Kết hợp với các tệp có sẵn trong SQLite database
+		dbList, dbErr := a.files.List(scanCtx, userID, files.ListOptions{
+			Filter:   filter,
+			Limit:    100000,
+			AllUsers: hasFullRoot,
+		})
+		if dbErr == nil {
+			for _, v := range nodeViews(dbList, userID) {
+				// Bỏ qua .ts và .tsx nếu là video
+				if !isImg && (strings.HasSuffix(strings.ToLower(v.Name), ".ts") || strings.HasSuffix(strings.ToLower(v.Name), ".tsx")) {
+					continue
+				}
+				scannedNodes = append(scannedNodes, v)
+			}
+		}
+
+		// Pre-sort once by UpdatedAt desc so standard requests have 0 sorting overhead
+		sort.Slice(scannedNodes, func(i, j int) bool {
+			return scannedNodes[i].UpdatedAt > scannedNodes[j].UpdatedAt
+		})
+
+		setCachedMediaList(cacheKey, scannedNodes)
+		return scannedNodes, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res.([]nodeDTO), nil
 }
 
 func (a *API) handleThumbnail(w http.ResponseWriter, r *http.Request) {
@@ -1564,15 +1645,34 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 	if mimeType == "" {
 		mimeType = mime.TypeByExtension(ext)
 	}
+	if mimeType == "" {
+		switch ext {
+		case ".svg":
+			mimeType = "image/svg+xml"
+		case ".ico":
+			mimeType = "image/x-icon"
+		case ".heic", ".heif":
+			mimeType = "image/heic"
+		case ".avif":
+			mimeType = "image/avif"
+		case ".webp":
+			mimeType = "image/webp"
+		}
+	}
 	cat := models.CategoryOf(models.NodeFile, mimeType, cleanTarget)
 	if cat != models.CategoryImage && cat != models.CategoryVideo && cat != models.CategoryPDF {
 		writeError(w, http.StatusNotFound, "no_thumbnail", "this file has no preview")
 		return
 	}
 
-	// For tiny images (under 60KB), serve immediately with long cache
-	if info.Size() <= 60*1024 && (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".gif") {
-		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	isStandardImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".gif" || ext == ".svg" || ext == ".ico"
+
+	// For standard web images under 256KB, serve immediately with long client cache
+	if isStandardImage && info.Size() <= 256*1024 {
+		if mimeType != "" {
+			w.Header().Set("Content-Type", mimeType)
+		}
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		http.ServeFile(w, r, cleanTarget)
 		return
 	}
@@ -1593,15 +1693,15 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 			defer cf.Close()
 			w.Header().Set("Content-Type", "image/jpeg")
 			w.Header().Set("ETag", `"thumb-`+hash+`"`)
-			w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 			http.ServeContent(w, r, "thumbnail.jpg", cinfo.ModTime(), cf)
 			return
 		}
 	}
 
 	if a.thumbs == nil {
-		if cat == models.CategoryImage && info.Size() <= 2*1024*1024 {
-			w.Header().Set("Cache-Control", "private, max-age=86400")
+		if cat == models.CategoryImage && isStandardImage && info.Size() <= 4*1024*1024 {
+			w.Header().Set("Cache-Control", "public, max-age=86400")
 			http.ServeFile(w, r, cleanTarget)
 			return
 		}
@@ -1609,7 +1709,15 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 		return
 	}
 
-	// 2. Generate thumbnail with concurrency limiter and singleflight deduplication
+	// 2. Separate concurrency limiting by media type
+	sem := datasetImageThumbSem
+	semTimeout := 2 * time.Second
+	if cat == models.CategoryVideo {
+		sem = datasetVideoThumbSem
+		semTimeout = 4 * time.Second
+	}
+
+	// 3. Generate thumbnail with concurrency limiter and singleflight deduplication
 	_, _, _ = datasetThumbGroup.Do(hash, func() (any, error) {
 		// Recheck if created by a racing request
 		if cinfo, err := os.Stat(cacheFile); err == nil && cinfo.Size() > 0 {
@@ -1618,11 +1726,11 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 
 		// Acquire semaphore slot with timeout
 		select {
-		case datasetThumbSem <- struct{}{}:
-			defer func() { <-datasetThumbSem }()
+		case sem <- struct{}{}:
+			defer func() { <-sem }()
 		case <-r.Context().Done():
 			return nil, r.Context().Err()
-		case <-time.After(30 * time.Second):
+		case <-time.After(semTimeout):
 			return nil, fmt.Errorf("thumbnail queue timeout")
 		}
 
@@ -1644,7 +1752,7 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 		return nil, nil
 	})
 
-	// 3. Check if cached file is now available and serve
+	// 4. Check if cached file is now available and serve
 	if cinfo, err := os.Stat(cacheFile); err == nil && cinfo.Size() > 0 {
 		cf, err := os.Open(cacheFile)
 		if err == nil {
@@ -1657,12 +1765,8 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 		}
 	}
 
-	// 4. Graceful fallback for images: serve original image directly with client cache
-	if cat == models.CategoryImage {
-		if ext == ".heic" || ext == ".heif" {
-			writeError(w, http.StatusNotFound, "no_thumbnail", "cannot decode heic")
-			return
-		}
+	// 5. Graceful fallback for standard images: serve directly if <= 8MB rather than leaving a blank tile!
+	if cat == models.CategoryImage && isStandardImage && info.Size() <= 8*1024*1024 {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		http.ServeFile(w, r, cleanTarget)
 		return

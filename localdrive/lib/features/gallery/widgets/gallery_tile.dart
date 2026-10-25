@@ -47,26 +47,26 @@ class GalleryTile extends ConsumerWidget {
               ClipRRect(
                 borderRadius: LdRadii.tileRadius,
                 clipBehavior: Clip.antiAlias,
-                child: Hero(
-                  // the same tag the full screen viewer uses, so opening a
-                  // picture grows it out of its own tile
-                  tag: 'gallery-${node.id}',
-                  child: node.hasThumbnail
-                      ? LdRemoteImage(
-                          url: db.thumbnailUrl(node.id),
-                          headers: db.authHeaders,
-                          tint: node.category.tint,
-                        )
-                      : ColoredBox(
-                          color: context.surfaces.backgroundElevated,
-                          child: Center(
+                child: ColoredBox(
+                  color: context.surfaces.backgroundElevated,
+                  child: Hero(
+                    // the same tag the full screen viewer uses, so opening a
+                    // picture grows it out of its own tile
+                    tag: 'gallery-${node.id}',
+                    child: node.hasThumbnail
+                        ? LdRemoteImage(
+                            url: db.thumbnailUrl(node.id),
+                            headers: db.authHeaders,
+                            tint: node.category.tint,
+                          )
+                        : Center(
                             child: LdIcon(
                               LdGlyph.image,
                               size: 26,
                               color: context.surfaces.foregroundMuted,
                             ),
                           ),
-                        ),
+                  ),
                 ),
               ),
 

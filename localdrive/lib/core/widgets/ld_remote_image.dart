@@ -72,7 +72,7 @@ class LdRemoteImage extends StatelessWidget {
                 filterQuality: FilterQuality.high,
                 loadingBuilder: (context, child, loadingProgress) {
                   if (loadingProgress == null) return child;
-                  return const SizedBox.expand();
+                  return _LoadingPlaceholder(tint: tint);
                 },
                 errorBuilder: (context, error, stack) => _Failed(tint: tint),
               )
@@ -87,7 +87,7 @@ class LdRemoteImage extends StatelessWidget {
                 fadeInDuration:
                     fadeIn ? const Duration(milliseconds: 80) : Duration.zero,
                 fadeOutDuration: Duration.zero,
-                placeholder: (context, _) => const SizedBox.expand(),
+                placeholder: (context, _) => _LoadingPlaceholder(tint: tint),
                 errorWidget: (context, _, _) => _Failed(tint: tint),
               );
 
@@ -107,6 +107,29 @@ class LdRemoteImage extends StatelessWidget {
       return NetworkImage(url, headers: headers.isEmpty ? null : headers);
     }
     return CachedNetworkImageProvider(url, headers: headers);
+  }
+}
+
+class _LoadingPlaceholder extends StatelessWidget {
+  const _LoadingPlaceholder({this.tint});
+
+  final Color? tint;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: context.surfaces.backgroundElevated,
+      child: Center(
+        child: Opacity(
+          opacity: 0.25,
+          child: LdIcon(
+            LdGlyph.image,
+            size: 22,
+            color: tint ?? context.surfaces.foregroundSecondary,
+          ),
+        ),
+      ),
+    );
   }
 }
 

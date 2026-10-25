@@ -37,6 +37,14 @@ var (
 	knownDiskMu    sync.Mutex
 	knownDiskItems = make(map[string]bool)
 	hasInitialScan = false
+
+	allowedDriveRoots = map[string]bool{
+		"1DATA":   true,
+		"DaoKy_5": true,
+		"Long_4":  true,
+		"NgLoc_6": true,
+		"NgSon_1": true,
+	}
 )
 
 func notifyShell() {
@@ -381,6 +389,9 @@ func (s *Service) syncFromVirtualDrive(ctx context.Context, vDrive string, lastQ
 				if err != nil || len(rel) == 0 {
 					continue
 				}
+				if !allowedDriveRoots[rel[0]] {
+					continue
+				}
 				relKey := filepath.Join(rel...)
 				if !diskItems[relKey] {
 					diskPath := filepath.Join(append([]string{vDrive}, rel...)...)
@@ -419,6 +430,9 @@ func (s *Service) syncFromVirtualDrive(ctx context.Context, vDrive string, lastQ
 			if err != nil || len(rel) == 0 {
 				continue
 			}
+			if !allowedDriveRoots[rel[0]] {
+				continue
+			}
 			diskPath := filepath.Join(append([]string{vDrive}, rel...)...)
 			relKey := filepath.Join(rel...)
 			if node.Type == models.NodeFolder {
@@ -445,7 +459,7 @@ func (s *Service) syncFromVirtualDrive(ctx context.Context, vDrive string, lastQ
 			}
 		}
 
-		// 4. Mirror accessible datasets into vDrive
+		// 4. Mirror accessible datasets into allowed roots in vDrive
 		dRows, dErr := s.database.Read().QueryContext(ctx, `SELECT name, mount FROM datasets`)
 		if dErr == nil {
 			for dRows.Next() {
@@ -454,24 +468,91 @@ func (s *Service) syncFromVirtualDrive(ctx context.Context, vDrive string, lastQ
 					dsClean := strings.TrimPrefix(filepath.ToSlash(dsName), "/")
 					parts := strings.Split(dsClean, "/")
 					leaf := parts[len(parts)-1]
-					targetDir := filepath.Join(vDrive, leaf)
-					if fi, err := os.Stat(dsMount); err == nil && fi.IsDir() {
-						_ = os.MkdirAll(targetDir, 0o755)
-						if entries, err := os.ReadDir(dsMount); err == nil {
-							for _, entry := range entries {
-								srcPath := filepath.Join(dsMount, entry.Name())
-								dstPath := filepath.Join(targetDir, entry.Name())
-								if entry.IsDir() {
-									_ = os.MkdirAll(dstPath, 0o755)
-								} else {
-									_ = storage.LinkOrCopy(srcPath, dstPath)
-								}
-							}
+					if leaf == "root" {
+						continue // Do NOT mirror pool roots into vDrive root
+					}
+					// Only map leaf if it matches an allowed root
+					targetName := ""
+					for allowed := range allowedDriveRoots {
+						if strings.EqualFold(leaf, allowed) {
+							targetName = allowed
+							break
 						}
+					}
+					if targetName == "" {
+						continue
+					}
+					targetDir := filepath.Join(vDrive, targetName)
+					_ = os.MkdirAll(targetDir, 0o755)
+					setFolderCloudIcon(targetDir)
+
+					realMount := dsMount
+					if fi, err := os.Stat(realMount); err == nil && fi.IsDir() {
+						mirrorRecursive(realMount, targetDir, 6)
 					}
 				}
 			}
 			dRows.Close()
+		}
+
+		// Mirror specific Google Drive folders into allowed target subfolders only
+		gMyDrive := "G:\\My Drive"
+		if fi, err := os.Stat(gMyDrive); err == nil && fi.IsDir() {
+			// Dự án -> 1DATA\Dự án
+			gDuAn := filepath.Join(gMyDrive, "Dự án")
+			if fi, err := os.Stat(gDuAn); err == nil && fi.IsDir() {
+				target := filepath.Join(vDrive, "1DATA", "Dự án")
+				_ = os.MkdirAll(target, 0o755)
+				mirrorRecursive(gDuAn, target, 4)
+			}
+			// Video -> 1DATA\Video
+			gVideo := filepath.Join(gMyDrive, "video")
+			if fi, err := os.Stat(gVideo); err == nil && fi.IsDir() {
+				target := filepath.Join(vDrive, "1DATA", "Video")
+				_ = os.MkdirAll(target, 0o755)
+				mirrorRecursive(gVideo, target, 4)
+			}
+			// Ảnh & Hinh Anh -> NgSon_1\Ảnh
+			gAnh := filepath.Join(gMyDrive, "Ảnh")
+			if fi, err := os.Stat(gAnh); err == nil && fi.IsDir() {
+				target := filepath.Join(vDrive, "NgSon_1", "Ảnh")
+				_ = os.MkdirAll(target, 0o755)
+				mirrorRecursive(gAnh, target, 4)
+			}
+			gHinhAnh := filepath.Join(gMyDrive, "Hinh Anh")
+			if fi, err := os.Stat(gHinhAnh); err == nil && fi.IsDir() {
+				target := filepath.Join(vDrive, "NgSon_1", "Ảnh")
+				_ = os.MkdirAll(target, 0o755)
+				mirrorRecursive(gHinhAnh, target, 4)
+			}
+			// Học sinh -> NgSon_1\Học sinh
+			gHocSinh := filepath.Join(gMyDrive, "Học sinh")
+			if fi, err := os.Stat(gHocSinh); err == nil && fi.IsDir() {
+				target := filepath.Join(vDrive, "NgSon_1", "Học sinh")
+				_ = os.MkdirAll(target, 0o755)
+				mirrorRecursive(gHocSinh, target, 4)
+			}
+		}
+
+		// Ensure the 5 allowed dataset folders exist in vDrive
+		for fName := range allowedDriveRoots {
+			fPath := filepath.Join(vDrive, fName)
+			_ = os.MkdirAll(fPath, 0o755)
+			setFolderCloudIcon(fPath)
+		}
+
+		// Strict Cleanup: Remove any loose root files or non-allowed directories in vDrive
+		if rootEntries, err := os.ReadDir(vDrive); err == nil {
+			for _, re := range rootEntries {
+				rn := re.Name()
+				rnLower := strings.ToLower(rn)
+				if rnLower == "autorun.inf" || rnLower == "app_icon.ico" || rnLower == "desktop.ini" {
+					continue
+				}
+				if !allowedDriveRoots[rn] {
+					_ = os.RemoveAll(filepath.Join(vDrive, rn))
+				}
+			}
 		}
 
 		if len(toSyncDown) > 0 {
@@ -524,6 +605,13 @@ func (s *Service) syncDirectoryRecursive(
 			strings.HasPrefix(name, ".") ||
 			strings.HasPrefix(name, "~$") {
 			continue
+		}
+
+		// Root-level filter: Only allow the 5 allowed roots at vDrive root
+		if len(relSegments) == 0 {
+			if !entry.IsDir() || !allowedDriveRoots[name] {
+				continue
+			}
 		}
 
 		currRel := append(append([]string{}, relSegments...), name)
@@ -602,7 +690,14 @@ func (s *Service) syncDirectoryRecursive(
 			  AND name = ? AND type = 'file' AND deleted_at IS NULL`,
 			ownerID, libraryID, parentID, parentID, name).Scan(&existingID, &existingSum, &fileTrashed)
 
-		if err == nil && existingSum == sum && (!fileTrashed.Valid || fileTrashed.Int64 == 0) {
+		if err == nil && existingSum == sum {
+			if fileTrashed.Valid && fileTrashed.Int64 > 0 {
+				now := db.NowMillis()
+				_ = s.database.Write(ctx, func(ctx context.Context, tx *sql.Tx) error {
+					_, err := tx.ExecContext(ctx, `UPDATE nodes SET trashed_at = NULL, updated_at = ? WHERE id = ?`, now, existingID)
+					return err
+				})
+			}
 			// File is up to date
 			continue
 		}
@@ -644,5 +739,50 @@ func (s *Service) syncDirectoryRecursive(
 			continue
 		}
 		s.ScheduleDerived(node)
+	}
+}
+
+func isIgnoredMirrorItem(name string) bool {
+	lower := strings.ToLower(name)
+	if strings.HasPrefix(name, "$") || name == "desktop.ini" || name == "autorun.inf" || strings.EqualFold(name, "System Volume Information") {
+		return true
+	}
+	switch lower {
+	case "appdata", "program files", "program files (x86)", "windows", "perflogs", "recovery":
+		return true
+	}
+	return false
+}
+
+func mirrorRecursive(src, dst string, maxDepth int) {
+	if maxDepth <= 0 {
+		return
+	}
+	fi, err := os.Stat(src)
+	if err != nil || !fi.IsDir() {
+		return
+	}
+	_ = os.MkdirAll(dst, 0o755)
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if isIgnoredMirrorItem(name) {
+			continue
+		}
+		s := filepath.Join(src, name)
+		d := filepath.Join(dst, name)
+		if entry.IsDir() {
+			mirrorRecursive(s, d, maxDepth-1)
+			setFolderCloudIcon(d)
+		} else {
+			ext := strings.ToLower(filepath.Ext(name))
+			if ext == ".gdoc" || ext == ".gsheet" || ext == ".gslides" || ext == ".gform" {
+				continue
+			}
+			_ = storage.LinkOrCopy(s, d)
+		}
 	}
 }

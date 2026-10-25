@@ -89,18 +89,11 @@ TMP_BIN="/tmp/localdrive-bin-new.$$.$RANDOM"
 rm -f "$TMP_BIN"
 
 DOWNLOADED=false
-DIRECT_CDN=""
-if [ "$ARCH" = "x64" ]; then
-  DIRECT_CDN="https://files.catbox.moe/b68qcf"
-elif [ "$ARCH" = "arm64" ]; then
-  DIRECT_CDN="https://files.catbox.moe/mumemq"
-fi
-
 URLS=(
-  "https://github.com/kiyogo/kidrive/releases/download/v1.1.7/localdrive-linux-${ARCH}"
+  "https://github.com/kiyogo/kidrive/releases/download/v1.1.8/localdrive-linux-${ARCH}"
   "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH}"
   "https://github.com/kiyogo/kidrive/releases/latest/download/localdrive-linux-${ARCH_LEGACY}"
-  "$DIRECT_CDN"
+  "https://github.com/kiyogo/kidrive/releases/download/v1.1.7/localdrive-linux-${ARCH}"
 )
 
 for URL in "${URLS[@]}"; do
@@ -176,6 +169,94 @@ fi
 modprobe zfs 2>/dev/null || true
 zfs mount -a 2>/dev/null || true
 
+# Cài đặt và cấu hình dịch vụ chia sẻ mạng nội bộ Samba (SMB) với quyền Guest
+if ! command -v smbd >/dev/null 2>&1; then
+  echo -e "${BLUE}Cài đặt dịch vụ chia sẻ mạng nội bộ Samba (SMB)...${NC}"
+  if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq && apt-get install -y -qq samba smbclient 2>/dev/null || true
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y -q samba samba-client 2>/dev/null || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q samba samba-client 2>/dev/null || true
+  fi
+fi
+
+# Mở cổng tường lửa cho Samba (SMB) ngay lập tức
+if command -v ufw >/dev/null 2>&1; then
+  ufw allow 445/tcp comment "Samba SMB" >/dev/null 2>&1 || true
+  ufw allow 139/tcp comment "Samba NetBIOS" >/dev/null 2>&1 || true
+  ufw allow 137:138/udp comment "Samba Name/Datagram" >/dev/null 2>&1 || true
+fi
+if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+  firewall-cmd --permanent --add-service=samba >/dev/null 2>&1 || true
+  firewall-cmd --permanent --add-port=445/tcp >/dev/null 2>&1 || true
+  firewall-cmd --permanent --add-port=139/tcp >/dev/null 2>&1 || true
+  firewall-cmd --reload >/dev/null 2>&1 || true
+fi
+
+# Tạo thư mục chia sẻ thực tế
+mkdir -p "/mnt/DỮ LIỆU/KiyoVN" 2>/dev/null || true
+chmod 777 "/mnt/DỮ LIỆU/KiyoVN" 2>/dev/null || true
+mkdir -p /var/lib/samba/usershares 2>/dev/null || true
+chmod 1777 /var/lib/samba/usershares 2>/dev/null || true
+
+# Cấu hình Samba hỗ trợ Guest Access (Không cần mật khẩu đăng nhập mạng nội bộ)
+if [ -f /etc/samba/smb.conf ]; then
+  if ! grep -q "usershare path" /etc/samba/smb.conf; then
+    sed -i '/\[global\]/a \   usershare path = /var/lib/samba/usershares\n   usershare max shares = 100\n   usershare allow guests = yes\n   usershare owner only = false\n   map to guest = Bad User' /etc/samba/smb.conf
+  fi
+  if ! grep -q "\[KiyoVN\]" /etc/samba/smb.conf; then
+    cat << 'EOF' >> /etc/samba/smb.conf
+
+[KiyoVN]
+   path = /mnt/DỮ LIỆU/KiyoVN
+   browseable = yes
+   writable = yes
+   guest ok = yes
+   guest only = yes
+   read only = no
+   force user = root
+   create mask = 0777
+   directory mask = 0777
+EOF
+  fi
+else
+  mkdir -p /etc/samba
+  cat << 'EOF' > /etc/samba/smb.conf
+[global]
+   workgroup = WORKGROUP
+   server string = LocalDrive NAS
+   security = user
+   map to guest = Bad User
+   guest account = nobody
+   usershare path = /var/lib/samba/usershares
+   usershare max shares = 100
+   usershare allow guests = yes
+   usershare owner only = false
+
+[KiyoVN]
+   path = /mnt/DỮ LIỆU/KiyoVN
+   browseable = yes
+   writable = yes
+   guest ok = yes
+   guest only = yes
+   read only = no
+   force user = root
+   create mask = 0777
+   directory mask = 0777
+EOF
+fi
+
+# Thêm usershare qua net usershare
+if command -v net >/dev/null 2>&1; then
+  net usershare add KiyoVN "/mnt/DỮ LIỆU/KiyoVN" "LocalDrive Network Share" "Everyone:F" "guest_ok=y" 2>/dev/null || true
+fi
+
+# Kích hoạt và khởi động lại dịch vụ Samba
+systemctl enable smbd 2>/dev/null || systemctl enable smb 2>/dev/null || true
+systemctl restart smbd 2>/dev/null || systemctl restart smb 2>/dev/null || service smbd restart 2>/dev/null || true
+
 # 7. Khởi tạo cấu hình ban đầu nếu chưa có (Tuyệt đối không ghi đè cấu hình cũ)
 ENV_FILE="$INSTALL_DIR/.env"
 if [ ! -f "$ENV_FILE" ]; then
@@ -244,9 +325,15 @@ sleep 2
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "active"; then
   ufw allow 5437/tcp comment "LocalDrive Web UI" >/dev/null 2>&1 || true
   ufw allow 9683/tcp comment "LocalDrive Server API" >/dev/null 2>&1 || true
+  ufw allow 445/tcp comment "Samba SMB" >/dev/null 2>&1 || true
+  ufw allow 139/tcp comment "Samba NetBIOS" >/dev/null 2>&1 || true
+  ufw allow 137:138/udp comment "Samba Name/Datagram" >/dev/null 2>&1 || true
   ufw allow 80/tcp >/dev/null 2>&1 || true
   ufw allow 443/tcp >/dev/null 2>&1 || true
 elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+  firewall-cmd --permanent --add-service=samba >/dev/null 2>&1 || true
+  firewall-cmd --permanent --add-port=445/tcp >/dev/null 2>&1 || true
+  firewall-cmd --permanent --add-port=139/tcp >/dev/null 2>&1 || true
   firewall-cmd --permanent --add-port=5437/tcp >/dev/null 2>&1 || true
   firewall-cmd --permanent --add-port=9683/tcp >/dev/null 2>&1 || true
   firewall-cmd --permanent --add-port=80/tcp >/dev/null 2>&1 || true

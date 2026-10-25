@@ -174,9 +174,9 @@ func Load() (*Config, error) {
 		c.JWTSecret = []byte(secret)
 	}
 
-	c.AccessTokenTTL = l.duration("ACCESS_TOKEN_TTL", 15*time.Minute)
-	if c.AccessTokenTTL < time.Minute || c.AccessTokenTTL > 24*time.Hour {
-		l.fail("ACCESS_TOKEN_TTL must be between 1m and 24h")
+	c.AccessTokenTTL = l.duration("ACCESS_TOKEN_TTL", 24*time.Hour)
+	if c.AccessTokenTTL < time.Minute || c.AccessTokenTTL > 30*24*time.Hour {
+		l.fail("ACCESS_TOKEN_TTL must be between 1m and 30d")
 	}
 	c.RefreshTokenTTL = l.duration("REFRESH_TOKEN_TTL", 30*24*time.Hour)
 	if c.RefreshTokenTTL < time.Hour {

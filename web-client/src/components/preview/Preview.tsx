@@ -607,7 +607,6 @@ export function Preview({
                 stallTimer.current = setTimeout(() => {
                   const v = videoRef.current;
                   if (v && !v.paused) {
-                    v.currentTime = Math.min(v.duration || 0, v.currentTime + 0.05);
                     void v.play().catch(() => {});
                   }
                 }, 3500);
@@ -618,7 +617,6 @@ export function Preview({
                 stallTimer.current = setTimeout(() => {
                   const v = videoRef.current;
                   if (v && !v.paused) {
-                    v.currentTime = Math.min(v.duration || 0, v.currentTime + 0.05);
                     void v.play().catch(() => {});
                   }
                 }, 3500);

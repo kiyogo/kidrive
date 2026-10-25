@@ -98,11 +98,25 @@ class Client {
   private refreshing: Promise<boolean> | null = null;
   private onSignedOut: (() => void) | null = null;
 
+  private refreshTimer: any = null;
+
   load() {
     if (typeof window === "undefined") return;
     this.base = localStorage.getItem(KEY_BASE) ?? (window.location.origin || "http://localhost:9683");
     this.access = localStorage.getItem(KEY_ACCESS) ?? "";
     this.refresh = localStorage.getItem(KEY_REFRESH) ?? "";
+    this.startPeriodicRefresh();
+  }
+
+  private startPeriodicRefresh() {
+    if (typeof window === "undefined") return;
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+    // Refresh access token periodically every 30 minutes to keep media URLs fresh
+    this.refreshTimer = setInterval(() => {
+      if (this.refresh) {
+        void this.refreshOnce();
+      }
+    }, 30 * 60 * 1000);
   }
 
   get server() {
@@ -142,9 +156,11 @@ class Client {
     if (t) {
       localStorage.setItem(KEY_ACCESS, t.access);
       localStorage.setItem(KEY_REFRESH, t.refresh);
+      this.startPeriodicRefresh();
     } else {
       localStorage.removeItem(KEY_ACCESS);
       localStorage.removeItem(KEY_REFRESH);
+      if (this.refreshTimer) clearInterval(this.refreshTimer);
     }
   }
 

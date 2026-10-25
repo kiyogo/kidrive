@@ -29,32 +29,7 @@ class VideoTile extends HookConsumerWidget {
     final initialRatio = (node.imageWidth > 0 && node.imageHeight > 0)
         ? (node.imageWidth / node.imageHeight)
         : null;
-    final dynamicRatio = useState<double?>(initialRatio);
-
-    useEffect(() {
-      if (initialRatio != null) {
-        dynamicRatio.value = initialRatio;
-        return null;
-      }
-      if (!node.hasThumbnail) return null;
-      final provider = LdRemoteImage.provider(
-        url: db.thumbnailUrl(node.id),
-        headers: db.authHeaders,
-      );
-      final stream = provider.resolve(ImageConfiguration.empty);
-      late final ImageStreamListener listener;
-      listener = ImageStreamListener((info, _) {
-        final w = info.image.width;
-        final h = info.image.height;
-        if (w > 0 && h > 0) {
-          dynamicRatio.value = w / h;
-        }
-      }, onError: (error, stack) {});
-      stream.addListener(listener);
-      return () => stream.removeListener(listener);
-    }, <Object?>[node.id, node.hasThumbnail, node.imageWidth, node.imageHeight]);
-
-    final ratio = (dynamicRatio.value ?? initialRatio ?? (16 / 9)).clamp(0.2, 5.0);
+    final ratio = (initialRatio ?? (16 / 9)).clamp(0.2, 5.0);
 
     return AspectRatio(
       aspectRatio: ratio,

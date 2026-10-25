@@ -141,6 +141,12 @@ begin
       DelTree(NetFolder, True, True, True);
     end;
 
+    // Setup and publish KiyoVN network share (SMB)
+    if DirExists('E:\DATA\KiyoVN') then
+      Exec('cmd.exe', '/c net share KiyoVN="E:\DATA\KiyoVN" /GRANT:Everyone,FULL /Y 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+    else if WizardIsTaskSelected('kiyodrive') then
+      Exec('cmd.exe', '/c net share KiyoVN="' + TargetDir + '" /GRANT:Everyone,FULL /Y 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
     SHChangeNotify($08000000, 0, 0, 0);
     SHChangeNotify($00000040, 0, 0, 0);
   end;

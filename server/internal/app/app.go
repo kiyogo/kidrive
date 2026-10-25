@@ -224,6 +224,9 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	a.registerScheduledJobs(sharesSvc, uploadStore, libs, authSvc, database, log)
 	scheduler.Start()
 
+	// Synchronize active network shares (SMB) with the operating system on boot
+	go api.SyncAllActiveNetworkShares(context.Background())
+
 	// keep the lan-discovery bridge in step with the admin-editable settings
 	settingsSvc.Watch(func(current models.ServerSettings) {
 		if !discoveryClient.Enabled() {
