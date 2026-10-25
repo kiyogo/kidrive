@@ -1211,7 +1211,7 @@ func (a *API) handleMediaNodes(w http.ResponseWriter, r *http.Request, userID st
 	var mediaNodes []nodeDTO
 
 	cached, found := getCachedMediaList(cacheKey)
-	if found {
+	if found && len(cached) > 0 {
 		mediaNodes = cached
 		if isMediaCacheStale(cacheKey) {
 			if u, ok := mw.UserFrom(r.Context()); ok {
@@ -1226,36 +1226,32 @@ func (a *API) handleMediaNodes(w http.ResponseWriter, r *http.Request, userID st
 			}
 		}
 	} else {
-		// Fast SQLite query: Returns in <2ms!
-		dbList, dbErr := a.files.List(r.Context(), userID, files.ListOptions{
-			Filter:   opts.Filter,
-			Limit:    100000,
-			AllUsers: hasFullRoot,
-		})
-		if dbErr == nil {
-			isImg := opts.Filter == "image" || opts.Filter == "images" || opts.Filter == "gallery"
-			for _, v := range nodeViews(dbList, userID) {
-				if !isImg && (strings.HasSuffix(strings.ToLower(v.Name), ".ts") || strings.HasSuffix(strings.ToLower(v.Name), ".tsx")) {
-					continue
+		// Cache is missing or empty: We MUST scan directly so user gets media instantly!
+		scanned, err := a.scanAndCacheMediaNodes(r, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
+		if err == nil && len(scanned) > 0 {
+			mediaNodes = scanned
+		} else {
+			// Fast SQLite fallback: query files table
+			dbList, dbErr := a.files.List(r.Context(), userID, files.ListOptions{
+				Filter:   opts.Filter,
+				Limit:    100000,
+				AllUsers: hasFullRoot,
+			})
+			if dbErr == nil {
+				isImg := opts.Filter == "image" || opts.Filter == "images" || opts.Filter == "gallery"
+				for _, v := range nodeViews(dbList, userID) {
+					if !isImg && (strings.HasSuffix(strings.ToLower(v.Name), ".ts") || strings.HasSuffix(strings.ToLower(v.Name), ".tsx")) {
+						continue
+					}
+					mediaNodes = append(mediaNodes, v)
 				}
-				mediaNodes = append(mediaNodes, v)
 			}
-		}
-		sort.Slice(mediaNodes, func(i, j int) bool {
-			return mediaNodes[i].UpdatedAt > mediaNodes[j].UpdatedAt
-		})
-		setCachedMediaList(cacheKey, mediaNodes)
-
-		// Launch background deep scan without blocking this HTTP request
-		if u, ok := mw.UserFrom(r.Context()); ok {
-			bgCtx := mw.WithUser(context.Background(), u)
-			bgReq := r.Clone(bgCtx)
-			go func() {
-				scanned, err := a.scanAndCacheMediaNodes(bgReq, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
-				if err == nil && len(scanned) > len(mediaNodes) {
-					a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
-				}
-			}()
+			sort.Slice(mediaNodes, func(i, j int) bool {
+				return mediaNodes[i].UpdatedAt > mediaNodes[j].UpdatedAt
+			})
+			if len(mediaNodes) > 0 {
+				setCachedMediaList(cacheKey, mediaNodes)
+			}
 		}
 	}
 
@@ -1274,7 +1270,10 @@ func (a *API) handleMediaNodes(w http.ResponseWriter, r *http.Request, userID st
 			for _, ur := range userRoots {
 				normRoot := strings.ToLower(filepath.ToSlash(filepath.Clean("/" + ur)))
 				cleanRoot := strings.Trim(normRoot, "/")
-				if normItem == normRoot || strings.HasPrefix(normItem, normRoot+"/") || strings.Contains(normItem, "/"+cleanRoot+"/") {
+				urParts := strings.Split(cleanRoot, "/")
+				urLeaf := urParts[len(urParts)-1]
+				if normItem == normRoot || strings.HasPrefix(normItem, normRoot+"/") || strings.Contains(normItem, "/"+cleanRoot+"/") ||
+					normItem == "/"+urLeaf || strings.HasPrefix(normItem, "/"+urLeaf+"/") || strings.Contains(normItem, "/"+urLeaf+"/") {
 					match = true
 					break
 				}
@@ -1352,7 +1351,7 @@ func (a *API) handleMediaNodes(w http.ResponseWriter, r *http.Request, userID st
 func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter string, userRoots []string, hasFullRoot bool) ([]nodeDTO, error) {
 	isImg := filter == "image" || filter == "images" || filter == "gallery"
 	res, err, _ := mediaScanGroup.Do(cacheKey, func() (any, error) {
-		if c, ok := getCachedMediaList(cacheKey); ok && !isMediaCacheStale(cacheKey) {
+		if c, ok := getCachedMediaList(cacheKey); ok && !isMediaCacheStale(cacheKey) && len(c) > 0 {
 			return c, nil
 		}
 
@@ -1379,6 +1378,17 @@ func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter s
 			}
 		}
 
+		candidateRoots := []string{
+			"/DATA/KiyoVN",
+			"/mnt/DATA/KiyoVN",
+			"/DATA",
+			"/mnt/DATA",
+			"/mnt/DỮ LIỆU/KiyoVN",
+			"/mnt/DỮ LIỆU",
+			"/mnt/zfs-recovery/DATA",
+			"/mnt/zfs-recovery",
+		}
+
 		addDatasetRootTarget := func(root, role string) {
 			cleanRoot := strings.Trim(strings.TrimSpace(root), "/")
 			if cleanRoot == "" {
@@ -1400,7 +1410,28 @@ func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter s
 					return
 				}
 			}
-			// 3. Quét dưới các dataset đã biết
+			// 3. Thử qua candidateRoots
+			for _, cr := range candidateRoots {
+				cand := filepath.Join(cr, cleanRoot)
+				if fi, sErr := os.Stat(cand); sErr == nil && fi.IsDir() {
+					addMountTarget(cleanRoot, cand, role)
+					return
+				}
+				leaf := filepath.Base(cleanRoot)
+				candLeaf := filepath.Join(cr, leaf)
+				if fi, sErr := os.Stat(candLeaf); sErr == nil && fi.IsDir() {
+					addMountTarget(cleanRoot, candLeaf, role)
+					return
+				}
+			}
+			// 4. Thử trực tiếp trên filesystem
+			for _, direct := range []string{"/" + cleanRoot, cleanRoot} {
+				if fi, sErr := os.Stat(direct); sErr == nil && fi.IsDir() {
+					addMountTarget(cleanRoot, direct, role)
+					return
+				}
+			}
+			// 5. Quét dưới các dataset đã biết
 			if dRows, qErr := a.db.Read().QueryContext(scanCtx, `SELECT name, mount FROM datasets WHERE status != 'deleted'`); qErr == nil {
 				defer dRows.Close()
 				for dRows.Next() {
@@ -1417,7 +1448,7 @@ func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter s
 					}
 				}
 			}
-			// 4. Quét dưới /mnt
+			// 6. Quét dưới /mnt
 			if mntEntries, mErr := os.ReadDir("/mnt"); mErr == nil {
 				for _, me := range mntEntries {
 					if me.IsDir() {
@@ -1458,6 +1489,19 @@ func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter s
 							addMountTarget(dName, realMount, role)
 						}
 					}
+				}
+			}
+
+			// 3. Quét các tập dữ liệu thực tế (1DATA, DaoKy_5, Long_4, NgLoc_6, NgSon_1)
+			coreDatasets := []string{"1DATA", "DaoKy_5", "Long_4", "NgLoc_6", "NgSon_1"}
+			for _, cds := range coreDatasets {
+				addDatasetRootTarget(cds, "editor")
+			}
+
+			// 4. Quét các thư mục gốc ứng viên (/DATA/KiyoVN, /DATA, /mnt/DỮ LIỆU/KiyoVN, ...)
+			for _, cr := range candidateRoots {
+				if fi, err := os.Stat(cr); err == nil && fi.IsDir() {
+					addMountTarget(filepath.Base(cr), cr, "editor")
 				}
 			}
 
@@ -1636,7 +1680,10 @@ func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter s
 				for _, ur := range userRoots {
 					normRoot := strings.ToLower(filepath.ToSlash(filepath.Clean("/" + ur)))
 					cleanRoot := strings.Trim(normRoot, "/")
-					if normItem == normRoot || strings.HasPrefix(normItem, normRoot+"/") || strings.Contains(normItem, "/"+cleanRoot+"/") {
+					urParts := strings.Split(cleanRoot, "/")
+					urLeaf := urParts[len(urParts)-1]
+					if normItem == normRoot || strings.HasPrefix(normItem, normRoot+"/") || strings.Contains(normItem, "/"+cleanRoot+"/") ||
+						normItem == "/"+urLeaf || strings.HasPrefix(normItem, "/"+urLeaf+"/") || strings.Contains(normItem, "/"+urLeaf+"/") {
 						match = true
 						break
 					}

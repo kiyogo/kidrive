@@ -198,31 +198,7 @@ class SessionController extends Notifier<SessionState> {
     });
   }
 
-  /// A device held for approval polls every four to five seconds, no faster,
-  /// so a phone in a pocket is not doing constant network work while it waits.
-  void _startApprovalPolling(String sessionId) {
-    _approvalPoll?.cancel();
-    _approvalPoll = Timer.periodic(AppDurations.approvalPoll, (_) async {
-      try {
-        final result = await _db.sessionStatus(sessionId);
-        if (result.tokens != null) {
-          _approvalPoll?.cancel();
-          await _adopt(result.tokens!);
-          return;
-        }
-        if (result.status == 'denied' || result.status == 'revoked') {
-          _approvalPoll?.cancel();
-          await cancelPendingApproval(denied: true);
-        }
-      } on ApiException catch (error) {
-        if (error.kind == ApiErrorKind.unauthorized) {
-          _approvalPoll?.cancel();
-          await cancelPendingApproval(denied: true);
-        }
-        // anything transient just waits for the next tick
-      }
-    });
-  }
+
 
   /// Abandons a pending session cleanly, from the Cancel action on the waiting
   /// screen or after a denial.

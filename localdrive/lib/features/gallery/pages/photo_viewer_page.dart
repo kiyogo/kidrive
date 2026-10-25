@@ -124,31 +124,48 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
         defaultTargetPlatform == TargetPlatform.android ||
         defaultTargetPlatform == TargetPlatform.iOS;
 
+    final singleNode = ref.watch(nodeProvider(widget.nodeId)).valueOrNull;
+
     final List<NodeModel> sourceNodes;
     if (widget.scopedNodes != null && widget.scopedNodes!.isNotEmpty) {
       sourceNodes = widget.scopedNodes!;
+    } else if (singleNode != null && singleNode.parentId.isNotEmpty) {
+      final folderNodes = ref
+          .watch(folderProvider(FolderQuery(parentId: singleNode.parentId)))
+          .valueOrNull;
+      final folderImages = folderNodes
+          ?.where((n) => n.category == FileCategory.image)
+          .toList();
+      if (folderImages != null &&
+          folderImages.isNotEmpty &&
+          folderImages.any((n) => n.id == widget.nodeId)) {
+        sourceNodes = folderImages;
+      } else {
+        sourceNodes =
+            ref.watch(galleryProvider).valueOrNull ?? const <NodeModel>[];
+      }
     } else {
       final gallery = ref.watch(galleryProvider);
       sourceNodes = gallery.valueOrNull ?? const <NodeModel>[];
     }
 
     final targetId = _currentNodeId ?? widget.nodeId;
-    final singleNode = ref.watch(nodeProvider(widget.nodeId)).valueOrNull;
-    final effectiveNodes = (sourceNodes.any((n) => n.id == targetId))
-        ? sourceNodes
-        : (singleNode != null
-            ? <NodeModel>[singleNode, ...sourceNodes]
-            : (sourceNodes.isNotEmpty
-                ? sourceNodes
-                : <NodeModel>[
-                    NodeModel(
-                      id: widget.nodeId,
-                      name: '',
-                      isFolder: false,
-                      category: FileCategory.image,
-                      libraryId: '',
-                    ),
-                  ]));
+    final List<NodeModel> effectiveNodes;
+    if (sourceNodes.any((n) => n.id == targetId)) {
+      effectiveNodes = sourceNodes;
+    } else if (singleNode != null) {
+      effectiveNodes = <NodeModel>[singleNode];
+    } else {
+      effectiveNodes = <NodeModel>[
+        NodeModel(
+          id: widget.nodeId,
+          name: '',
+          isFolder: false,
+          category: FileCategory.image,
+          libraryId: '',
+        ),
+      ];
+    }
 
     if (effectiveNodes.isEmpty) {
       return Theme(

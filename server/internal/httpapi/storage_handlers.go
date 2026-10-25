@@ -2387,10 +2387,22 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 	leaf := parts[len(parts)-1]
 
 	candidateSet = append(candidateSet,
+		"/DATA/KiyoVN/"+trimmedName,
+		"/DATA/KiyoVN/"+leaf,
+		"/DATA/"+trimmedName,
+		"/DATA/"+leaf,
+		"/mnt/DATA/KiyoVN/"+trimmedName,
+		"/mnt/DATA/KiyoVN/"+leaf,
+		"/mnt/DATA/"+trimmedName,
+		"/mnt/DATA/"+leaf,
+		"/mnt/DỮ LIỆU/KiyoVN/"+trimmedName,
+		"/mnt/DỮ LIỆU/KiyoVN/"+leaf,
+		"/mnt/DỮ LIỆU/"+trimmedName,
+		"/mnt/DỮ LIỆU/"+leaf,
 		filepath.Join("/mnt", trimmedName),
 		filepath.Join("/mnt", leaf),
-		"/" + trimmedName,
-		"/" + leaf,
+		"/"+trimmedName,
+		"/"+leaf,
 	)
 
 	// Kiểm tra nếu nằm trong Virtual Drive Folder (Windows Local Drive)
