@@ -11,6 +11,7 @@ import '../../features/auth/pages/change_password_page.dart';
 import '../../features/auth/pages/pending_approval_page.dart';
 import '../../features/auth/pages/sign_in_page.dart';
 import '../../features/auth/pages/two_factor_setup_page.dart';
+import '../../features/files/models/node_model.dart';
 import '../../features/files/pages/files_page.dart';
 import '../../features/onboarding/pages/connect_page.dart';
 import '../../features/onboarding/pages/language_page.dart';

@@ -119,6 +119,11 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
 
   @override
   Widget build(BuildContext context) {
+    final darkTheme = LdTheme.dark(Localizations.localeOf(context));
+    final isMobile = context.deviceClass == DeviceClass.mobile ||
+        defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+
     final List<NodeModel> sourceNodes;
     if (widget.scopedNodes != null && widget.scopedNodes!.isNotEmpty) {
       sourceNodes = widget.scopedNodes!;

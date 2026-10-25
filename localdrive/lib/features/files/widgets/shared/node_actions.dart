@@ -91,7 +91,7 @@ Future<void> showNodeActions(
         id: 'paste',
         label: 'Dán',
         glyph: LdGlyph.file,
-        enabled: clipboard != null && clipboard.nodes.isNotEmpty && node.role.canWrite,
+        enabled: clipboard != null && clipboard.nodes.isNotEmpty && node.role.canCreate,
       ),
     LdMenuAction(
       id: 'share',
@@ -225,7 +225,7 @@ Future<void> showNodeActions(
           if (cb.action == ClipboardAction.cut) {
             ref.read(fileClipboardProvider.notifier).clear();
           }
-          ref.invalidate(folderNodesProvider(node.id));
+          refreshServerDataFrom(ref);
           if (context.mounted) {
             LdToast.success(
               context,
