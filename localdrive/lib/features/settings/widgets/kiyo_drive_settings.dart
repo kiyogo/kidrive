@@ -60,7 +60,7 @@ class KiyoDriveSettingsGroup extends HookWidget {
           (Join-Path \$appData "Programs\\LocalDrive\\app_icon.ico"),
           (Join-Path \$appData "LocalDrive\\app_icon.ico"),
           (Join-Path \$target "app_icon.ico"),
-          "E:\\DATA\\source\\Nas\LocalDrive\\windows-installer\\app_icon.ico"
+          "E:\\DATA\\source\\Nas\\LocalDrive\\windows-installer\\app_icon.ico"
         )
         \$foundIcon = ""
         foreach (\$c in \$candidates) {

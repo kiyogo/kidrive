@@ -26,14 +26,16 @@ import '../widgets/video_view.dart';
 ///
 /// It doubles as the public share screen, which needs no session at all.
 class PreviewPage extends ConsumerWidget {
-  const PreviewPage({super.key, required this.nodeId}) : shareToken = '';
+  const PreviewPage({super.key, required this.nodeId, this.scopedNodes}) : shareToken = '';
 
   const PreviewPage.publicShare({super.key, required String token})
     : nodeId = '',
-      shareToken = token;
+      shareToken = token,
+      scopedNodes = null;
 
   final String nodeId;
   final String shareToken;
+  final List<NodeModel>? scopedNodes;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -46,7 +48,10 @@ class PreviewPage extends ConsumerWidget {
     final loadedNode = node.valueOrNull;
 
     if (loadedNode != null && loadedNode.category == FileCategory.image) {
-      return PhotoViewerPage(nodeId: loadedNode.id);
+      return PhotoViewerPage(
+        nodeId: loadedNode.id,
+        scopedNodes: scopedNodes,
+      );
     }
 
     if (loadedNode != null && loadedNode.category == FileCategory.video) {

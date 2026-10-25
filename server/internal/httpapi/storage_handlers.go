@@ -2269,6 +2269,74 @@ type DatasetItemDTO struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+func isDatasetPathAllowed(permPath, targetPath string) bool {
+	pNorm := strings.ToLower(filepath.ToSlash(filepath.Clean("/" + permPath)))
+	pClean := strings.Trim(pNorm, "/")
+	tNorm := strings.ToLower(filepath.ToSlash(filepath.Clean("/" + targetPath)))
+	tClean := strings.Trim(tNorm, "/")
+
+	if pClean == "" || pClean == "*" || pClean == "/" {
+		return true
+	}
+	// 1. Khớp trực tiếp hoặc target là con của permPath
+	if tClean == pClean || strings.HasPrefix(tClean, pClean+"/") {
+		return true
+	}
+
+	// 2. So sánh sau khi loại bỏ các tiền tố thư mục gốc thông dụng
+	stripPrefixes := func(s string) string {
+		for _, pr := range []string{
+			"mnt/zfs-recovery/data/kiyovn/",
+			"mnt/zfs-recovery/data/",
+			"mnt/zfs-recovery/",
+			"mnt/data/kiyovn/",
+			"mnt/data/",
+			"mnt/dữ liệu/kiyovn/",
+			"mnt/dữ liệu/",
+			"data/kiyovn/",
+			"dữ liệu/kiyovn/",
+			"kiyovn/",
+			"data/",
+			"dữ liệu/",
+		} {
+			if strings.HasPrefix(s, pr) {
+				return strings.Trim(s[len(pr):], "/")
+			}
+		}
+		return s
+	}
+
+	pStripped := stripPrefixes(pClean)
+	tStripped := stripPrefixes(tClean)
+
+	if pStripped != "" {
+		if tStripped == pStripped || strings.HasPrefix(tStripped, pStripped+"/") {
+			return true
+		}
+	}
+
+	// 3. Nếu quyền là cấp DATA/KiyoVN và đối tượng thuộc 1 trong 5 core datasets
+	if pClean == "data/kiyovn" || pClean == "kiyovn" || pClean == "mnt/zfs-recovery/data/kiyovn" {
+		core := []string{"1data", "daoky_5", "long_4", "ngloc_6", "ngson_1"}
+		for _, c := range core {
+			if tStripped == c || strings.HasPrefix(tStripped, c+"/") {
+				return true
+			}
+		}
+	}
+
+	// 4. Khớp theo tên dataset lá (leaf)
+	pParts := strings.Split(pClean, "/")
+	pLeaf := pParts[len(pParts)-1]
+	if pLeaf != "" && pLeaf != "kiyovn" && pLeaf != "data" {
+		if tClean == pLeaf || strings.HasPrefix(tClean, pLeaf+"/") || strings.Contains(tClean, "/"+pLeaf+"/") {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (a *API) checkDatasetAccess(r *http.Request, datasetName string, needEditor bool) (string, error) {
 	user, ok := mw.UserFrom(r.Context())
 	if !ok {
@@ -2306,7 +2374,7 @@ func (a *API) checkDatasetAccess(r *http.Request, datasetName string, needEditor
 	}
 
 	var matchedVal any
-	// 1. Direct, ancestor inheritance, or suffix match
+	// 1. Direct, ancestor inheritance, suffix or normalized prefix match
 	for k, v := range rawPerms {
 		if v == nil || v == "none" {
 			continue
@@ -2316,22 +2384,9 @@ func (a *API) checkDatasetAccess(r *http.Request, datasetName string, needEditor
 		if kClean == "" {
 			continue
 		}
-		// 1. Khớp chính xác
-		if kClean == cleanName || kNorm == normName {
+		if isDatasetPathAllowed(kClean, cleanName) {
 			matchedVal = v
 			break
-		}
-		// 2. Thừa hưởng quyền từ dataset cha (ví dụ cấp quyền DATA/KiyoVN thì tự động có quyền trên DATA/KiyoVN/1DATA)
-		if strings.HasPrefix(cleanName, kClean+"/") {
-			matchedVal = v
-			break
-		}
-		// 3. Nếu kClean không có tên pool (ví dụ kClean là "kiyovn" còn cleanName là "data/kiyovn" hoặc "data/kiyovn/sub")
-		if !strings.Contains(kClean, "/") {
-			if cleanName == kClean || strings.HasSuffix(cleanName, "/"+kClean) || strings.Contains(cleanName, "/"+kClean+"/") {
-				matchedVal = v
-				break
-			}
 		}
 	}
 	// 2. Wildcard match
@@ -2422,7 +2477,7 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 		for _, tryName := range []string{trimmedName, strings.ToUpper(trimmedName), strings.ToLower(trimmedName)} {
 			if out, err := exec.Command("zfs", "get", "-H", "-o", "value", "mountpoint", tryName).Output(); err == nil {
 				mp := strings.TrimSpace(string(out))
-				if mp != "" && mp != "none" && mp != "legacy" && !strings.Contains(mp, "zfs-recovery") {
+				if mp != "" && mp != "none" && mp != "legacy" {
 					_ = exec.Command("zfs", "mount", tryName).Run()
 					if fi, sErr := os.Stat(mp); sErr == nil && fi.IsDir() {
 						return mp
@@ -2431,7 +2486,7 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 			}
 			if out, err := exec.Command("zfs", "list", "-H", "-o", "mountpoint", tryName).Output(); err == nil {
 				mp := strings.TrimSpace(string(out))
-				if mp != "" && mp != "none" && mp != "legacy" && !strings.Contains(mp, "zfs-recovery") {
+				if mp != "" && mp != "none" && mp != "legacy" {
 					_ = exec.Command("zfs", "mount", tryName).Run()
 					if fi, sErr := os.Stat(mp); sErr == nil && fi.IsDir() {
 						return mp
@@ -2449,7 +2504,7 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 					zName := strings.TrimSpace(parts[0])
 					zMount := strings.TrimSpace(parts[1])
 					if strings.EqualFold(zName, trimmedName) || strings.HasSuffix(strings.ToLower(zName), "/"+strings.ToLower(trimmedName)) {
-						if zMount != "" && zMount != "none" && zMount != "legacy" && !strings.Contains(zMount, "zfs-recovery") {
+						if zMount != "" && zMount != "none" && zMount != "legacy" {
 							_ = exec.Command("zfs", "mount", zName).Run()
 							if fi, sErr := os.Stat(zMount); sErr == nil && fi.IsDir() {
 								return zMount
@@ -2552,7 +2607,7 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 
 	// 3. Nếu chưa ghi được (read-only hoặc phân quyền hạn chế), ưu tiên thư mục TỒN TẠI
 	for _, c := range candidateSet {
-		if c != "" && c != "/" && c != "." && !strings.Contains(c, "zfs-recovery") {
+		if c != "" && c != "/" && c != "." {
 			if fi, err := os.Stat(c); err == nil && fi.IsDir() {
 				return c
 			}
@@ -2579,7 +2634,7 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 	}
 
 	// 5. Dự phòng nếu chưa được mount vật lý
-	if cleanMount != "" && cleanMount != "." && cleanMount != "/" && !strings.Contains(cleanMount, "zfs-recovery") {
+	if cleanMount != "" && cleanMount != "." && cleanMount != "/" {
 		return cleanMount
 	}
 	if trimmedName != "" {
@@ -2726,6 +2781,40 @@ func (a *API) resolveDatasetTarget(ctx context.Context, rawID string) (canonical
 		mountPath = filepath.Clean(filepath.Join(dMount, subpath))
 		canonicalPath = clean
 		return canonicalPath, dsName, subpath, mountPath, nil
+	}
+
+	// 4. Fallback: Tìm trực tiếp trong các candidateRoots
+	candidateRoots := []string{
+		"/DATA/KiyoVN",
+		"/DATA",
+		"/mnt/zfs-recovery/DATA/KiyoVN",
+		"/mnt/zfs-recovery/DATA",
+		"/mnt/DATA/KiyoVN",
+		"/mnt/DATA",
+		"/mnt/DỮ LIỆU/KiyoVN",
+		"/mnt/DỮ LIỆU",
+		"/mnt",
+	}
+	for _, cr := range candidateRoots {
+		cand := filepath.Clean(filepath.Join(cr, clean))
+		if _, err := os.Stat(cand); err == nil {
+			return clean, parts[0], strings.Join(parts[1:], "/"), cand, nil
+		}
+		for _, prefix := range []string{"data/kiyovn/", "kiyovn/", "data/"} {
+			if strings.HasPrefix(strings.ToLower(clean), prefix) {
+				trimmed := clean[len(prefix):]
+				candTrimmed := filepath.Clean(filepath.Join(cr, trimmed))
+				if _, err := os.Stat(candTrimmed); err == nil {
+					return clean, parts[0], trimmed, candTrimmed, nil
+				}
+			}
+		}
+	}
+
+	for _, direct := range []string{"/" + clean, clean, filepath.Join("/mnt", clean)} {
+		if _, err := os.Stat(direct); err == nil {
+			return clean, parts[0], strings.Join(parts[1:], "/"), direct, nil
+		}
 	}
 
 	return clean, clean, "", filepath.Join("/mnt", clean), nil

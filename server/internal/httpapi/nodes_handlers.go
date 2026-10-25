@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1108,6 +1109,14 @@ func (a *API) extractNodeID(r *http.Request, suffix string) string {
 	if unescaped, err := url.PathUnescape(id); err == nil {
 		id = unescaped
 	}
+	if strings.HasPrefix(id, "b64_") {
+		b64 := strings.TrimPrefix(id, "b64_")
+		if decoded, err := base64.RawURLEncoding.DecodeString(b64); err == nil {
+			id = string(decoded)
+		} else if decoded, err := base64.URLEncoding.DecodeString(b64); err == nil {
+			id = string(decoded)
+		}
+	}
 	return id
 }
 
@@ -1427,14 +1436,15 @@ func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter s
 		}
 
 		candidateRoots := []string{
+			"/mnt/zfs-recovery/DATA/KiyoVN",
+			"/mnt/zfs-recovery/DATA",
+			"/mnt/zfs-recovery",
 			"/DATA/KiyoVN",
 			"/mnt/DATA/KiyoVN",
 			"/DATA",
 			"/mnt/DATA",
 			"/mnt/DỮ LIỆU/KiyoVN",
 			"/mnt/DỮ LIỆU",
-			"/mnt/zfs-recovery/DATA",
-			"/mnt/zfs-recovery",
 		}
 
 		addDatasetRootTarget := func(root, role string) {

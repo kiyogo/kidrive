@@ -104,12 +104,13 @@ func setFileOffline(path string) error {
 }
 
 func setFolderCloudIcon(folderPath string) {
+	// Giữ nguyên 100% biểu tượng thư mục mặc định của Windows, tuyệt đối không đổi thành hình người
+	// Tự động xóa desktop.ini cũ nếu có để Windows khôi phục lại icon thư mục chuẩn
 	iniPath := filepath.Join(folderPath, "desktop.ini")
-	if _, err := os.Stat(iniPath); os.IsNotExist(err) {
-		iniContent := "[.ShellClassInfo]\r\nIconResource=%SystemRoot%\\system32\\imageres.dll,238\r\nConfirmFileOp=0\r\n[ViewState]\r\nMode=\r\nVid=\r\nFolderType=Generic\r\n"
-		_ = os.WriteFile(iniPath, []byte(iniContent), 0o644)
-		_ = setFileHiddenAndSystem(iniPath)
-		_ = setFileReadOnly(folderPath)
+	if _, err := os.Stat(iniPath); err == nil {
+		_ = setFileNormal(iniPath)
+		_ = os.Remove(iniPath)
+		_ = setFileNormal(folderPath)
 	}
 }
 

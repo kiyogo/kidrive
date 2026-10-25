@@ -141,7 +141,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '${Routes.preview}/${Routes.pattern('id')}',
         pageBuilder: (context, state) =>
-            _fade(state, PreviewPage(nodeId: state.pathParameters['id'] ?? '')),
+            _fade(state, PreviewPage(
+              nodeId: Routes.decodeId(state.pathParameters['id'] ?? ''),
+              scopedNodes: state.extra is List<NodeModel> ? (state.extra as List<NodeModel>) : null,
+            )),
       ),
 
       // full screen, outside the shell, because a photo being looked at wants
@@ -151,7 +154,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _fade(
           state,
           PhotoViewerPage(
-            nodeId: state.pathParameters['id'] ?? '',
+            nodeId: Routes.decodeId(state.pathParameters['id'] ?? ''),
             scopedNodes: state.extra is List<NodeModel>
                 ? (state.extra as List<NodeModel>)
                 : null,
@@ -179,7 +182,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                 path: Routes.pattern('id'),
                 pageBuilder: (context, state) => _fade(
                   state,
-                  FilesPage(folderId: state.pathParameters['id']),
+                  FilesPage(folderId: Routes.decodeId(state.pathParameters['id'] ?? '')),
                 ),
               ),
             ],

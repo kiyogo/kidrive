@@ -33,6 +33,7 @@ class VideosGrid extends ConsumerWidget {
         return false;
       },
       child: CustomScrollView(
+        cacheExtent: 1500,
         slivers: <Widget>[
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(13, 13, 13, 13),

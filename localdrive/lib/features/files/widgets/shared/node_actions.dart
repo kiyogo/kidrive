@@ -425,6 +425,18 @@ Future<void> showBulkNodeActions(
         label: l10n.download,
         glyph: LdGlyph.download,
       ),
+    LdMenuAction(
+      id: 'cut',
+      label: 'Cắt',
+      glyph: LdGlyph.move,
+      enabled: nodes.every((n) => n.role.canMove),
+    ),
+    LdMenuAction(
+      id: 'copy',
+      label: l10n.actionCopy,
+      glyph: LdGlyph.copy,
+      enabled: true,
+    ),
     if (canTrash)
       LdMenuAction(
         id: 'trash',
@@ -455,6 +467,18 @@ Future<void> showBulkNodeActions(
       for (final node in nodes) {
         await controller.setStarred(node, !allStarred);
       }
+    case 'cut':
+      ref.read(fileClipboardProvider.notifier).cut(nodes);
+      if (context.mounted) {
+        LdToast.success(context, 'Đã cắt ${nodes.length} mục vào bộ nhớ tạm');
+      }
+      ref.read(selectionProvider.notifier).clear();
+    case 'copy':
+      ref.read(fileClipboardProvider.notifier).copy(nodes);
+      if (context.mounted) {
+        LdToast.success(context, 'Đã sao chép ${nodes.length} mục vào bộ nhớ tạm');
+      }
+      ref.read(selectionProvider.notifier).clear();
     case 'download':
       await downloadNodes(context, ref, nodes);
     case 'trash':

@@ -222,54 +222,85 @@ main() {
 
   # Xác định thư mục chia sẻ mạng nội bộ thực tế
   TARGET_SHARE_DIR="/DATA/KiyoVN"
-  if [ -d "/DATA/KiyoVN" ]; then
-    TARGET_SHARE_DIR="/DATA/KiyoVN"
-  elif [ -d "/mnt/DATA/KiyoVN" ]; then
-    TARGET_SHARE_DIR="/mnt/DATA/KiyoVN"
-  fi
-  mkdir -p "$TARGET_SHARE_DIR" 2>/dev/null || true
-  chmod -R 777 "$TARGET_SHARE_DIR" 2>/dev/null || true
+  mkdir -p "$TARGET_SHARE_DIR" "/DATA" 2>/dev/null || true
+  chmod -R 777 "$TARGET_SHARE_DIR" "/DATA" 2>/dev/null || true
   mkdir -p /var/lib/samba/usershares 2>/dev/null || true
   chmod 1777 /var/lib/samba/usershares 2>/dev/null || true
 
+  # Nếu OpenZFS pool DATA được import tại /mnt/zfs-recovery
+  if [ -d "/mnt/zfs-recovery/DATA/KiyoVN" ]; then
+    mount --rbind /mnt/zfs-recovery/DATA/KiyoVN /DATA/KiyoVN 2>/dev/null || true
+  fi
+
   # Tự động liên kết các tập dữ liệu thực (1DATA, DaoKy_5, Long_4, NgLoc_6, NgSon_1) vào KiyoVN bằng bind mount
   DATASET_NAMES=("1DATA" "DaoKy_5" "Long_4" "NgLoc_6" "NgSon_1")
-  ROOT_CANDIDATES=("/DATA/KiyoVN" "/DATA" "/mnt/DATA/KiyoVN" "/mnt/DATA" "/mnt/DỮ LIỆU/KiyoVN" "/mnt/DỮ LIỆU" "/mnt/zfs-recovery/DATA" "/mnt/zfs-recovery" "/mnt" "/srv" "/var" "/home")
 
   for ds in "${DATASET_NAMES[@]}"; do
-    if [ -d "$TARGET_SHARE_DIR/$ds" ] && [ ! -L "$TARGET_SHARE_DIR/$ds" ] && [ "$(ls -A "$TARGET_SHARE_DIR/$ds" 2>/dev/null)" ]; then
-      continue
-    fi
-
-    FOUND_PATH=""
-    for root in "${ROOT_CANDIDATES[@]}"; do
-      if [ -d "$root/$ds" ] && [ ! -L "$root/$ds" ] && [ "$root/$ds" != "$TARGET_SHARE_DIR/$ds" ]; then
-        FOUND_PATH="$root/$ds"
-        break
-      elif [ -d "$root/DATA/$ds" ] && [ ! -L "$root/DATA/$ds" ] && [ "$root/DATA/$ds" != "$TARGET_SHARE_DIR/$ds" ]; then
-        FOUND_PATH="$root/DATA/$ds"
+    SRC=""
+    # 1. Ưu tiên các đường dẫn chứa tệp thực tế
+    for cand in \
+      "/mnt/zfs-recovery/DATA/KiyoVN/$ds" \
+      "/mnt/zfs-recovery/DATA/$ds" \
+      "/mnt/DATA/KiyoVN/$ds" \
+      "/mnt/DATA/$ds" \
+      "/mnt/DỮ LIỆU/KiyoVN/$ds" \
+      "/mnt/DỮ LIỆU/$ds" \
+      "/mnt/$ds" \
+      "/DATA/KiyoVN/$ds" \
+      "/DATA/$ds"; do
+      if [ -d "$cand" ] && [ ! -L "$cand" ] && [ "$(ls -A "$cand" 2>/dev/null)" ]; then
+        SRC="$cand"
         break
       fi
     done
-    if [ -z "$FOUND_PATH" ]; then
-      FOUND_PATH=$(find /DATA /mnt /srv /var /home -maxdepth 3 -type d -name "$ds" 2>/dev/null | grep -v "$TARGET_SHARE_DIR" | head -n 1)
+
+    # 2. Nếu chưa thấy đường dẫn có file, tìm đường dẫn tồn tại
+    if [ -z "$SRC" ]; then
+      for cand in \
+        "/mnt/zfs-recovery/DATA/KiyoVN/$ds" \
+        "/mnt/zfs-recovery/DATA/$ds" \
+        "/mnt/DATA/KiyoVN/$ds" \
+        "/mnt/DATA/$ds" \
+        "/mnt/DỮ LIỆU/KiyoVN/$ds" \
+        "/mnt/DỮ LIỆU/$ds" \
+        "/mnt/$ds"; do
+        if [ -d "$cand" ] && [ ! -L "$cand" ]; then
+          SRC="$cand"
+          break
+        fi
+      done
     fi
 
-    if [ -n "$FOUND_PATH" ]; then
-      if [ -L "$TARGET_SHARE_DIR/$ds" ]; then
-        rm -f "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
-      fi
-      mkdir -p "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
-      chmod 777 "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
+    # 3. Quét sâu bằng find nếu cần
+    if [ -z "$SRC" ]; then
+      SRC=$(find /mnt/zfs-recovery /DATA /mnt /srv /var /home -maxdepth 5 -type d -name "$ds" 2>/dev/null | grep -v "/DATA/KiyoVN/$ds" | grep -v "/DATA/$ds" | head -n 1)
+    fi
 
-      # Bind mount trực tiếp
-      if ! mount | grep -q "$TARGET_SHARE_DIR/$ds"; then
-        mount --bind "$FOUND_PATH" "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
+    if [ -n "$SRC" ]; then
+      echo -e "${GREEN}✓ Đã nhận diện tập dữ liệu $ds -> $SRC${NC}"
+      mkdir -p "/DATA/KiyoVN/$ds" "/DATA/$ds" 2>/dev/null || true
+      chmod -R 777 "/DATA/KiyoVN/$ds" "/DATA/$ds" 2>/dev/null || true
+
+      # Bind mount trực tiếp vào /DATA/KiyoVN/$ds
+      if [ "$SRC" != "/DATA/KiyoVN/$ds" ] && ! mount | grep -q "/DATA/KiyoVN/$ds "; then
+        mount --bind "$SRC" "/DATA/KiyoVN/$ds" 2>/dev/null || true
       fi
 
-      if [ -f /etc/fstab ] && ! grep -q "$TARGET_SHARE_DIR/$ds" /etc/fstab 2>/dev/null; then
-        echo "$FOUND_PATH $TARGET_SHARE_DIR/$ds none bind 0 0" >> /etc/fstab 2>/dev/null || true
+      # Bind mount trực tiếp vào /DATA/$ds
+      if [ "$SRC" != "/DATA/$ds" ] && ! mount | grep -q "/DATA/$ds "; then
+        mount --bind "$SRC" "/DATA/$ds" 2>/dev/null || true
       fi
+
+      if [ -f /etc/fstab ]; then
+        if ! grep -q "/DATA/KiyoVN/$ds" /etc/fstab 2>/dev/null; then
+          echo "$SRC /DATA/KiyoVN/$ds none bind 0 0" >> /etc/fstab 2>/dev/null || true
+        fi
+        if ! grep -q "/DATA/$ds" /etc/fstab 2>/dev/null; then
+          echo "$SRC /DATA/$ds none bind 0 0" >> /etc/fstab 2>/dev/null || true
+        fi
+      fi
+    else
+      echo -e "${YELLOW}  [LƯU Ý] Chưa thấy tập dữ liệu: $ds${NC}"
     fi
   done
 

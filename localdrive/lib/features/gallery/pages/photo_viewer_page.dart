@@ -136,14 +136,16 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
       final folderImages = folderNodes
           ?.where((n) => n.category == FileCategory.image)
           .toList();
-      if (folderImages != null &&
-          folderImages.isNotEmpty &&
-          folderImages.any((n) => n.id == widget.nodeId)) {
+      if (folderImages != null && folderImages.isNotEmpty) {
         sourceNodes = folderImages;
       } else {
-        sourceNodes =
-            ref.watch(galleryProvider).valueOrNull ?? const <NodeModel>[];
+        // While folder images are loading, stay strictly on singleNode.
+        // NEVER fall back to the global gallery, which causes wrong folder / first photo jump bug!
+        sourceNodes = <NodeModel>[singleNode];
       }
+    } else if (singleNode != null && singleNode.parentId.isEmpty) {
+      final gallery = ref.watch(galleryProvider);
+      sourceNodes = gallery.valueOrNull ?? <NodeModel>[singleNode];
     } else {
       final gallery = ref.watch(galleryProvider);
       sourceNodes = gallery.valueOrNull ?? const <NodeModel>[];

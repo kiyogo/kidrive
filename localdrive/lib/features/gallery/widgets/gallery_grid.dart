@@ -43,6 +43,7 @@ class GalleryGrid extends ConsumerWidget {
         return false;
       },
       child: CustomScrollView(
+        cacheExtent: 1500,
         slivers: <Widget>[
           for (final section in sections) ...<Widget>[
             if (section.label.isNotEmpty)

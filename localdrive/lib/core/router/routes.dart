@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
@@ -59,8 +60,26 @@ abstract final class Routes {
   /// The path pattern go_router registers for a child route, as in `:id`.
   static String pattern(String parameter) => ':$parameter';
 
-  static String child(String base, String segment) =>
-      '$base/${Uri.encodeComponent(segment)}';
+  static String child(String base, String segment) {
+    if (segment.contains('/') || segment.contains(':') || segment.contains('\\')) {
+      final b64 = base64Url.encode(utf8.encode(segment)).replaceAll('=', '');
+      return '$base/b64_$b64';
+    }
+    return '$base/${Uri.encodeComponent(segment)}';
+  }
+
+  static String decodeId(String raw) {
+    if (raw.startsWith('b64_')) {
+      final stripped = raw.substring(4);
+      final normalized = base64Url.normalize(stripped);
+      try {
+        return utf8.decode(base64Url.decode(normalized));
+      } catch (_) {
+        return raw;
+      }
+    }
+    return Uri.decodeComponent(raw);
+  }
 
   /// The id in a location like `/files/abc123`, or null when the location is
   /// the base itself or something else entirely.
@@ -76,7 +95,7 @@ abstract final class Routes {
     // only the first segment; anything deeper belongs to another route
     final end = rest.indexOf('/');
     final value = end == -1 ? rest : rest.substring(0, end);
-    return value.isEmpty ? null : Uri.decodeComponent(value);
+    return value.isEmpty ? null : decodeId(value);
   }
 
   /// The folder a location is showing, or null at the root of the browser.
