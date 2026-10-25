@@ -14,7 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -750,8 +749,25 @@ func updateLinuxSmbConf(shareName, sharePath string, readOnly bool) {
 	}
 
 	// Remove existing share section if present
-	re := regexp.MustCompile(fmt.Sprintf(`(?ms)^\[%s\].*?(?=^\[|\z)`, regexp.QuoteMeta(shareName)))
-	content = re.ReplaceAllString(content, "")
+	lines := strings.Split(content, "\n")
+	var newLines []string
+	inTargetSection := false
+	targetHeader := "[" + shareName + "]"
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			if strings.EqualFold(trimmed, targetHeader) {
+				inTargetSection = true
+				continue
+			} else {
+				inTargetSection = false
+			}
+		}
+		if !inTargetSection {
+			newLines = append(newLines, line)
+		}
+	}
+	content = strings.Join(newLines, "\n")
 
 	readOnlyStr := "no"
 	writableStr := "yes"
