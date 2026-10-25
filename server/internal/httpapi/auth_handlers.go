@@ -46,7 +46,7 @@ func (a *API) handleStatus(w http.ResponseWriter, r *http.Request) {
 		ServerID:              cfg.ServerID,
 		Version:               Version,
 		SetupRequired:         setupRequired,
-		RequireDeviceApproval: cfg.RequireDeviceApproval,
+		RequireDeviceApproval: false,
 		AllowSelfRegistration: cfg.AllowSelfRegistration,
 		Ready:                 ready,
 	})
@@ -209,14 +209,6 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		a.fail(w, r, err)
-		return
-	}
-	if result.Pending {
-		writeJSON(w, http.StatusAccepted, tokenResponse{
-			Status:      "pending",
-			SessionID:   result.SessionID,
-			AccessToken: result.PendingToken,
-		})
 		return
 	}
 	writeJSON(w, http.StatusOK, a.tokenBodyWithContext(r.Context(), result.Tokens))

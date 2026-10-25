@@ -242,18 +242,6 @@ class SessionController extends Notifier<SessionState> {
   }
 
   Future<void> _adopt(AuthResult result) async {
-    if (result.pending) {
-      _api.useTokens(accessToken: result.accessToken);
-      state = state.copyWith(
-        stage: SessionStage.pendingApproval,
-        pendingSessionId: result.sessionId,
-        busy: false,
-        clearError: true,
-      );
-      _startApprovalPolling(result.sessionId);
-      return;
-    }
-
     _api.useTokens(accessToken: result.accessToken);
     await _store.writeTokens(
       accessToken: result.accessToken,

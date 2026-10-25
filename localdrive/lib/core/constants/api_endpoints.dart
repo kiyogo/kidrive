@@ -24,6 +24,8 @@ abstract final class Api {
   // nodes
   static const String nodes = '$prefix/nodes';
   static const String folder = '$prefix/nodes/folder';
+  static const String copyNode = '$prefix/nodes/copy';
+  static const String moveNode = '$prefix/nodes/move';
   static String node(String id) => '$prefix/nodes/$id';
   static String nodePath(String id) => '$prefix/nodes/$id/path';
   static String star(String id) => '$prefix/nodes/$id/star';

@@ -54,6 +54,25 @@ const glyphForCategory: Record<string, Glyph> = {
 
 
 
+type ClipboardState = { action: "cut" | "copy"; nodes: NodeModel[] } | null;
+let globalClipboard: ClipboardState = null;
+const clipboardListeners = new Set<() => void>();
+function setGlobalClipboard(cb: ClipboardState) {
+  globalClipboard = cb;
+  clipboardListeners.forEach((l) => l());
+}
+function useBrowserClipboard() {
+  const [cb, setCb] = useState<ClipboardState>(globalClipboard);
+  useEffect(() => {
+    const listener = () => setCb(globalClipboard);
+    clipboardListeners.add(listener);
+    return () => {
+      clipboardListeners.delete(listener);
+    };
+  }, []);
+  return [cb, setGlobalClipboard] as const;
+}
+
 export function FilesBrowser({
   folderId,
   filter,
@@ -96,6 +115,7 @@ export function FilesBrowser({
     x?: number;
     y?: number;
   } | null>(null);
+  const [clipboard, setClipboard] = useBrowserClipboard();
   const [overflow, setOverflow] = useState<{
     x?: number;
     y?: number;
@@ -460,6 +480,40 @@ export function FilesBrowser({
       toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const currentFolderTarget = useMemo(() => {
+    let p = filter === "none" ? folderId : "";
+    if (filter === "none" && !folderId && defaultSingleDataset) {
+      p = `dataset:${defaultSingleDataset}`;
+    }
+    return p;
+  }, [filter, folderId, defaultSingleDataset]);
+
+  const handlePaste = async (targetParentId: string) => {
+    if (!clipboard || clipboard.nodes.length === 0) return;
+    try {
+      for (const node of clipboard.nodes) {
+        if (clipboard.action === "cut") {
+          await api.post(Api.moveNode, {
+            node_id: node.id,
+            parent_id: targetParentId,
+          });
+        } else {
+          await api.post(Api.copyNode, {
+            node_id: node.id,
+            parent_id: targetParentId,
+          });
+        }
+      }
+      toast(clipboard.action === "cut" ? "Đã chuyển thành công!" : "Đã dán thành công!", "success");
+      if (clipboard.action === "cut") {
+        setClipboard(null);
+      }
+      void load();
+    } catch (err: any) {
+      toast(err?.message || "Không thể dán", "error");
     }
   };
 
@@ -1677,6 +1731,23 @@ export function FilesBrowser({
                       ]
                     : []),
                   {
+                    label: "Cắt",
+                    glyph: "cut" as Glyph,
+                    disabled: isReadOnly || chosen.some((n) => n.role === "viewer"),
+                    onClick: () => {
+                      setClipboard({ action: "cut", nodes: chosen });
+                      toast(`Đã cắt ${chosen.length} mục vào bộ nhớ tạm`, "success");
+                    },
+                  },
+                  {
+                    label: t.actionCopy || "Sao chép",
+                    glyph: "copy" as Glyph,
+                    onClick: () => {
+                      setClipboard({ action: "copy", nodes: chosen });
+                      toast(`Đã sao chép ${chosen.length} mục vào bộ nhớ tạm`, "success");
+                    },
+                  },
+                  {
                     label: t.actionDeselect,
                     glyph: "close" as Glyph,
                     onClick: () => setSelection(new Set()),
@@ -1771,10 +1842,36 @@ export function FilesBrowser({
                             ]
                           : []),
                         {
-                          label: t.actionMove,
-                          glyph: "move" as Glyph,
-                          onClick: () => void openMoveDialog(menu.node),
+                          label: "Cắt",
+                          glyph: "cut" as Glyph,
+                          disabled: isReadOnly || menu.node.role === "viewer",
+                          onClick: () => {
+                            setClipboard({ action: "cut", nodes: [menu.node] });
+                            toast("Đã cắt vào bộ nhớ tạm", "success");
+                          },
                         },
+                        {
+                          label: t.actionCopy || "Sao chép",
+                          glyph: "copy" as Glyph,
+                          onClick: () => {
+                            setClipboard({ action: "copy", nodes: [menu.node] });
+                            toast("Đã sao chép vào bộ nhớ tạm", "success");
+                          },
+                        },
+                        ...(isFolder(menu.node)
+                          ? [
+                              {
+                                label: "Dán",
+                                glyph: "paste" as Glyph,
+                                disabled:
+                                  !clipboard ||
+                                  clipboard.nodes.length === 0 ||
+                                  isReadOnly ||
+                                  menu.node.role === "viewer",
+                                onClick: () => void handlePaste(menu.node.id),
+                              },
+                            ]
+                          : []),
                         {
                           label: t.actionShare,
                           glyph: "share" as Glyph,
@@ -1832,6 +1929,16 @@ export function FilesBrowser({
                 },
               ]
             : []),
+          {
+            label: "Dán",
+            glyph: "paste" as Glyph,
+            disabled:
+              !clipboard ||
+              clipboard.nodes.length === 0 ||
+              isReadOnly ||
+              !hasAssignedCategory,
+            onClick: () => void handlePaste(currentFolderTarget),
+          },
           {
             label: t.actionRefresh,
             glyph: "refresh" as Glyph,
@@ -2352,11 +2459,6 @@ const Tile = React.memo(function Tile({
             <Icon glyph="check" size={14} color="#FFFFFF" strokeWidth={2.6} />
           </span>
         )}
-        {node.owner && (
-          <span style={{ position: "absolute", insetInlineStart: 6, top: 6 }} title={node.owner.name}>
-            <Avatar name={node.owner.name} seed={node.owner.avatar_seed} size={26} showBorder />
-          </span>
-        )}
 
         {kept && !selected && (
           <span
@@ -2676,11 +2778,6 @@ const Row = React.memo(function Row({
             }}
             style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
           />
-        )}
-        {node.owner && (
-          <span style={{ position: "absolute", top: -2, left: -2 }}>
-            <Avatar name={node.owner.name} seed={node.owner.avatar_seed} size={18} showBorder />
-          </span>
         )}
       </span>
       <span style={{ flex: 1, minWidth: 0 }}>

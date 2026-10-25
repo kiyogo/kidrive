@@ -36,6 +36,8 @@ export const Api = {
   // the tree
   nodes: `${prefix}/nodes`,
   folder: `${prefix}/nodes/folder`,
+  copyNode: `${prefix}/nodes/copy`,
+  moveNode: `${prefix}/nodes/move`,
   node: (id: string) => `${prefix}/nodes/${id}`,
   nodePath: (id: string) => `${prefix}/nodes/${id}/path`,
   star: (id: string) => `${prefix}/nodes/${id}/star`,

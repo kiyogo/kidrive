@@ -196,15 +196,39 @@ if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>
 fi
 
 # Tạo thư mục chia sẻ thực tế
-mkdir -p "/mnt/DỮ LIỆU/KiyoVN" 2>/dev/null || true
-chmod 777 "/mnt/DỮ LIỆU/KiyoVN" 2>/dev/null || true
+TARGET_SHARE_DIR="/mnt/DỮ LIỆU/KiyoVN"
+mkdir -p "$TARGET_SHARE_DIR" 2>/dev/null || true
+chmod 777 "$TARGET_SHARE_DIR" 2>/dev/null || true
 mkdir -p /var/lib/samba/usershares 2>/dev/null || true
 chmod 1777 /var/lib/samba/usershares 2>/dev/null || true
+
+# Tự động liên kết các tập dữ liệu thực (1DATA, DaoKy_5, Long_4, NgLoc_6, NgSon_1) vào KiyoVN
+DATASET_NAMES=("1DATA" "DaoKy_5" "Long_4" "NgLoc_6" "NgSon_1")
+ROOT_CANDIDATES=("/DATA/KiyoVN" "/mnt/DATA/KiyoVN" "/DATA" "/mnt/DATA" "/mnt/DỮ LIỆU" "/mnt/zfs-recovery")
+
+for ds in "${DATASET_NAMES[@]}"; do
+  FOUND_PATH=""
+  for root in "${ROOT_CANDIDATES[@]}"; do
+    if [ -d "$root/$ds" ]; then
+      FOUND_PATH="$root/$ds"
+      break
+    fi
+  done
+  if [ -z "$FOUND_PATH" ]; then
+    FOUND_PATH=$(find /DATA /mnt -maxdepth 3 -type d -name "$ds" 2>/dev/null | head -n 1)
+  fi
+  if [ -n "$FOUND_PATH" ] && [ "$FOUND_PATH" != "$TARGET_SHARE_DIR/$ds" ]; then
+    rm -rf "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
+    ln -sfn "$FOUND_PATH" "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
+    mkdir -p "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
+    mount --bind "$FOUND_PATH" "$TARGET_SHARE_DIR/$ds" 2>/dev/null || true
+  fi
+done
 
 # Cấu hình Samba hỗ trợ Guest Access (Không cần mật khẩu đăng nhập mạng nội bộ)
 if [ -f /etc/samba/smb.conf ]; then
   if ! grep -q "usershare path" /etc/samba/smb.conf; then
-    sed -i '/\[global\]/a \   usershare path = /var/lib/samba/usershares\n   usershare max shares = 100\n   usershare allow guests = yes\n   usershare owner only = false\n   map to guest = Bad User' /etc/samba/smb.conf
+    sed -i '/\[global\]/a \   usershare path = /var/lib/samba/usershares\n   usershare max shares = 100\n   usershare allow guests = yes\n   usershare owner only = false\n   map to guest = Bad User\n   follow symlinks = yes\n   wide links = yes\n   unix extensions = no\n   allow insecure wide links = yes' /etc/samba/smb.conf
   fi
   if ! grep -q "\[KiyoVN\]" /etc/samba/smb.conf; then
     cat << 'EOF' >> /etc/samba/smb.conf
@@ -219,6 +243,8 @@ if [ -f /etc/samba/smb.conf ]; then
    force user = root
    create mask = 0777
    directory mask = 0777
+   follow symlinks = yes
+   wide links = yes
 EOF
   fi
 else
@@ -234,6 +260,10 @@ else
    usershare max shares = 100
    usershare allow guests = yes
    usershare owner only = false
+   follow symlinks = yes
+   wide links = yes
+   unix extensions = no
+   allow insecure wide links = yes
 
 [KiyoVN]
    path = /mnt/DỮ LIỆU/KiyoVN
@@ -245,12 +275,14 @@ else
    force user = root
    create mask = 0777
    directory mask = 0777
+   follow symlinks = yes
+   wide links = yes
 EOF
 fi
 
 # Thêm usershare qua net usershare
 if command -v net >/dev/null 2>&1; then
-  net usershare add KiyoVN "/mnt/DỮ LIỆU/KiyoVN" "LocalDrive Network Share" "Everyone:F" "guest_ok=y" 2>/dev/null || true
+  net usershare add KiyoVN "$TARGET_SHARE_DIR" "LocalDrive Network Share" "Everyone:F" "guest_ok=y" 2>/dev/null || true
 fi
 
 # Kích hoạt và khởi động lại dịch vụ Samba

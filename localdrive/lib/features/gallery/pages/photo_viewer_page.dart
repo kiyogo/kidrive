@@ -26,9 +26,14 @@ import '../providers/gallery_providers.dart';
 /// which makes it a gallery rather than a list of files that happen to
 /// be pictures.
 class PhotoViewerPage extends ConsumerStatefulWidget {
-  const PhotoViewerPage({super.key, required this.nodeId});
+  const PhotoViewerPage({
+    super.key,
+    required this.nodeId,
+    this.scopedNodes,
+  });
 
   final String nodeId;
+  final List<NodeModel>? scopedNodes;
 
   @override
   ConsumerState<PhotoViewerPage> createState() => _PhotoViewerPageState();
@@ -37,6 +42,13 @@ class PhotoViewerPage extends ConsumerStatefulWidget {
 class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
   PageController? _controller;
   int _index = 0;
+  String? _currentNodeId;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentNodeId = widget.nodeId;
+  }
 
   /// the chrome hides on a tap, so the picture can be looked at with nothing
   /// on top of it, and comes back on the next tap
@@ -107,20 +119,22 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final gallery = ref.watch(galleryProvider);
-    final darkTheme = LdTheme.dark(Localizations.localeOf(context));
-    final isMobile = context.deviceClass == DeviceClass.mobile ||
-        defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS;
+    final List<NodeModel> sourceNodes;
+    if (widget.scopedNodes != null && widget.scopedNodes!.isNotEmpty) {
+      sourceNodes = widget.scopedNodes!;
+    } else {
+      final gallery = ref.watch(galleryProvider);
+      sourceNodes = gallery.valueOrNull ?? const <NodeModel>[];
+    }
 
+    final targetId = _currentNodeId ?? widget.nodeId;
     final singleNode = ref.watch(nodeProvider(widget.nodeId)).valueOrNull;
-    final nodes = gallery.valueOrNull ?? const <NodeModel>[];
-    final effectiveNodes = (nodes.any((n) => n.id == widget.nodeId))
-        ? nodes
+    final effectiveNodes = (sourceNodes.any((n) => n.id == targetId))
+        ? sourceNodes
         : (singleNode != null
-            ? <NodeModel>[singleNode, ...nodes]
-            : (nodes.isNotEmpty
-                ? nodes
+            ? <NodeModel>[singleNode, ...sourceNodes]
+            : (sourceNodes.isNotEmpty
+                ? sourceNodes
                 : <NodeModel>[
                     NodeModel(
                       id: widget.nodeId,
@@ -141,14 +155,23 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
       );
     }
 
-    final start = effectiveNodes.indexWhere((n) => n.id == widget.nodeId);
+    final start = effectiveNodes.indexWhere((n) => n.id == targetId);
+    final initial = start < 0 ? 0 : start;
+
     if (_controller == null) {
-      final initial = start < 0 ? 0 : start;
       _controller = PageController(initialPage: initial);
       _index = initial;
+      _currentNodeId = effectiveNodes[initial].id;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _precacheAdjacent(effectiveNodes, initial);
       });
+    } else if (_currentNodeId != null &&
+        (_index >= effectiveNodes.length || effectiveNodes[_index].id != _currentNodeId)) {
+      final newIdx = effectiveNodes.indexWhere((n) => n.id == _currentNodeId);
+      if (newIdx >= 0 && newIdx != _index) {
+        _index = newIdx;
+        _controller?.jumpToPage(newIdx);
+      }
     }
 
     final current = effectiveNodes[_index.clamp(0, effectiveNodes.length - 1)];
@@ -190,7 +213,12 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
                       currentIndex: _index,
                       isMobile: isMobile,
                       onPageChanged: (index) {
-                        setState(() => _index = index);
+                        setState(() {
+                          _index = index;
+                          if (index >= 0 && index < effectiveNodes.length) {
+                            _currentNodeId = effectiveNodes[index].id;
+                          }
+                        });
                         _precacheAdjacent(effectiveNodes, index);
                       },
                       onTap: () => setState(() => _chrome = !_chrome),

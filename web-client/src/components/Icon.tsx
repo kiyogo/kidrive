@@ -86,6 +86,8 @@ export type Glyph =
   | "restore"
   | "copy"
   | "move"
+  | "cut"
+  | "paste"
   | "sun"
   | "moon"
   | "expand"
@@ -439,11 +441,31 @@ function renderGlyph(glyph: Glyph, color: string, strokeWidth: number): React.Re
         </>
       );
 
+    case "cut":
+      return (
+        <>
+          <circle cx="6" cy="6" r="2.5" />
+          <circle cx="6" cy="18" r="2.5" />
+          <line x1="8" y1="7.8" x2="19.5" y2="18" />
+          <line x1="8" y1="16.2" x2="19.5" y2="6" />
+        </>
+      );
+
     case "copy":
       return (
         <>
           <rect x="8" y="8" width="12" height="12" rx="2.4" />
           <path d="M16 5.5 H6.5 Q4.5 5.5 4.5 7.5 V16.5" />
+        </>
+      );
+
+    case "paste":
+      return (
+        <>
+          <rect x="5" y="7" width="14" height="14" rx="2" />
+          <path d="M9 7 V4.5 Q9 3.5 10 3.5 H14 Q15 3.5 15 4.5 V7" />
+          <line x1="8.5" y1="11.5" x2="15.5" y2="11.5" />
+          <line x1="8.5" y1="15.5" x2="13.5" y2="15.5" />
         </>
       );
 

@@ -93,17 +93,6 @@ class NodeTile extends HookConsumerWidget {
                         hovered: hovered.value,
                         alwaysPeek: !deviceClass.hasHover,
                       ),
-                      if (node.owner != null)
-                        Positioned(
-                          top: 6,
-                          left: 6,
-                          child: LdAvatar(
-                            name: node.owner!.name,
-                            seed: node.owner!.avatarSeed,
-                            size: 26,
-                            showBorder: true,
-                          ),
-                        ),
                       // top-right is the fourth and last corner: the type
                       // badge holds bottom-right and the owner avatar
                       // top-left, and bottom-left is left alone rather than
@@ -314,17 +303,6 @@ class NodeRow extends ConsumerWidget {
                         memCacheWidth: 96,
                         tint: node.category.tint,
                         borderRadius: BorderRadius.circular(10),
-                      ),
-                    if (node.owner != null)
-                      Positioned(
-                        top: -2,
-                        left: -2,
-                        child: LdAvatar(
-                          name: node.owner!.name,
-                          seed: node.owner!.avatarSeed,
-                          size: 18,
-                          showBorder: true,
-                        ),
                       ),
                   ],
                 ),

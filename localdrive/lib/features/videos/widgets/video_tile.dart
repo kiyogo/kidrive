@@ -5,7 +5,7 @@ import '../../files/widgets/shared/node_actions.dart';
 import '../../offline/controller/offline_controller.dart';
 
 /// A card for one video in the videos grid.
-class VideoTile extends HookConsumerWidget {
+class VideoTile extends ConsumerStatefulWidget {
   const VideoTile({
     super.key,
     required this.node,
@@ -22,7 +22,23 @@ class VideoTile extends HookConsumerWidget {
   final bool selecting;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<VideoTile> createState() => _VideoTileState();
+}
+
+class _VideoTileState extends ConsumerState<VideoTile>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final node = widget.node;
+    final selected = widget.selected;
+    final selecting = widget.selecting;
+    final onOpen = widget.onOpen;
+    final onToggleSelect = widget.onToggleSelect;
+
     final db = ref.watch(filesDbProvider);
     final offline = ref.watch(isOfflineProvider(node.id));
 

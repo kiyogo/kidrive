@@ -6,6 +6,7 @@ import '../../../offline/controller/offline_controller.dart';
 import '../../../upload/controller/transfer_controller.dart';
 import '../../controller/files_controller.dart';
 import '../../models/node_model.dart';
+import '../../providers/clipboard_provider.dart';
 import '../../providers/files_providers.dart';
 import 'rename_sheet.dart';
 
@@ -25,6 +26,7 @@ Future<void> showNodeActions(
   FutureOr<bool> Function(String id)? onExtraAction,
 }) async {
   final l10n = L10n.of(context);
+  final clipboard = ref.read(fileClipboardProvider);
 
   final actions = <LdMenuAction>[
     ...?extraActions,
@@ -73,11 +75,24 @@ Future<void> showNodeActions(
         enabled: node.role.canRecolor,
       ),
     LdMenuAction(
-      id: 'move',
-      label: l10n.actionMove,
+      id: 'cut',
+      label: 'Cắt',
       glyph: LdGlyph.move,
       enabled: node.role.canMove,
     ),
+    LdMenuAction(
+      id: 'copy',
+      label: l10n.actionCopy,
+      glyph: LdGlyph.copy,
+      enabled: true,
+    ),
+    if (node.isFolder)
+      LdMenuAction(
+        id: 'paste',
+        label: 'Dán',
+        glyph: LdGlyph.file,
+        enabled: clipboard != null && clipboard.nodes.isNotEmpty && node.role.canWrite,
+      ),
     LdMenuAction(
       id: 'share',
       label: l10n.actionShare,
@@ -181,10 +196,51 @@ Future<void> showNodeActions(
     case 'color':
       await showColorSheet(context, ref, node);
 
-    case 'move':
+    case 'cut':
+      ref.read(fileClipboardProvider.notifier).cut(<NodeModel>[node]);
       if (context.mounted) {
-        LdToast.show(context, message: l10n.moveTo);
+        LdToast.success(context, 'Đã cắt vào bộ nhớ tạm');
       }
+      break;
+
+    case 'copy':
+      ref.read(fileClipboardProvider.notifier).copy(<NodeModel>[node]);
+      if (context.mounted) {
+        LdToast.success(context, 'Đã sao chép vào bộ nhớ tạm');
+      }
+      break;
+
+    case 'paste':
+      final cb = ref.read(fileClipboardProvider);
+      if (cb != null && cb.nodes.isNotEmpty) {
+        final db = ref.read(filesDbProvider);
+        try {
+          for (final item in cb.nodes) {
+            if (cb.action == ClipboardAction.cut) {
+              await db.moveNodeTo(item.id, node.id);
+            } else {
+              await db.copyNode(item.id, node.id);
+            }
+          }
+          if (cb.action == ClipboardAction.cut) {
+            ref.read(fileClipboardProvider.notifier).clear();
+          }
+          ref.invalidate(folderNodesProvider(node.id));
+          if (context.mounted) {
+            LdToast.success(
+              context,
+              cb.action == ClipboardAction.cut
+                  ? 'Đã chuyển thành công!'
+                  : 'Đã dán thành công!',
+            );
+          }
+        } catch (e) {
+          if (context.mounted) {
+            LdToast.error(context, e.toString());
+          }
+        }
+      }
+      break;
 
     case 'share':
       await showShareSheet(context, ref, node);

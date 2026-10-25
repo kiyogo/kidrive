@@ -100,6 +100,18 @@ class FilesDb {
         },
       ));
 
+  Future<void> copyNode(String id, String parentId) async =>
+      _api.post(Api.copyNode, body: <String, dynamic>{
+        'node_id': id,
+        'parent_id': parentId,
+      });
+
+  Future<void> moveNodeTo(String id, String parentId) async =>
+      _api.post(Api.moveNode, body: <String, dynamic>{
+        'node_id': id,
+        'parent_id': parentId,
+      });
+
   Future<NodeModel> recolor(String id, String color) async =>
       NodeModel.fromJson(
         await _api.patch(Api.node(id), body: <String, dynamic>{'color': color}),

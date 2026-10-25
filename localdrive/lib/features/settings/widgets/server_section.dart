@@ -33,16 +33,6 @@ class ServerSection extends ConsumerWidget {
               title: l10n.settingsServer,
               children: <Widget>[
                 LdSettingRow(
-                  label: l10n.settingsRequireApproval,
-                  description: l10n.settingsRequireApprovalNote,
-                  glyph: LdGlyph.device,
-                  trailing: LdSwitch(
-                    value: current.requireDeviceApproval,
-                    onChanged: (value) =>
-                        controller.apply(requireDeviceApproval: value),
-                  ),
-                ),
-                LdSettingRow(
                   label: l10n.settingsLanDiscovery,
                   description: l10n.settingsLanDiscoveryNote,
                   glyph: LdGlyph.wifi,

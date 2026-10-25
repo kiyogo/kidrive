@@ -7,7 +7,7 @@ import '../../offline/controller/offline_controller.dart';
 /// One picture in the grid. Holds its own aspect ratio from the server's
 /// recorded dimensions, so the masonry lays itself out correctly before a
 /// single thumbnail has arrived, instead of reflowing as they load.
-class GalleryTile extends ConsumerWidget {
+class GalleryTile extends ConsumerStatefulWidget {
   const GalleryTile({
     super.key,
     required this.node,
@@ -24,7 +24,23 @@ class GalleryTile extends ConsumerWidget {
   final bool selecting;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<GalleryTile> createState() => _GalleryTileState();
+}
+
+class _GalleryTileState extends ConsumerState<GalleryTile>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final node = widget.node;
+    final selected = widget.selected;
+    final selecting = widget.selecting;
+    final onOpen = widget.onOpen;
+    final onToggleSelect = widget.onToggleSelect;
+
     final db = ref.watch(filesDbProvider);
     final offline = ref.watch(isOfflineProvider(node.id));
 

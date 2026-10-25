@@ -1362,7 +1362,7 @@ export function Menu({
   title?: string;
   subtitle?: string;
   onClose: () => void;
-  items: { label: string; glyph?: Glyph; onClick: () => void; danger?: boolean }[];
+  items: { label: string; glyph?: Glyph; onClick: () => void; danger?: boolean; disabled?: boolean }[];
 }) {
   const { isDesktop } = useDeviceClass();
   const [mounted, setMounted] = useState(false);
@@ -1385,12 +1385,13 @@ export function Menu({
       <Sheet open={open} onClose={onClose} title={title} subtitle={subtitle}>
         <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "4px 0" }}>
           {items.map((item) => {
-            const itemColor = item.danger ? "var(--warning)" : "var(--fg-primary)";
+            const itemColor = item.disabled ? "var(--fg-muted, #71717a)" : item.danger ? "var(--warning)" : "var(--fg-primary)";
             return (
               <Tappable
                 key={item.label}
                 radius={12}
                 onClick={() => {
+                  if (item.disabled) return;
                   onClose();
                   item.onClick();
                 }}
@@ -1403,6 +1404,8 @@ export function Menu({
                   minHeight: 48,
                   padding: "0 12px",
                   color: itemColor,
+                  opacity: item.disabled ? 0.45 : 1,
+                  cursor: item.disabled ? "default" : "pointer",
                   boxSizing: "border-box",
                   whiteSpace: "nowrap",
                 }}
@@ -1509,12 +1512,13 @@ export function Menu({
         }}
       >
         {items.map((item) => {
-          const itemColor = item.danger ? "var(--warning)" : "var(--fg-primary)";
+          const itemColor = item.disabled ? "var(--fg-muted, #71717a)" : item.danger ? "var(--warning)" : "var(--fg-primary)";
           return (
             <Tappable
               key={item.label}
               radius={10}
               onClick={() => {
+                if (item.disabled) return;
                 onClose();
                 item.onClick();
               }}
@@ -1527,6 +1531,8 @@ export function Menu({
                 minHeight: 42,
                 padding: "0 14px",
                 color: itemColor,
+                opacity: item.disabled ? 0.45 : 1,
+                cursor: item.disabled ? "default" : "pointer",
                 boxSizing: "border-box",
               }}
             >

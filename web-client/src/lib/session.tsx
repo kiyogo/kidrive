@@ -237,57 +237,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     wsClient.disconnect();
   }, []);
 
-  // Active polling while device is waiting for approval
-  useEffect(() => {
-    if (stage !== "pendingApproval" || !pendingSessionId) return;
-
-    let cancelled = false;
-
-    const checkStatus = async () => {
-      try {
-        const res = await api.get<{
-          status: string;
-          access_token?: string;
-          refresh_token?: string;
-        }>(Api.sessionStatus(pendingSessionId));
-
-        if (cancelled) return;
-
-        if (res.access_token) {
-          api.setTokens({
-            access: res.access_token,
-            refresh: res.refresh_token ?? "",
-          });
-          setPendingSessionId("");
-          await refreshUser();
-          return;
-        }
-
-        if (res.status === "denied" || res.status === "revoked") {
-          cancelPending();
-          setError("Thiết bị này đã bị từ chối phê duyệt.");
-        }
-      } catch (err) {
-        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-          if (!cancelled) {
-            cancelPending();
-            setError("Thiết bị này đã bị từ chối phê duyệt.");
-          }
-        }
-      }
-    };
-
-    void checkStatus();
-    const interval = setInterval(() => {
-      void checkStatus();
-    }, 2500);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [stage, pendingSessionId, refreshUser, cancelPending]);
-
   const connect = useCallback(async (address: string) => {
     setError("");
     api.setServer(address);
@@ -313,15 +262,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         ...device(),
       });
 
-      // a held device gets a pending token rather than a session
-      if (result.pending || result.status === "pending") {
-        if (result.access_token) {
-          api.setTokens({ access: result.access_token, refresh: "" });
-        }
-        setPendingSessionId(result.session_id ?? "");
-        setStage("pendingApproval");
-        return;
-      }
       if (!result.access_token) throw new ApiError(0, "no_token", "The server sent no session.");
       api.setTokens({ access: result.access_token, refresh: result.refresh_token ?? "" });
       await refreshUser();
@@ -353,14 +293,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         ...(inviteCode ? { invite_code: inviteCode } : {}),
         ...device(),
       });
-      if (result.pending || result.status === "pending") {
-        if (result.access_token) {
-          api.setTokens({ access: result.access_token, refresh: "" });
-        }
-        setPendingSessionId(result.session_id ?? "");
-        setStage("pendingApproval");
-        return;
-      }
       if (!result.access_token) throw new ApiError(0, "no_token", "The server sent no session.");
       api.setTokens({ access: result.access_token, refresh: result.refresh_token ?? "" });
       await refreshUser();

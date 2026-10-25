@@ -6,7 +6,6 @@ import {
   BootScreen,
   ConnectScreen,
   LanguageScreen,
-  PendingApprovalScreen,
   SetupScreen,
   SignInScreen,
   WelcomeScreen,
@@ -137,7 +136,6 @@ export default function AppClient({
     );
   }
 
-  if (stage === "pendingApproval") return <PendingApprovalScreen />;
   if (stage === "mustChangePassword") return <MustChangePassword />;
   if (stage === "mustEnableTotp") {
     return (

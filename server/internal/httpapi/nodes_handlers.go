@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -909,6 +910,40 @@ func (a *API) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if req.ParentID != nil {
+			destParent := strings.TrimSpace(*req.ParentID)
+			oldTarget := filepath.Clean(mountPath)
+			destCanonical, _, _, destMount, err := a.resolveDatasetTarget(r.Context(), destParent)
+			if err != nil {
+				a.fail(w, r, err)
+				return
+			}
+			destRole, accessErr := a.checkDatasetAccess(r, destCanonical, true)
+			if accessErr != nil {
+				writeJSON(w, http.StatusForbidden, map[string]any{"error": accessErr.Error()})
+				return
+			}
+			fileName := filepath.Base(oldTarget)
+			newTarget := filepath.Clean(filepath.Join(destMount, fileName))
+			if err := os.Rename(oldTarget, newTarget); err != nil {
+				if copyErr := copyPathRecursive(oldTarget, newTarget); copyErr != nil {
+					a.fail(w, r, copyErr)
+					return
+				}
+				_ = os.RemoveAll(oldTarget)
+			}
+			newCanonical := filepath.ToSlash(filepath.Join(destCanonical, fileName))
+			newCanonical = strings.TrimPrefix(newCanonical, "/")
+			invalidateAllCaches()
+			writeJSON(w, http.StatusOK, nodeDTO{
+				ID:        fmt.Sprintf("dataset:%s", newCanonical),
+				ParentID:  destParent,
+				Name:      fileName,
+				Role:      destRole,
+				UpdatedAt: time.Now().UnixMilli(),
+			})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 		return
 	}
@@ -1224,6 +1259,33 @@ func (a *API) handleMediaNodes(w http.ResponseWriter, r *http.Request, userID st
 		}
 	}
 
+	// 2. Phân quyền nghiêm ngặt cho người dùng bị giới hạn danh mục (userRoots)
+	if !hasFullRoot && len(userRoots) > 0 {
+		var permitted []nodeDTO
+		for _, n := range mediaNodes {
+			itemPath := ""
+			if strings.HasPrefix(n.ID, "dataset:") {
+				itemPath = strings.TrimPrefix(n.ID, "dataset:")
+			} else if strings.HasPrefix(n.ParentID, "dataset:") {
+				itemPath = strings.TrimPrefix(n.ParentID, "dataset:") + "/" + n.Name
+			}
+			normItem := strings.ToLower(filepath.ToSlash(filepath.Clean("/" + itemPath)))
+			match := false
+			for _, ur := range userRoots {
+				normRoot := strings.ToLower(filepath.ToSlash(filepath.Clean("/" + ur)))
+				cleanRoot := strings.Trim(normRoot, "/")
+				if normItem == normRoot || strings.HasPrefix(normItem, normRoot+"/") || strings.Contains(normItem, "/"+cleanRoot+"/") {
+					match = true
+					break
+				}
+			}
+			if match {
+				permitted = append(permitted, n)
+			}
+		}
+		mediaNodes = permitted
+	}
+
 	// Lọc theo tìm kiếm
 	var filtered []nodeDTO
 	qLower := strings.ToLower(opts.Query)
@@ -1378,67 +1440,68 @@ func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter s
 			addDatasetRootTarget(root, role)
 		}
 
-		// 2. Quét toàn bộ các tập dữ liệu (datasets) trong CSDL mà tài khoản có quyền truy cập
-		dRows, err := a.db.Read().QueryContext(scanCtx,
-			`SELECT name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY name ASC`)
-		if err == nil {
-			defer dRows.Close()
-			for dRows.Next() {
-				var dName, dPool, dMount string
-				if err := dRows.Scan(&dName, &dPool, &dMount); err == nil {
-					role, accessErr := a.checkDatasetAccess(r, dName, false)
-					if accessErr != nil {
-						continue
-					}
-					realMount := a.resolveRealMountPath(dName, dMount)
-					if realMount != "" {
-						addMountTarget(dName, realMount, role)
-					}
-				}
-			}
-		}
-
-
-		// 6. Quét các thư mục chia sẻ mạng (network_shares) trong CSDL
-		sRows, sErr := a.db.Read().QueryContext(scanCtx, `SELECT name, path FROM network_shares WHERE status != 'deleted'`)
-		if sErr == nil {
-			defer sRows.Close()
-			for sRows.Next() {
-				var sName, sPath string
-				if sRows.Scan(&sName, &sPath) == nil {
-					role, accessErr := a.checkDatasetAccess(r, sName, false)
-					if accessErr == nil {
-						realP := a.resolveRealMountPath(sName, sPath)
-						if realP != "" {
-							addMountTarget(sName, realP, role)
+		if hasFullRoot {
+			// 2. Quét toàn bộ các tập dữ liệu (datasets) trong CSDL mà tài khoản có quyền truy cập
+			dRows, err := a.db.Read().QueryContext(scanCtx,
+				`SELECT name, pool, mount FROM datasets WHERE status != 'deleted' ORDER BY name ASC`)
+			if err == nil {
+				defer dRows.Close()
+				for dRows.Next() {
+					var dName, dPool, dMount string
+					if err := dRows.Scan(&dName, &dPool, &dMount); err == nil {
+						role, accessErr := a.checkDatasetAccess(r, dName, false)
+						if accessErr != nil {
+							continue
+						}
+						realMount := a.resolveRealMountPath(dName, dMount)
+						if realMount != "" {
+							addMountTarget(dName, realMount, role)
 						}
 					}
 				}
 			}
-		}
 
-		// 7. Quét các thư viện lưu trữ (libraries)
-		if a.libs != nil {
-			if libList, lErr := a.libs.List(scanCtx); lErr == nil {
-				for _, lib := range libList {
-					if lib.Online() && lib.RootPath != "" {
-						role := "viewer"
-						if hasFullRoot {
-							role = "admin"
+			// 6. Quét các thư mục chia sẻ mạng (network_shares) trong CSDL
+			sRows, sErr := a.db.Read().QueryContext(scanCtx, `SELECT name, path FROM network_shares WHERE status != 'deleted'`)
+			if sErr == nil {
+				defer sRows.Close()
+				for sRows.Next() {
+					var sName, sPath string
+					if sRows.Scan(&sName, &sPath) == nil {
+						role, accessErr := a.checkDatasetAccess(r, sName, false)
+						if accessErr == nil {
+							realP := a.resolveRealMountPath(sName, sPath)
+							if realP != "" {
+								addMountTarget(sName, realP, role)
+							}
 						}
-						addMountTarget("library:"+lib.ID, lib.RootPath, role)
 					}
 				}
 			}
-		}
 
-		// 8. Quét Virtual Drive folder nếu có (trên Windows / client server)
-		if vdf := files.GetVirtualDriveFolder(); vdf != "" {
-			role := "viewer"
-			if hasFullRoot {
-				role = "admin"
+			// 7. Quét các thư viện lưu trữ (libraries)
+			if a.libs != nil {
+				if libList, lErr := a.libs.List(scanCtx); lErr == nil {
+					for _, lib := range libList {
+						if lib.Online() && lib.RootPath != "" {
+							role := "viewer"
+							if hasFullRoot {
+								role = "admin"
+							}
+							addMountTarget("library:"+lib.ID, lib.RootPath, role)
+						}
+					}
+				}
 			}
-			addMountTarget("localdrive", vdf, role)
+
+			// 8. Quét Virtual Drive folder nếu có (trên Windows / client server)
+			if vdf := files.GetVirtualDriveFolder(); vdf != "" {
+				role := "viewer"
+				if hasFullRoot {
+					role = "admin"
+				}
+				addMountTarget("localdrive", vdf, role)
+			}
 		}
 
 		// Tối ưu hóa: Loại bỏ các target con nếu target cha đã có trong danh sách
@@ -1557,6 +1620,32 @@ func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter s
 				}
 				scannedNodes = append(scannedNodes, v)
 			}
+		}
+
+		if !hasFullRoot && len(userRoots) > 0 {
+			var permitted []nodeDTO
+			for _, n := range scannedNodes {
+				itemPath := ""
+				if strings.HasPrefix(n.ID, "dataset:") {
+					itemPath = strings.TrimPrefix(n.ID, "dataset:")
+				} else if strings.HasPrefix(n.ParentID, "dataset:") {
+					itemPath = strings.TrimPrefix(n.ParentID, "dataset:") + "/" + n.Name
+				}
+				normItem := strings.ToLower(filepath.ToSlash(filepath.Clean("/" + itemPath)))
+				match := false
+				for _, ur := range userRoots {
+					normRoot := strings.ToLower(filepath.ToSlash(filepath.Clean("/" + ur)))
+					cleanRoot := strings.Trim(normRoot, "/")
+					if normItem == normRoot || strings.HasPrefix(normItem, normRoot+"/") || strings.Contains(normItem, "/"+cleanRoot+"/") {
+						match = true
+						break
+					}
+				}
+				if match {
+					permitted = append(permitted, n)
+				}
+			}
+			scannedNodes = permitted
 		}
 
 		// Pre-sort once by UpdatedAt desc so standard requests have 0 sorting overhead
@@ -1902,4 +1991,248 @@ func (a *API) handleActivity(w http.ResponseWriter, r *http.Request) {
 		"has_more":    hasMore,
 		"next_cursor": nextCursor,
 	})
+}
+
+func copyPathRecursive(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		if err := os.MkdirAll(dst, 0755); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(src)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			srcSub := filepath.Join(src, e.Name())
+			dstSub := filepath.Join(dst, e.Name())
+			if err := copyPathRecursive(srcSub, dstSub); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	sFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sFile.Close()
+	dFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer dFile.Close()
+	_, err = io.Copy(dFile, sFile)
+	return err
+}
+
+type copyNodeRequest struct {
+	NodeID   string  `json:"node_id"`
+	ParentID string  `json:"parent_id"`
+	Name     *string `json:"name"`
+}
+
+func (a *API) handleCopyNode(w http.ResponseWriter, r *http.Request) {
+	var req copyNodeRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	nodeID := req.NodeID
+	if nodeID == "" {
+		nodeID = a.extractNodeID(r, "")
+	}
+	if nodeID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "node_id is required")
+		return
+	}
+	targetParentID := strings.TrimSpace(req.ParentID)
+	userID, ip := caller(r)
+
+	// 1. Dataset item copy
+	if strings.HasPrefix(nodeID, "dataset:") {
+		srcCanonical, _, _, srcMount, err := a.resolveDatasetTarget(r.Context(), nodeID)
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		_, err = a.checkDatasetAccess(r, srcCanonical, false)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
+			return
+		}
+		destCanonical, _, _, destMount, dErr := a.resolveDatasetTarget(r.Context(), targetParentID)
+		if dErr != nil {
+			a.fail(w, r, dErr)
+			return
+		}
+		destRole, dErr := a.checkDatasetAccess(r, destCanonical, true)
+		if dErr != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": dErr.Error()})
+			return
+		}
+		fileName := filepath.Base(srcMount)
+		if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
+			fileName = strings.TrimSpace(*req.Name)
+		}
+		newTarget := filepath.Clean(filepath.Join(destMount, fileName))
+		if _, statErr := os.Stat(newTarget); statErr == nil {
+			ext := filepath.Ext(fileName)
+			base := strings.TrimSuffix(fileName, ext)
+			newTarget = filepath.Clean(filepath.Join(destMount, fmt.Sprintf("%s - Copy%s", base, ext)))
+			fileName = filepath.Base(newTarget)
+		}
+		if err := copyPathRecursive(srcMount, newTarget); err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		newCanonical := filepath.ToSlash(filepath.Join(destCanonical, fileName))
+		newCanonical = strings.TrimPrefix(newCanonical, "/")
+		invalidateAllCaches()
+		writeJSON(w, http.StatusCreated, nodeDTO{
+			ID:        fmt.Sprintf("dataset:%s", newCanonical),
+			ParentID:  targetParentID,
+			Name:      fileName,
+			Role:      destRole,
+			CreatedAt: time.Now().UnixMilli(),
+			UpdatedAt: time.Now().UnixMilli(),
+		})
+		return
+	}
+
+	// 2. Database node copy
+	srcNode, err := a.files.GetNode(r.Context(), nodeID)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	newName := srcNode.Name
+	if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
+		newName = strings.TrimSpace(*req.Name)
+	}
+	if targetParentID == srcNode.ParentID && (req.Name == nil || *req.Name == "") {
+		ext := filepath.Ext(newName)
+		base := strings.TrimSuffix(newName, ext)
+		newName = fmt.Sprintf("%s - Copy%s", base, ext)
+	}
+
+	if srcNode.Type == models.NodeFolder {
+		newFolder, fErr := a.files.CreateFolder(r.Context(), files.CreateFolderParams{
+			UserID: userID, ParentID: targetParentID, Name: newName, Color: srcNode.Color, IP: ip,
+		})
+		if fErr != nil {
+			a.fail(w, r, fErr)
+			return
+		}
+		invalidateAllCaches()
+		writeJSON(w, http.StatusCreated, plainNode(newFolder))
+		return
+	}
+
+	f, _, err := a.files.OpenNodeBytes(srcNode)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	defer f.Close()
+
+	tmp, err := os.CreateTemp("", "localdrive-copy-*")
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	defer os.Remove(tmp.Name())
+	h := sha256.New()
+	wtr := io.MultiWriter(tmp, h)
+	nBytes, err := io.Copy(wtr, f)
+	tmp.Close()
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	cSum := fmt.Sprintf("%x", h.Sum(nil))
+
+	newNode, err := a.files.CommitUpload(r.Context(), files.CommitUploadParams{
+		UserID: userID, ParentID: targetParentID, Name: newName, Size: nBytes,
+		MimeType: srcNode.MimeType, Checksum: cSum, TempPath: tmp.Name(), IP: ip,
+	})
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	invalidateAllCaches()
+	writeJSON(w, http.StatusCreated, plainNode(newNode))
+}
+
+type moveNodeRequest struct {
+	NodeID   string `json:"node_id"`
+	ParentID string `json:"parent_id"`
+}
+
+func (a *API) handleMoveNode(w http.ResponseWriter, r *http.Request) {
+	var req moveNodeRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	nodeID := strings.TrimSpace(req.NodeID)
+	if nodeID == "" {
+		nodeID = a.extractNodeID(r, "")
+	}
+	if nodeID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "node_id is required")
+		return
+	}
+	targetParentID := strings.TrimSpace(req.ParentID)
+	userID, ip := caller(r)
+
+	if strings.HasPrefix(nodeID, "dataset:") {
+		_, _, _, mountPath, err := a.resolveDatasetTarget(r.Context(), nodeID)
+		if err != nil {
+			a.fail(w, r, err)
+			return
+		}
+		oldTarget := filepath.Clean(mountPath)
+		destCanonical, _, _, destMount, dErr := a.resolveDatasetTarget(r.Context(), targetParentID)
+		if dErr != nil {
+			a.fail(w, r, dErr)
+			return
+		}
+		destRole, accessErr := a.checkDatasetAccess(r, destCanonical, true)
+		if accessErr != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": accessErr.Error()})
+			return
+		}
+		fileName := filepath.Base(oldTarget)
+		newTarget := filepath.Clean(filepath.Join(destMount, fileName))
+		if err := os.Rename(oldTarget, newTarget); err != nil {
+			if copyErr := copyPathRecursive(oldTarget, newTarget); copyErr != nil {
+				a.fail(w, r, copyErr)
+				return
+			}
+			_ = os.RemoveAll(oldTarget)
+		}
+		newCanonical := filepath.ToSlash(filepath.Join(destCanonical, fileName))
+		newCanonical = strings.TrimPrefix(newCanonical, "/")
+		invalidateAllCaches()
+		writeJSON(w, http.StatusOK, nodeDTO{
+			ID:        fmt.Sprintf("dataset:%s", newCanonical),
+			ParentID:  targetParentID,
+			Name:      fileName,
+			Role:      destRole,
+			UpdatedAt: time.Now().UnixMilli(),
+		})
+		return
+	}
+
+	node, err := a.files.Move(r.Context(), files.MoveParams{
+		UserID: userID, NodeID: nodeID, ParentID: targetParentID, IP: ip,
+	})
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	invalidateAllCaches()
+	writeJSON(w, http.StatusOK, plainNode(node))
 }

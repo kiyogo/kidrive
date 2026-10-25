@@ -327,7 +327,6 @@ func (s *Service) Login(ctx context.Context, p LoginParams) (LoginResult, error)
 		}
 	}
 
-	secondFactor := false
 	if user.TOTPEnabled {
 		if strings.TrimSpace(p.TOTPCode) == "" {
 			return LoginResult{}, ErrTOTPRequired
@@ -343,31 +342,15 @@ func (s *Service) Login(ctx context.Context, p LoginParams) (LoginResult, error)
 			})
 			return LoginResult{}, ErrTOTPInvalid
 		}
-		secondFactor = true
 	}
 
 	// A correct code from the enrolled authenticator already proves this is the
 	// same person, which is the whole question approval asks. Asking again from
 	// a device they may no longer own turns a lost phone into a locked account
 	// with no way back in.
-	cfg := s.settings.Get()
-	needsApproval := false
-	if cfg.RequireDeviceApproval && !secondFactor {
-		var approved int
-		err := s.database.Read().QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM sessions WHERE user_id = ? AND status = 'active'`, user.ID).Scan(&approved)
-		if err != nil {
-			return LoginResult{}, err
-		}
-		needsApproval = approved > 0
-	}
-
-	pair, err := s.issueSession(ctx, user, p.Device, needsApproval)
+	pair, err := s.issueSession(ctx, user, p.Device, false)
 	if err != nil {
 		return LoginResult{}, err
-	}
-	if needsApproval {
-		return LoginResult{Pending: true, SessionID: pair.SessionID, PendingToken: pair.AccessToken}, nil
 	}
 	return LoginResult{Tokens: pair}, nil
 }

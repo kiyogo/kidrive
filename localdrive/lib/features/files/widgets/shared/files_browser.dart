@@ -7,6 +7,7 @@ import '../../../offline/controller/offline_controller.dart';
 import '../../../../imports.dart';
 import '../../controller/files_controller.dart';
 import '../../models/node_model.dart';
+import '../../providers/clipboard_provider.dart';
 import '../../providers/files_providers.dart';
 import '../desktop/draggable_node.dart';
 import '../desktop/marquee_selection.dart';
@@ -299,6 +300,7 @@ Future<void> _showCanvasMenu(
   final isBrowse = query.filter == NodeFilter.none && query.query.isEmpty;
   final viewMode = ref.read(viewModeProvider);
   final isGrid = viewMode == ViewMode.grid;
+  final clipboard = ref.read(fileClipboardProvider);
 
   final actions = <LdMenuAction>[
     if (isBrowse) ...<LdMenuAction>[
@@ -311,6 +313,12 @@ Future<void> _showCanvasMenu(
         id: 'upload',
         label: l10n.upload,
         glyph: LdGlyph.upload,
+      ),
+      LdMenuAction(
+        id: 'paste',
+        label: 'Dán',
+        glyph: LdGlyph.file,
+        enabled: clipboard != null && clipboard.nodes.isNotEmpty,
       ),
     ],
     LdMenuAction(
@@ -350,6 +358,37 @@ Future<void> _showCanvasMenu(
       await showNewFolderSheet(context, ref, parentId: query.parentId);
     case 'upload':
       await pickAndUpload(context, ref, query.parentId);
+    case 'paste':
+      final cb = ref.read(fileClipboardProvider);
+      if (cb != null && cb.nodes.isNotEmpty) {
+        final db = ref.read(filesDbProvider);
+        try {
+          final targetId = query.parentId;
+          for (final item in cb.nodes) {
+            if (cb.action == ClipboardAction.cut) {
+              await db.moveNodeTo(item.id, targetId);
+            } else {
+              await db.copyNode(item.id, targetId);
+            }
+          }
+          if (cb.action == ClipboardAction.cut) {
+            ref.read(fileClipboardProvider.notifier).clear();
+          }
+          ref.invalidate(folderProvider(query));
+          if (context.mounted) {
+            LdToast.success(
+              context,
+              cb.action == ClipboardAction.cut
+                  ? 'Đã chuyển thành công!'
+                  : 'Đã dán thành công!',
+            );
+          }
+        } catch (e) {
+          if (context.mounted) {
+            LdToast.error(context, e.toString());
+          }
+        }
+      }
     case 'view_mode':
       ref.read(viewModeProvider.notifier).toggle();
     case 'sort':
@@ -375,7 +414,7 @@ void activateNode(
   List<NodeModel> ordered,
 ) {
   if (!desktopBehaviour(context)) {
-    openNode(context, ref, node);
+    openNode(context, ref, node, ordered);
     return;
   }
 
@@ -403,7 +442,7 @@ void activateNode(
   }
 
   if (_DoubleClick.isSecond(node.id)) {
-    openNode(context, ref, node);
+    openNode(context, ref, node, ordered);
     return;
   }
   selection.only(node.id);
@@ -421,28 +460,41 @@ abstract final class _DoubleClick {
   static String _id = '';
   static int _at = 0;
 
-  /// the platform double click time on Windows, and close enough elsewhere
-  static const _window = 400;
+  /// double click time window (650ms for Windows responsiveness)
+  static const _window = 650;
 
   static bool isSecond(String id) {
     final now = DateTime.now().millisecondsSinceEpoch;
     final again = _id == id && now - _at < _window;
-    _id = id;
-    _at = now;
+    if (again) {
+      _id = '';
+      _at = 0;
+    } else {
+      _id = id;
+      _at = now;
+    }
     return again;
   }
 }
 
 /// Opening a folder navigates; opening a photo goes to the photo viewer;
 /// other files go to the preview screen.
-void openNode(BuildContext context, WidgetRef ref, NodeModel node) {
+void openNode(
+  BuildContext context,
+  WidgetRef ref,
+  NodeModel node, [
+  List<NodeModel>? scopedList,
+]) {
   ref.read(selectionProvider.notifier).clear();
   if (node.isFolder) {
     context.go(Routes.folder(node.id));
     return;
   }
   if (node.category == FileCategory.image) {
-    context.push(Routes.photo(node.id));
+    final imageNodes = scopedList
+        ?.where((n) => n.category == FileCategory.image)
+        .toList();
+    context.push(Routes.photo(node.id), extra: imageNodes);
     return;
   }
   context.push(Routes.previewOf(node.id));
@@ -507,6 +559,34 @@ class SelectionActionBar extends ConsumerWidget {
             child: const Padding(
               padding: EdgeInsets.all(6),
               child: LdIcon(LdGlyph.more, size: 18),
+            ),
+          ),
+        ],
+        if (chosen.length > 1) ...<Widget>[
+          const SizedBox(width: 4),
+          LdTappable(
+            onTap: () {
+              ref.read(fileClipboardProvider.notifier).cut(chosen);
+              LdToast.success(context, 'Đã cắt ${chosen.length} mục vào bộ nhớ tạm');
+              ref.read(selectionProvider.notifier).clear();
+            },
+            borderRadius: BorderRadius.circular(20),
+            child: const Padding(
+              padding: EdgeInsets.all(6),
+              child: LdIcon(LdGlyph.move, size: 18),
+            ),
+          ),
+          const SizedBox(width: 4),
+          LdTappable(
+            onTap: () {
+              ref.read(fileClipboardProvider.notifier).copy(chosen);
+              LdToast.success(context, 'Đã sao chép ${chosen.length} mục vào bộ nhớ tạm');
+              ref.read(selectionProvider.notifier).clear();
+            },
+            borderRadius: BorderRadius.circular(20),
+            child: const Padding(
+              padding: EdgeInsets.all(6),
+              child: LdIcon(LdGlyph.copy, size: 18),
             ),
           ),
         ],

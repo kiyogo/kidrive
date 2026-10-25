@@ -750,57 +750,6 @@ function DevicesSection({ onBack, embedded }: { onBack?: () => void; embedded?: 
         <EmptyState glyph="device" title={t.emptyDevicesTitle} message={t.settingsRequireApprovalNote} />
       ) : (
         <>
-          {pending.length > 0 && (
-            <div style={{ marginBottom: 20 }}>
-              <div
-                style={{
-                  padding: "4px 8px 4px 10px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: "var(--fg-secondary)",
-                }}
-              >
-                {t.devicesPendingSection}
-              </div>
-              <SettingGroup>
-                {pending.map((d, i) => (
-                  <SettingRow
-                    key={d.id}
-                    showDivider={i > 0}
-                    glyph="device"
-                    label={d.device_name}
-                    description={`${d.platform} ${d.ip || ""}`}
-                    trailing={
-                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <Button
-                          label={t.approve}
-                          compact
-                          expand={false}
-                          onClick={async () => {
-                            await api.post(`${Api.devices}/${d.id}/approve`, {});
-                            toast(t.devicesApprovedToast, "success");
-                            void load();
-                          }}
-                        />
-                        <Button
-                          label={t.deny}
-                          variant="secondary"
-                          compact
-                          expand={false}
-                          onClick={async () => {
-                            await api.post(`${Api.devices}/${d.id}/deny`, {});
-                            toast(t.devicesDeniedToast, "error");
-                            void load();
-                          }}
-                        />
-                      </div>
-                    }
-                  />
-                ))}
-              </SettingGroup>
-            </div>
-          )}
-
           <SettingGroup>
             {active.map((d, i) => (
               <SettingRow
@@ -891,19 +840,6 @@ function ServerSection({ onBack, embedded }: { onBack?: () => void; embedded?: b
     <Page title={t.settingsServer} onBack={onBack} embedded={embedded}>
       <SettingGroup title={t.settingsServer}>
         <SettingRow
-          label={t.settingsRequireApproval}
-          description={t.settingsRequireApprovalNote}
-          glyph="device"
-          onTap={() => void apply({ require_device_approval: !(current.require_device_approval ?? false) })}
-          trailing={
-            <Switch
-              value={current.require_device_approval ?? false}
-              onChange={(v) => void apply({ require_device_approval: v })}
-            />
-          }
-        />
-        <SettingRow
-          showDivider
           label={t.settingsLanDiscovery}
           description={t.settingsLanDiscoveryNote}
           glyph="wifi"

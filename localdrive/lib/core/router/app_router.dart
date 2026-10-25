@@ -68,8 +68,7 @@ final routerProvider = Provider<GoRouter>((ref) {
               ? null
               : Routes.welcome,
         SessionStage.signedOut => onboarding ? null : Routes.signIn,
-        SessionStage.pendingApproval =>
-          location == Routes.pendingApproval ? null : Routes.pendingApproval,
+        SessionStage.pendingApproval => Routes.signIn,
         SessionStage.mustEnableTotp => Routes.files,
         SessionStage.mustChangePassword =>
           location == Routes.changePassword ? null : Routes.changePassword,
@@ -150,7 +149,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '${Routes.image}/${Routes.pattern('id')}',
         pageBuilder: (context, state) => _fade(
           state,
-          PhotoViewerPage(nodeId: state.pathParameters['id'] ?? ''),
+          PhotoViewerPage(
+            nodeId: state.pathParameters['id'] ?? '',
+            scopedNodes: state.extra is List<NodeModel>
+                ? (state.extra as List<NodeModel>)
+                : null,
+          ),
         ),
       ),
       GoRoute(

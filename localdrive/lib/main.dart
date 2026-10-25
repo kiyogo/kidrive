@@ -33,8 +33,8 @@ Future<void> main() async {
 
   // Prevent WebGL texture cache thrashing and black rectangles in CanvasKit
   // when viewing high-resolution gallery grids and file lists.
-  PaintingBinding.instance.imageCache.maximumSizeBytes = 512 << 20; // 512 MB
-  PaintingBinding.instance.imageCache.maximumSize = 1000;
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 1024 << 20; // 1 GB
+  PaintingBinding.instance.imageCache.maximumSize = 10000;
 
   // Disables the browser's default right-click context menu on web so the app's
   // own file actions menu appears cleanly without being obscured.

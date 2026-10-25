@@ -714,17 +714,44 @@ func syncSystemNetworkShare(name string, path string, readOnly bool, guestOk boo
 	cfgContent := fmt.Sprintf("# LocalDrive Auto-generated Share\npath=%s\ncomment=LocalDrive Network Share\nusershare_acl=%s\nguest_ok=y\n", trimmedPath, uAcl)
 	_ = os.WriteFile(usershareFile, []byte(cfgContent), 0644)
 
-	// 4. Ensure firewall allows Samba ports (445, 139)
+	// 4. Ensure datasets are linked into the share folder so it's never empty
+	if strings.EqualFold(trimmedName, "KiyoVN") || strings.Contains(strings.ToLower(trimmedPath), "kiyovn") {
+		ensureDatasetsLinkedToShare(trimmedPath)
+	}
+
+	// 5. Ensure firewall allows Samba ports (445, 139)
 	_ = exec.Command("ufw", "allow", "445/tcp").Run()
 	_ = exec.Command("ufw", "allow", "139/tcp").Run()
 	_ = exec.Command("ufw", "allow", "137:138/udp").Run()
 
-	// 5. Reload Samba service
+	// 6. Reload Samba service
 	_ = exec.Command("smbcontrol", "smbd", "reload-config").Run()
 	_ = exec.Command("systemctl", "reload", "smbd").Run()
 	_ = exec.Command("systemctl", "restart", "smbd").Run()
 
 	return nil
+}
+
+func ensureDatasetsLinkedToShare(sharePath string) {
+	_ = os.MkdirAll(sharePath, 0777)
+	datasets := []string{"1DATA", "DaoKy_5", "Long_4", "NgLoc_6", "NgSon_1"}
+	roots := []string{"/DATA/KiyoVN", "/mnt/DATA/KiyoVN", "/DATA", "/mnt/DATA", "/mnt/DỮ LIỆU", "/mnt/zfs-recovery"}
+	for _, ds := range datasets {
+		targetLink := filepath.Join(sharePath, ds)
+		if fi, err := os.Stat(targetLink); err == nil && fi.IsDir() {
+			continue
+		}
+		for _, r := range roots {
+			cand := filepath.Join(r, ds)
+			if cfi, cErr := os.Stat(cand); cErr == nil && cfi.IsDir() {
+				_ = os.Remove(targetLink)
+				_ = os.Symlink(cand, targetLink)
+				_ = os.MkdirAll(targetLink, 0777)
+				_ = exec.Command("mount", "--bind", cand, targetLink).Run()
+				break
+			}
+		}
+	}
 }
 
 func removeSystemNetworkShare(name string) {
@@ -2161,7 +2188,26 @@ func (a *API) checkDatasetAccess(r *http.Request, datasetName string, needEditor
 		return "", errors.New("unauthorized")
 	}
 	if user.Role == models.RoleAdmin {
-		return "editor", nil
+		// If admin user has specific dataset_permissions configured (and not "/" or "*"), enforce them!
+		if user.DatasetPermissions != "" && user.DatasetPermissions != "{}" {
+			var perms map[string]any
+			if err := json.Unmarshal([]byte(user.DatasetPermissions), &perms); err == nil {
+				hasSlashOrStar := false
+				if rootPerm, exists := perms["/"]; exists && rootPerm != nil && rootPerm != "none" {
+					hasSlashOrStar = true
+				}
+				if starPerm, exists := perms["*"]; exists && starPerm != nil && starPerm != "none" {
+					hasSlashOrStar = true
+				}
+				if len(perms) == 0 || hasSlashOrStar {
+					return "editor", nil
+				}
+			} else {
+				return "editor", nil
+			}
+		} else {
+			return "editor", nil
+		}
 	}
 
 	normName := strings.ToLower(strings.TrimSpace(datasetName))
