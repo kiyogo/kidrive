@@ -242,17 +242,6 @@ Win32Window::MessageHandler(HWND hwnd,
       }
       return 0;
     }
-    case WM_SHOWWINDOW: {
-      if (wparam) {
-        RECT rect = GetClientArea();
-        if (child_content_ != nullptr) {
-          MoveWindow(child_content_, rect.left, rect.top, rect.right - rect.left,
-                     rect.bottom - rect.top, TRUE);
-          InvalidateRect(child_content_, nullptr, TRUE);
-        }
-      }
-      return 0;
-    }
 
     case WM_ACTIVATE:
       if (child_content_ != nullptr) {

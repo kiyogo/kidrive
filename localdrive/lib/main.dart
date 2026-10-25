@@ -79,7 +79,9 @@ Future<void> main() async {
   );
 
   // The desktop window starts hidden so there is no flash of default chrome.
-  DesktopShellService.showWindow();
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    DesktopShellService.showWindow();
+  });
 }
 
 Future<void> _lockOrientations() async {

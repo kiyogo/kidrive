@@ -58,18 +58,6 @@ class DesktopShellService with TrayListener {
         ..alignment = Alignment.center
         ..title = 'Local Drive'
         ..show();
-
-      // Force layout ticks across consecutive frames so the engine paints the screen and swaps ANGLE/DirectX buffers
-      Future<void>.delayed(const Duration(milliseconds: 60), () {
-        if (appWindow.size.width > 0) {
-          appWindow.size = Size(initial.width + 1, initial.height);
-        }
-      });
-      Future<void>.delayed(const Duration(milliseconds: 180), () {
-        if (appWindow.size.width > 0) {
-          appWindow.size = initial;
-        }
-      });
     });
   }
 

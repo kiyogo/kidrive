@@ -17,6 +17,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows/registry"
 
@@ -30,6 +31,8 @@ import (
 var (
 	shell32            = syscall.NewLazyDLL("shell32.dll")
 	procSHChangeNotify = shell32.NewProc("SHChangeNotify")
+	kernel32           = syscall.NewLazyDLL("kernel32.dll")
+	procDefineDosDevice = kernel32.NewProc("DefineDosDeviceW")
 
 	knownDiskMu    sync.Mutex
 	knownDiskItems = make(map[string]bool)
@@ -82,6 +85,24 @@ func setFileHiddenAndSystem(path string) error {
 		return syscall.SetFileAttributes(pUtf16, 0x02|0x04)
 	}
 	return err
+}
+
+func setFileOffline(path string) error {
+	pUtf16, err := syscall.UTF16PtrFromString(path)
+	if err == nil {
+		return syscall.SetFileAttributes(pUtf16, 0x1000|0x20)
+	}
+	return err
+}
+
+func setFolderCloudIcon(folderPath string) {
+	iniPath := filepath.Join(folderPath, "desktop.ini")
+	if _, err := os.Stat(iniPath); os.IsNotExist(err) {
+		iniContent := "[.ShellClassInfo]\r\nIconResource=%SystemRoot%\\system32\\imageres.dll,238\r\nConfirmFileOp=0\r\n[ViewState]\r\nMode=\r\nVid=\r\nFolderType=Generic\r\n"
+		_ = os.WriteFile(iniPath, []byte(iniContent), 0o644)
+		_ = setFileHiddenAndSystem(iniPath)
+		_ = setFileReadOnly(folderPath)
+	}
 }
 
 func findAppIcon(vDrive string) string {
@@ -141,7 +162,10 @@ func ensureDriveKRegistry(vDrive string) {
 	}
 
 	if targetFolder != "" && targetFolder != `K:\` {
-		// 3. Mount drive K: via subst
+		// 3. Mount drive K: via DefineDosDevice and subst
+		devPtr, _ := syscall.UTF16PtrFromString("K:")
+		tgtPtr, _ := syscall.UTF16PtrFromString(targetFolder)
+		_, _, _ = procDefineDosDevice.Call(0, uintptr(unsafe.Pointer(devPtr)), uintptr(unsafe.Pointer(tgtPtr)))
 		_ = exec.Command("cmd.exe", "/c", "subst K: /D 2>nul").Run()
 		_ = exec.Command("cmd.exe", "/c", fmt.Sprintf(`subst K: "%s"`, targetFolder)).Run()
 
@@ -399,6 +423,7 @@ func (s *Service) syncFromVirtualDrive(ctx context.Context, vDrive string, lastQ
 			relKey := filepath.Join(rel...)
 			if node.Type == models.NodeFolder {
 				_ = os.MkdirAll(diskPath, 0o755)
+				setFolderCloudIcon(diskPath)
 				diskItems[relKey] = true
 				knownDiskItems[relKey] = true
 			} else if node.Type == models.NodeFile && node.ChecksumSHA256 != "" {
@@ -411,6 +436,7 @@ func (s *Service) syncFromVirtualDrive(ctx context.Context, vDrive string, lastQ
 					if _, statErr := os.Stat(targetObj); statErr == nil {
 						_ = os.MkdirAll(filepath.Dir(diskPath), 0o755)
 						if err := storage.LinkOrCopy(targetObj, diskPath); err == nil {
+							_ = setFileOffline(diskPath)
 							diskItems[relKey] = true
 							knownDiskItems[relKey] = true
 						}

@@ -78,6 +78,9 @@ Root: HKCU; Subkey: "Software\Classes\Applications\Explorer.exe\DriveIcons\K\Def
 procedure SHChangeNotify(wEventId: LongInt; uFlags: Cardinal; dwItem1, dwItem2: LongInt);
   external 'SHChangeNotify@shell32.dll stdcall';
 
+function DefineDosDeviceW(dwFlags: DWORD; lpDeviceName: String; lpTargetPath: String): Boolean;
+  external 'DefineDosDeviceW@kernel32.dll stdcall';
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   NetFolder, OldNetFolder, IniFile, IniContent, TargetDir: string;
@@ -113,6 +116,7 @@ begin
       Exec('attrib', '+h +s "' + IniFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
       // Mount Drive K:
+      DefineDosDeviceW(0, 'K:', TargetDir);
       Exec('cmd.exe', '/c subst K: /D 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       Exec('cmd.exe', '/c subst K: "' + TargetDir + '" 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
