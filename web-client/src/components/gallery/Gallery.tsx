@@ -160,7 +160,7 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
             {t.gallery}
           </h1>
           <div style={{ fontSize: 13, color: "var(--fg-secondary)", marginTop: 2 }}>
-            {t.gallerySummary({ photos: count, videos: 0 })}
+            {nodes !== null ? t.gallerySummary({ photos: count, videos: 0 }) : " "}
           </div>
         </div>
 

@@ -241,6 +241,25 @@ export function Preview({
     }
   };
 
+  // Reliable video load and autoplay initialization on node switch
+  useEffect(() => {
+    if (category === "video" && videoRef.current) {
+      const v = videoRef.current;
+      v.load();
+      const p = v.play();
+      if (p !== undefined) {
+        p.then(() => {
+          setPlaying(true);
+          setHasError(false);
+          setIsBuffering(false);
+        }).catch((err) => {
+          console.warn("Autoplay was prevented by browser policy:", err);
+          setPlaying(false);
+        });
+      }
+    }
+  }, [category, node.id, src]);
+
   // Video controls helpers
   const togglePlay = () => {
     const v = videoRef.current;
@@ -1072,11 +1091,12 @@ function VideoScrubberBar({
   const commitSeek = useCallback((targetTime: number) => {
     const v = videoRef.current;
     if (!v) return;
-    if ((v as any).fastSeek) {
-      (v as any).fastSeek(targetTime);
-    } else {
+    try {
       v.currentTime = targetTime;
-    }
+      if ((v as any).fastSeek) {
+        (v as any).fastSeek(targetTime);
+      }
+    } catch {}
   }, [videoRef]);
 
   const seek = useCallback(
@@ -1138,13 +1158,18 @@ function VideoScrubberBar({
         ref={trackRef}
         style={{
           position: "relative",
-          height: 38,
-          padding: "10px 0",
-          margin: "-10px 0",
+          height: 56,
+          padding: "20px 0",
+          margin: "-20px 0 0",
           display: "flex",
           alignItems: "center",
           cursor: "pointer",
           touchAction: "none",
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          wakeControls();
+          seek(e.clientX, true);
         }}
         onPointerEnter={(e) => {
           setActive(true);

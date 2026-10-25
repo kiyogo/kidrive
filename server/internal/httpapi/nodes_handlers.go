@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -26,6 +25,7 @@ import (
 	"github.com/MultiX0/LocalDrive/server/internal/files"
 	mw "github.com/MultiX0/LocalDrive/server/internal/middleware"
 	"github.com/MultiX0/LocalDrive/server/internal/models"
+	"github.com/MultiX0/LocalDrive/server/internal/ws"
 )
 
 type dirListCacheEntry struct {
@@ -1183,14 +1183,44 @@ func (a *API) handleMediaNodes(w http.ResponseWriter, r *http.Request, userID st
 				bgCtx := mw.WithUser(context.Background(), u)
 				bgReq := r.Clone(bgCtx)
 				go func() {
-					_, _ = a.scanAndCacheMediaNodes(bgReq, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
+					scanned, err := a.scanAndCacheMediaNodes(bgReq, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
+					if err == nil && len(scanned) > len(mediaNodes) {
+						a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
+					}
 				}()
 			}
 		}
 	} else {
-		scanned, err := a.scanAndCacheMediaNodes(r, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
-		if err == nil {
-			mediaNodes = scanned
+		// Fast SQLite query: Returns in <2ms!
+		dbList, dbErr := a.files.List(r.Context(), userID, files.ListOptions{
+			Filter:   opts.Filter,
+			Limit:    100000,
+			AllUsers: hasFullRoot,
+		})
+		if dbErr == nil {
+			isImg := opts.Filter == "image" || opts.Filter == "images" || opts.Filter == "gallery"
+			for _, v := range nodeViews(dbList, userID) {
+				if !isImg && (strings.HasSuffix(strings.ToLower(v.Name), ".ts") || strings.HasSuffix(strings.ToLower(v.Name), ".tsx")) {
+					continue
+				}
+				mediaNodes = append(mediaNodes, v)
+			}
+		}
+		sort.Slice(mediaNodes, func(i, j int) bool {
+			return mediaNodes[i].UpdatedAt > mediaNodes[j].UpdatedAt
+		})
+		setCachedMediaList(cacheKey, mediaNodes)
+
+		// Launch background deep scan without blocking this HTTP request
+		if u, ok := mw.UserFrom(r.Context()); ok {
+			bgCtx := mw.WithUser(context.Background(), u)
+			bgReq := r.Clone(bgCtx)
+			go func() {
+				scanned, err := a.scanAndCacheMediaNodes(bgReq, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
+				if err == nil && len(scanned) > len(mediaNodes) {
+					a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
+				}
+			}()
 		}
 	}
 
@@ -1368,57 +1398,6 @@ func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter s
 			}
 		}
 
-		// 3. Quét toàn bộ các mảng lưu trữ (storage_pools) mà tài khoản có quyền
-		pRows, err := a.db.Read().QueryContext(scanCtx, `SELECT name FROM storage_pools WHERE status != 'deleted'`)
-		if err == nil {
-			defer pRows.Close()
-			for pRows.Next() {
-				var pName string
-				if err := pRows.Scan(&pName); err == nil {
-					role, accessErr := a.checkDatasetAccess(r, pName, false)
-					if accessErr != nil {
-						continue
-					}
-					realMount := a.resolveRealMountPath(pName, "/mnt/"+pName)
-					if realMount != "" {
-						addMountTarget(pName, realMount, role)
-					}
-				}
-			}
-		}
-
-		// 4. Nếu có công cụ OpenZFS, kiểm tra trực tiếp tất cả datasets thực tế đang mount trên hệ thống
-		if hasZFSTools() {
-			if out, err := exec.Command("zfs", "list", "-H", "-o", "name,mountpoint").Output(); err == nil {
-				scanner := bufio.NewScanner(strings.NewReader(string(out)))
-				for scanner.Scan() {
-					parts := strings.Split(scanner.Text(), "\t")
-					if len(parts) >= 2 {
-						zName := strings.TrimSpace(parts[0])
-						zMount := strings.TrimSpace(parts[1])
-						if zMount != "" && zMount != "none" && zMount != "legacy" && !strings.Contains(zMount, "zfs-recovery") {
-							role, accessErr := a.checkDatasetAccess(r, zName, false)
-							if accessErr == nil {
-								addMountTarget(zName, zMount, role)
-							}
-						}
-					}
-				}
-			}
-		}
-
-		// 5. Quét tất cả các thư mục có sẵn trong /mnt (TrueNAS / Linux mount point tiêu chuẩn)
-		if mntEntries, err := os.ReadDir("/mnt"); err == nil {
-			for _, me := range mntEntries {
-				if me.IsDir() {
-					mPath := filepath.Join("/mnt", me.Name())
-					role, accessErr := a.checkDatasetAccess(r, me.Name(), false)
-					if accessErr == nil {
-						addMountTarget(me.Name(), mPath, role)
-					}
-				}
-			}
-		}
 
 		// 6. Quét các thư mục chia sẻ mạng (network_shares) trong CSDL
 		sRows, sErr := a.db.Read().QueryContext(scanCtx, `SELECT name, path FROM network_shares WHERE status != 'deleted'`)
@@ -1498,7 +1477,7 @@ func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter s
 						return filepath.SkipDir
 					}
 					switch lowerName {
-					case "node_modules", ".git", ".next", ".cache", "dist-inno", "dist-installer", "release-installer", "release_assets", ".dart_tool", ".gradle", "windows-installer", "windows-app", "appdata", "windows", "program files", "program files (x86)", "programdata", "proc", "sys", "dev", "run", "var", "etc", "usr", "boot", "build", "bin", "obj", "intermediates", "target", "vendor", "dist":
+					case "node_modules", ".git", ".next", ".cache", "dist-inno", "dist-installer", "release-installer", "release_assets", ".dart_tool", ".gradle", "windows-installer", "windows-app", "appdata", "windows", "program files", "program files (x86)", "programdata", "proc", "sys", "dev", "run", "var", "etc", "usr", "boot", "build", "bin", "obj", "intermediates", "target", "vendor", "dist", "world", "region", "playerdata", "poi", "libraries", "logs", "backups", "backup", "tmp", "temp":
 						return filepath.SkipDir
 					}
 					return nil
@@ -1622,6 +1601,10 @@ func (a *API) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 		defer f.Close()
 		ext := strings.ToLower(filepath.Ext(n.Name))
 		if ext == ".heic" || ext == ".heif" {
+			if f != nil && a.thumbs != nil && a.thumbs.Caps().FFmpeg {
+				a.serveDatasetThumbnail(w, r, f.Name())
+				return
+			}
 			writeError(w, http.StatusNotFound, "no_thumbnail", "cannot decode heic")
 			return
 		}
