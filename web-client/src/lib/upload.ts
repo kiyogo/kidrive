@@ -37,6 +37,7 @@ export interface Transfer {
   sent: number;
   state: TransferState;
   error?: string;
+  isTask?: boolean;
 }
 
 type Listener = (list: Transfer[]) => void;
@@ -280,16 +281,17 @@ class Transfers {
     size: number = 100
   ): Promise<void> {
     const id = `op-${Date.now()}-${this.nextId++}`;
-    const opLabel = operationType === "copy" ? "Sao chép" : "Cắt & Dán";
+    const opLabel = operationType === "copy" ? "Sao chép" : "Dán";
     const totalSize = size && size > 0 ? size : 100;
     const toBytes = (pct: number) => Math.max(0, Math.min(totalSize, Math.round((pct / 100) * totalSize)));
 
     const item: Transfer = {
       id,
-      name: `${opLabel}: ${name}`,
+      name: name ? `${opLabel}: ${name}` : opLabel,
       size: totalSize,
       sent: toBytes(8),
       state: "uploading",
+      isTask: true,
     };
     this.items = [item, ...this.items];
     this.emit();

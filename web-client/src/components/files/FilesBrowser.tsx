@@ -454,45 +454,7 @@ export function FilesBrowser({
     return p;
   }, [filter, folderId, defaultSingleDataset, defaultTargetDataset]);
 
-  const handlePaste = async (targetParentId: string) => {
-    if (!clipboard || clipboard.nodes.length === 0) return;
-    const isCut = clipboard.nodes.length > 0 && clipboard.action === "cut";
-    let effectiveTarget = targetParentId || currentFolderTarget;
-    // If user right-clicked one of the folders currently in clipboard and clicked Paste,
-    // paste into the current parent directory so a copy/move happens alongside it.
-    if (clipboard.nodes.some((n) => n.id === effectiveTarget)) {
-      effectiveTarget = currentFolderTarget;
-    }
-    try {
-      for (const node of clipboard.nodes) {
-        await transfers.enqueueTask(
-          node.name,
-          isCut ? "move" : "copy",
-          async () => {
-            if (isCut) {
-              await api.post(Api.moveNode, {
-                node_id: node.id,
-                parent_id: effectiveTarget,
-              });
-            } else {
-              await api.post(Api.copyNode, {
-                node_id: node.id,
-                parent_id: effectiveTarget,
-              });
-            }
-          },
-          node.size_bytes || 100,
-        );
-      }
-      toast(isCut ? "Đã di chuyển thành công!" : "Đã dán thành công!", "success");
-      if (isCut) {
-        setClipboard(null);
-      }
-      void load();
-    } catch (err: any) {
-      toast(err?.message || "Không thể dán", "error");
-    }
-  };
+// handlePaste is defined below after useInfiniteList
 
   const handleRecolor = async (colorKey: string) => {
     if (!recoloringNode) return;
@@ -643,6 +605,121 @@ export function FilesBrowser({
 
   const nodes = loading ? null : rawNodes;
   const error = infiniteError || (isForbidden ? "Bạn không có quyền truy cập vào bộ dữ liệu này." : "");
+
+  const handlePaste = async (targetParentId: string) => {
+    if (!clipboard || clipboard.nodes.length === 0) return;
+    const isCut = clipboard.nodes.length > 0 && clipboard.action === "cut";
+    let effectiveTarget = targetParentId || currentFolderTarget;
+    // If user right-clicked one of the folders currently in clipboard and clicked Paste,
+    // paste into the current parent directory so a copy/move happens alongside it.
+    if (clipboard.nodes.some((n) => n.id === effectiveTarget)) {
+      effectiveTarget = currentFolderTarget;
+    }
+
+    // Determine if pasting into the currently displayed directory
+    const isCurrentFolder = effectiveTarget === currentFolderTarget;
+
+    // Create optimistic pending placeholder items if pasting into current directory
+    const pendingItems: NodeModel[] = isCurrentFolder
+      ? clipboard.nodes.map((node, idx) => ({
+          ...node,
+          id: `pending-${Date.now()}-${idx}-${node.id}`,
+          parent_id: effectiveTarget,
+          name: node.name,
+          status: "pending" as const,
+          created_at: Date.now(),
+          updated_at: Date.now(),
+        }))
+      : [];
+
+    if (pendingItems.length > 0) {
+      setNodes((prev) => [...pendingItems, ...prev]);
+    }
+
+    let hasErrors = false;
+    let successCount = 0;
+
+    for (let i = 0; i < clipboard.nodes.length; i++) {
+      const node = clipboard.nodes[i];
+      const pendingNode = pendingItems[i];
+
+      try {
+        await transfers.enqueueTask(
+          node.name,
+          isCut ? "move" : "copy",
+          async () => {
+            if (isCut) {
+              await api.post(Api.moveNode, {
+                node_id: node.id,
+                parent_id: effectiveTarget,
+              });
+            } else {
+              await api.post(Api.copyNode, {
+                node_id: node.id,
+                parent_id: effectiveTarget,
+              });
+            }
+          },
+          node.size_bytes || 100,
+        );
+
+        successCount++;
+        if (pendingNode) {
+          setNodes((prev) =>
+            prev.map((n) => (n.id === pendingNode.id ? { ...n, status: "done" as const } : n))
+          );
+        }
+      } catch (itemErr: any) {
+        hasErrors = true;
+        const errMsg = itemErr?.message || "Lỗi thao tác trên mục này";
+        if (pendingNode) {
+          pendingNode.status = "failed";
+          pendingNode.error = errMsg;
+          setNodes((prev) =>
+            prev.map((n) =>
+              n.id === pendingNode.id
+                ? { ...n, status: "failed" as const, error: errMsg }
+                : n
+            )
+          );
+        }
+      }
+    }
+
+    if (hasErrors) {
+      toast(
+        successCount > 0
+          ? `Đã xử lý ${successCount} mục, nhưng có lỗi ở các mục còn lại!`
+          : "Không thể hoàn thành thao tác dán. Vui lòng kiểm tra quyền hoặc dung lượng!",
+        "error"
+      );
+    } else {
+      toast(isCut ? "Đã di chuyển thành công!" : "Đã dán thành công!", "success");
+      if (isCut) {
+        setClipboard(null);
+      }
+    }
+
+    // Invalidate local cache and notify all listeners
+    browserFolderCache.clear();
+    window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
+
+    // Reload directory data from server immediately without manual page refresh
+    try {
+      await load();
+    } catch {}
+
+    // If there were failed items, keep them visible in the view so user sees the exact failure
+    if (hasErrors && pendingItems.length > 0) {
+      const failedNodes = pendingItems.filter((p) => p.status === "failed");
+      if (failedNodes.length > 0) {
+        setNodes((prev) => [
+          ...failedNodes,
+          ...prev.filter((x) => !failedNodes.some((f) => f.id === x.id)),
+        ]);
+      }
+    }
+  };
 
   useEffect(() => {
     let reloadTimer: NodeJS.Timeout | null = null;
@@ -2318,13 +2395,16 @@ const Tile = React.memo(function Tile({
 }) {
   const t = useL10n();
   const cat = categoryOfNode(node);
+  const isPending = node.status === "pending";
+  const isFailed = node.status === "failed";
 
   return (
     <div
       data-node-id={node.id}
-      {...dragProps(node.id)}
-      {...(isFolder(node) ? folderProps(node.id) : {})}
+      {...(isPending ? {} : dragProps(node.id))}
+      {...(isPending ? {} : (isFolder(node) ? folderProps(node.id) : {}))}
       onClick={(e) => {
+        if (isPending) return;
         e.stopPropagation();
         if (isMobile) {
           if (hasSelection) {
@@ -2337,8 +2417,13 @@ const Tile = React.memo(function Tile({
         if (e.detail >= 2) onActivate(node);
         else onToggle(node.id, e.ctrlKey || e.metaKey, e.shiftKey);
       }}
-      onDoubleClick={() => onActivate(node)}
+      onDoubleClick={() => !isPending && onActivate(node)}
       onContextMenu={(e) => {
+        if (isPending) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
         if (isSelectingMultiple) {
@@ -2350,21 +2435,99 @@ const Tile = React.memo(function Tile({
           onMenu({ x: e.clientX, y: e.clientY, node, isBulk: false });
         }
       }}
-      style={{ cursor: "pointer", display: "flex", flexDirection: "column" }}
+      style={{
+        cursor: isPending ? "wait" : "pointer",
+        display: "flex",
+        flexDirection: "column",
+        opacity: isPending ? 0.45 : 1,
+        filter: isPending ? "grayscale(40%)" : undefined,
+        transition: "opacity 180ms ease",
+      }}
     >
       <div
         style={{
           position: "relative",
           aspectRatio: "1 / 1",
           borderRadius: "var(--r-tile)",
-          border: `1px solid ${isOver || selected ? "var(--accent)" : "var(--stroke)"}`,
-          background: isOver ? "rgba(76,141,255,0.12)" : "var(--bg-elevated)",
+          border: `1px solid ${
+            isFailed
+              ? "var(--danger, #ef4444)"
+              : isOver || selected
+              ? "var(--accent)"
+              : "var(--stroke)"
+          }`,
+          background: isFailed
+            ? "rgba(239, 68, 68, 0.08)"
+            : isOver
+            ? "rgba(76,141,255,0.12)"
+            : "var(--bg-elevated)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           overflow: "hidden",
         }}
       >
+        {isPending && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "rgba(0, 0, 0, 0.35)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              zIndex: 10,
+            }}
+          >
+            <div
+              className="ld-spin"
+              style={{
+                width: 24,
+                height: 24,
+                border: "2.5px solid rgba(255, 255, 255, 0.3)",
+                borderTopColor: "#FFFFFF",
+                borderRadius: "50%",
+              }}
+            />
+            <span
+              style={{
+                fontSize: 11,
+                color: "#FFFFFF",
+                fontWeight: 600,
+                textShadow: "0 1px 3px rgba(0,0,0,0.8)",
+              }}
+            >
+              Đang dán...
+            </span>
+          </div>
+        )}
+
+        {isFailed && (
+          <div
+            style={{
+              position: "absolute",
+              top: 6,
+              left: 6,
+              background: "rgba(239, 68, 68, 0.95)",
+              color: "#FFFFFF",
+              fontSize: 10,
+              fontWeight: 700,
+              padding: "2px 6px",
+              borderRadius: 6,
+              zIndex: 10,
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+            }}
+            title={node.error || "Thao tác thất bại"}
+          >
+            <Icon glyph="alert" size={11} color="#FFFFFF" />
+            Lỗi
+          </div>
+        )}
         {node.has_thumbnail || cat === "image" || cat === "video" ? (
           <>
             <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -2531,8 +2694,22 @@ const Tile = React.memo(function Tile({
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 2 }}>
-          <div className="t-label-sm" style={{ color: "var(--fg-secondary)" }}>
-            {isFolder(node) ? relative(node.updated_at) : bytes(node.size_bytes)}
+          <div
+            className="t-label-sm"
+            style={{
+              color: isFailed ? "var(--danger)" : "var(--fg-secondary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {isPending
+              ? "Đang dán..."
+              : isFailed
+              ? (node.error || "Lỗi thao tác")
+              : isFolder(node)
+              ? relative(node.updated_at)
+              : bytes(node.size_bytes)}
           </div>
           {isMobile && (
             <Tappable
@@ -2683,15 +2860,17 @@ const Row = React.memo(function Row({
 }) {
   const t = useL10n();
   const cat = categoryOfNode(node);
+  const isPending = node.status === "pending";
+  const isFailed = node.status === "failed";
 
   return (
     <div
       data-node-id={node.id}
-      {...(isTrash ? {} : dragProps(node.id))}
-      {...(!isTrash && isFolder(node) ? folderProps(node.id) : {})}
+      {...(isTrash || isPending ? {} : dragProps(node.id))}
+      {...(!isTrash && !isPending && isFolder(node) ? folderProps(node.id) : {})}
       onClick={(e) => {
+        if (isTrash || isPending) return;
         e.stopPropagation();
-        if (isTrash) return;
         if (isMobile) {
           if (selecting) {
             onToggle(node.id, true, false);
@@ -2704,9 +2883,14 @@ const Row = React.memo(function Row({
         else onToggle(node.id, e.ctrlKey || e.metaKey, e.shiftKey);
       }}
       onDoubleClick={() => {
-        if (!isTrash) onActivate(node);
+        if (!isTrash && !isPending) onActivate(node);
       }}
       onContextMenu={(e) => {
+        if (isPending) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
         if (isSelectingMultiple) {
@@ -2725,9 +2909,22 @@ const Row = React.memo(function Row({
         margin: "2px 0",
         padding: "9px 10px",
         borderRadius: "var(--r-tile)",
-        border: `1px solid ${isOver || selected ? "var(--accent)" : "transparent"}`,
-        background: isOver || selected ? "rgba(76, 141, 255, 0.1)" : "transparent",
-        cursor: isTrash ? "default" : "pointer",
+        border: `1px solid ${
+          isFailed
+            ? "var(--danger, #ef4444)"
+            : isOver || selected
+            ? "var(--accent)"
+            : "transparent"
+        }`,
+        background: isFailed
+          ? "rgba(239, 68, 68, 0.08)"
+          : isOver || selected
+          ? "rgba(76, 141, 255, 0.1)"
+          : "transparent",
+        cursor: isPending ? "wait" : (isTrash ? "default" : "pointer"),
+        opacity: isPending ? 0.45 : 1,
+        filter: isPending ? "grayscale(40%)" : undefined,
+        transition: "opacity 180ms ease",
       }}
     >
       {selecting && (
@@ -2823,8 +3020,39 @@ const Row = React.memo(function Row({
             <Icon glyph="offline" size={13} color="var(--accent)" />
           )}
         </span>
-        <span className="t-body-sm" style={{ color: "var(--fg-secondary)", marginTop: 2, display: "block" }}>
-          {subtitleFor(node)}
+        <span
+          className="t-body-sm"
+          style={{
+            color: isFailed ? "var(--danger)" : "var(--fg-secondary)",
+            marginTop: 2,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          {isPending ? (
+            <>
+              <span
+                className="ld-spin"
+                style={{
+                  width: 12,
+                  height: 12,
+                  border: "2px solid var(--accent)",
+                  borderTopColor: "transparent",
+                  borderRadius: "50%",
+                  display: "inline-block",
+                }}
+              />
+              <span>Đang dán...</span>
+            </>
+          ) : isFailed ? (
+            <>
+              <Icon glyph="alert" size={12} color="var(--danger)" />
+              <span>Lỗi: {node.error || "Thao tác thất bại"}</span>
+            </>
+          ) : (
+            subtitleFor(node)
+          )}
         </span>
       </span>
       {isTrash ? (

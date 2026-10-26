@@ -288,7 +288,11 @@ class Client {
       url.searchParams.set(k, String(v));
     }
 
-    const headers: Record<string, string> = { Accept: "application/json" };
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+    };
     if (options.body !== undefined) headers["Content-Type"] = "application/json";
     if (this.access) headers.Authorization = `Bearer ${this.access}`;
 
@@ -300,6 +304,7 @@ class Client {
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
         signal: options.signal,
         priority: "high",
+        cache: "no-store",
       } as any);
     } catch (cause: any) {
       if (options.signal?.aborted || cause?.name === "AbortError") {

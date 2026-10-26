@@ -25,6 +25,8 @@ export interface NodeModel {
   /** Present only on something someone else owns. A face and a name read
    *  faster than a generic share glyph and answer the real question. */
   owner?: NodeOwner;
+  status?: "pending" | "failed" | "done";
+  error?: string;
 }
 
 export interface NodeOwner {

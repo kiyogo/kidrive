@@ -142,16 +142,13 @@ export function FloatingTransfersTray({ onOpenTransfers }: { onOpenTransfers: ()
         />
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ display: "flex", alignItems: "center" }}>
         <span className="t-body-xs" style={{ color: isFailed ? "var(--danger)" : "var(--fg-secondary)" }}>
           {isFailed
             ? current.error || `Thất bại (${failedItems.length} mục)`
             : isDoneAll
               ? `Hoàn tất ${completed}/${total} mục (100%)`
               : `Đang xử lý ${Math.min(total, completed + 1)}/${total} mục (${pct}%)`}
-        </span>
-        <span className="t-label-xs" style={{ color: "var(--accent)", fontWeight: 600 }}>
-          Chi tiết →
         </span>
       </div>
     </div>

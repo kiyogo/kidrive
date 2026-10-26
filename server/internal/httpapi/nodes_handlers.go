@@ -118,6 +118,8 @@ func invalidateAllCaches() {
 }
 
 func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
 	userID, _ := caller(r)
 	user, ok := mw.UserFrom(r.Context())
 	isAdmin := ok && user.Role == models.RoleAdmin

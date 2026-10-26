@@ -569,8 +569,10 @@ export function TransfersScreen() {
                         {item.state === "failed"
                           ? item.error
                           : item.state === "done"
-                            ? bytes(item.size)
-                            : `${bytes(item.sent)} of ${bytes(item.size)}`}
+                            ? (item.isTask ? "Hoàn thành" : bytes(item.size))
+                            : item.isTask
+                              ? `Đang xử lý (${pct}%)`
+                              : `${bytes(item.sent)} of ${bytes(item.size)}`}
                       </span>
                     </span>
                     {item.state === "uploading" && (
