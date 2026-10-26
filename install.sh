@@ -203,20 +203,24 @@ main() {
     zpool import -f -a 2>/dev/null || true
     zpool import -f -R /mnt/zfs-recovery DATA 2>/dev/null || true
     if zpool get -H -o value readonly DATA 2>/dev/null | grep -q 'on'; then
-      echo -e "${YELLOW}Phát hiện mảng DATA bị khóa readonly ở cấp Pool, đang gỡ bind-mount và re-import read-write...${NC}"
-      systemctl stop smbd nmbd 2>/dev/null || true
-      for bm in $(awk '{print $2}' /proc/mounts 2>/dev/null | grep -E '^/DATA|^/mnt/DATA|^/mnt/zfs-recovery' | awk '{ print length, $0 }' | sort -rn | cut -d" " -f2-); do
-        umount -l "$bm" 2>/dev/null || true
-      done
-      if command -v fuser >/dev/null 2>&1; then
-        fuser -km /DATA /mnt/zfs-recovery 2>/dev/null || true
+      echo -e "${YELLOW}Phát hiện mảng DATA bị khóa readonly ở cấp Pool, đang thử chuyển sang read-write...${NC}"
+      zpool set readonly=off DATA 2>/dev/null || true
+      zfs set -r readonly=off DATA 2>/dev/null || true
+      if zpool get -H -o value readonly DATA 2>/dev/null | grep -q 'on'; then
+        systemctl stop smbd nmbd localdrive 2>/dev/null || true
+        for bm in $(awk '{print $2}' /proc/mounts 2>/dev/null | grep -E '^/DATA|^/mnt/DATA|^/mnt/zfs-recovery' | awk '{ print length, $0 }' | sort -rn | cut -d" " -f2-); do
+          umount -l "$bm" 2>/dev/null || true
+        done
+        zfs unmount -f -a 2>/dev/null || true
+        if zpool export -f DATA 2>/dev/null; then
+          echo -e "${GREEN}✓ Đã export mảng DATA thành công, đang re-import read-write...${NC}"
+          zpool import -f -o readonly=off -R /mnt/zfs-recovery DATA 2>/dev/null || \
+            zpool import -f -d /dev -o readonly=off -R /mnt/zfs-recovery DATA 2>/dev/null || \
+            zpool import -f -o readonly=on -R /mnt/zfs-recovery DATA 2>/dev/null || true
+        else
+          echo -e "${YELLOW}Mảng DATA đang bận, sẽ dùng OverlayFS để đảm bảo quyền ghi trực tiếp.${NC}"
+        fi
       fi
-      zfs unmount -f -a 2>/dev/null || true
-      zpool export -f DATA 2>/dev/null || true
-      zpool import -f -o readonly=off -R /mnt/zfs-recovery DATA 2>/dev/null || \
-        zpool import -f -d /dev -o readonly=off -R /mnt/zfs-recovery DATA 2>/dev/null || \
-        zpool import -f -F -o readonly=off -R /mnt/zfs-recovery DATA 2>/dev/null || \
-        zpool import -f -o readonly=on -R /mnt/zfs-recovery DATA 2>/dev/null || true
     fi
     for p in $(zpool list -H -o name 2>/dev/null); do
       zpool set readonly=off "$p" 2>/dev/null || true
@@ -239,25 +243,35 @@ main() {
 
   # Dự phòng OverlayFS nếu tập dữ liệu ZFS vẫn ở chế độ chỉ đọc do khóa phần cứng/recovery
   modprobe overlay 2>/dev/null || true
-  if [ -d "/mnt/zfs-recovery/DATA/KiyoVN" ]; then
-    for d in /mnt/zfs-recovery/DATA/KiyoVN/*; do
-      if [ -d "$d" ]; then
-        if ! touch "$d/.ld_rw_test" 2>/dev/null; then
-          SAFE_ID=$(echo "$d" | tr '/: ' '___')
-          OV_BASE="/var/lib/localdrive/overlay/${SAFE_ID}"
-          rm -rf "${OV_BASE}/work" 2>/dev/null || true
-          mkdir -p "${OV_BASE}/lower" "${OV_BASE}/upper" "${OV_BASE}/work" 2>/dev/null || true
-          if [ -z "$(ls -A "${OV_BASE}/lower" 2>/dev/null)" ]; then
-            mount --bind "$d" "${OV_BASE}/lower" 2>/dev/null || true
+  for root_cand in "/mnt/zfs-recovery/DATA/KiyoVN" "/DATA/KiyoVN" "/mnt/zfs-recovery/DATA" "/DATA"; do
+    if [ -d "$root_cand" ]; then
+      for d in "$root_cand"/*; do
+        if [ -d "$d" ]; then
+          if ! touch "$d/.ld_rw_test" 2>/dev/null; then
+            echo -e "${YELLOW}Kích hoạt OverlayFS Read-Write cho $d...${NC}"
+            SAFE_ID=$(echo "$d" | tr '/: ' '___')
+            OV_BASE="/var/lib/localdrive/overlay/${SAFE_ID}"
+            mkdir -p "${OV_BASE}/lower" "${OV_BASE}/upper" "${OV_BASE}/work" 2>/dev/null || true
+            rm -rf "${OV_BASE}/work" 2>/dev/null || true
+            mkdir -p "${OV_BASE}/work" 2>/dev/null || true
+            if [ -z "$(ls -A "${OV_BASE}/lower" 2>/dev/null)" ]; then
+              mount --bind "$d" "${OV_BASE}/lower" 2>/dev/null || true
+            fi
+            mount -t overlay overlay -o "lowerdir=${OV_BASE}/lower,upperdir=${OV_BASE}/upper,workdir=${OV_BASE}/work" "$d" 2>/dev/null || true
+            chmod 777 "$d" 2>/dev/null || true
+            if touch "$d/.ld_rw_test" 2>/dev/null; then
+              rm -f "$d/.ld_rw_test" 2>/dev/null || true
+              echo -e "${GREEN}✓ Đã mở khóa ghi (Read-Write) thành công cho $d!${NC}"
+            else
+              echo -e "${RED}[CẢNH BÁO] Không thể mount overlay cho $d${NC}"
+            fi
+          else
+            rm -f "$d/.ld_rw_test" 2>/dev/null || true
           fi
-          mount -t overlay overlay -o "lowerdir=${OV_BASE}/lower,upperdir=${OV_BASE}/upper,workdir=${OV_BASE}/work" "$d" 2>/dev/null || true
-          chmod 777 "$d" 2>/dev/null || true
-        else
-          rm -f "$d/.ld_rw_test" 2>/dev/null || true
         fi
-      fi
-    done
-  fi
+      done
+    fi
+  done
 
   # Cài đặt và cấu hình dịch vụ chia sẻ mạng nội bộ Samba (SMB) với quyền Guest
   if ! command -v smbd >/dev/null 2>&1; then
@@ -343,6 +357,26 @@ main() {
       if [ "$SRC" != "/DATA/$ds" ] && ! mount | grep -q "/DATA/$ds "; then
         mount --bind "$SRC" "/DATA/$ds" 2>/dev/null || true
       fi
+
+      for test_target in "/DATA/KiyoVN/$ds" "/DATA/$ds"; do
+        if [ -d "$test_target" ]; then
+          if ! touch "$test_target/.ld_rw_test" 2>/dev/null; then
+            SAFE_ID=$(echo "$test_target" | tr '/: ' '___')
+            OV_BASE="/var/lib/localdrive/overlay/${SAFE_ID}"
+            mkdir -p "${OV_BASE}/lower" "${OV_BASE}/upper" "${OV_BASE}/work" 2>/dev/null || true
+            rm -rf "${OV_BASE}/work" 2>/dev/null || true
+            mkdir -p "${OV_BASE}/work" 2>/dev/null || true
+            if [ -z "$(ls -A "${OV_BASE}/lower" 2>/dev/null)" ]; then
+              mount --bind "$test_target" "${OV_BASE}/lower" 2>/dev/null || true
+            fi
+            mount -t overlay overlay -o "lowerdir=${OV_BASE}/lower,upperdir=${OV_BASE}/upper,workdir=${OV_BASE}/work" "$test_target" 2>/dev/null || true
+            chmod 777 "$test_target" 2>/dev/null || true
+            rm -f "$test_target/.ld_rw_test" 2>/dev/null || true
+          else
+            rm -f "$test_target/.ld_rw_test" 2>/dev/null || true
+          fi
+        fi
+      done
 
       if [ -f /etc/fstab ]; then
         if ! grep -q "/DATA/KiyoVN/$ds" /etc/fstab 2>/dev/null; then
