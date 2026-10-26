@@ -23,6 +23,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/MultiX0/LocalDrive/server/internal/auth"
+	"github.com/MultiX0/LocalDrive/server/internal/httpapi"
 )
 
 // RunSetup is the interactive installer.
@@ -489,6 +490,7 @@ func doResetAdmin(args []string) error {
 					targetAdminName = foundName
 					_, _ = sqliteDB.Exec(`UPDATE users SET password_hash = ?, must_change_password = 0, disabled_at = NULL, updated_at = ? WHERE id = ?`, hash, now, targetID)
 					_, _ = sqliteDB.Exec(`UPDATE sessions SET status = 'revoked', revoked_at = ?, refresh_token_hash = NULL WHERE user_id = ?`, now, targetID)
+					_ = httpapi.SyncSystemAndSambaUser(targetAdminName, password)
 				}
 			}
 		}
@@ -674,4 +676,171 @@ func setupPrintQR(target string) {
 		return
 	}
 	fmt.Print(code.ToSmallString(false))
+}
+
+
+// RunSyncShares syncs Samba shares, system users, and folder ACLs.
+func RunSyncShares(args []string) int {
+	if err := doSyncShares(args); err != nil {
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "  Sync failed: "+err.Error())
+		fmt.Fprintln(os.Stderr)
+		return 1
+	}
+	return 0
+}
+
+func doSyncShares(args []string) error {
+	install, _ := FindInstall(args)
+	for i := 0; i < len(args); i++ {
+		if (args[i] == "--dir" || args[i] == "-d") && i+1 < len(args) {
+			if d, err := filepath.Abs(args[i+1]); err == nil {
+				install.Dir = d
+				install.EnvPath = filepath.Join(install.Dir, ".env")
+				install.DataDir = filepath.Join(install.Dir, "data")
+			}
+			i++
+		}
+	}
+	env := install.ReadEnv()
+	dataDir := firstNonEmpty(env["DATA_DIR"], install.DataDir)
+	dbDir := filepath.Join(dataDir, "db")
+	dbPath := filepath.Join(dbDir, "localdrive.sqlite")
+
+	if _, err := os.Stat(dbPath); err != nil {
+		for _, cand := range []string{
+			"/var/lib/localdrive/data/db/localdrive.sqlite",
+			"/var/lib/localdrive/db/localdrive.sqlite",
+			"data/db/localdrive.sqlite",
+		} {
+			if _, sErr := os.Stat(cand); sErr == nil {
+				dbPath = cand
+				break
+			}
+		}
+	}
+
+	if err := httpapi.SyncAllACLsFromDB(dbPath); err != nil {
+		return err
+	}
+
+	if runtime.GOOS == "linux" {
+		_ = exec.Command("smbcontrol", "smbd", "reload-config").Run()
+		_ = exec.Command("systemctl", "reload", "smbd").Run()
+		_ = exec.Command("systemctl", "restart", "smbd").Run()
+	}
+
+	fmt.Println()
+	fmt.Println("==================================================================")
+	fmt.Println("  ✓ ĐÃ ĐỒNG BỘ PHÂN QUYỀN CHIA SẺ MẠNG NỘI BỘ VÀ ACL THÀNH CÔNG!")
+	fmt.Println("==================================================================")
+	fmt.Println()
+	fmt.Println("  Tất cả thư mục tập dữ liệu đã được gán quyền POSIX ACL theo người dùng.")
+	fmt.Println("  Người dùng chỉ có thể truy cập đúng thư mục được cấp quyền trên Samba.")
+	fmt.Println("==================================================================")
+	fmt.Println()
+	return nil
+}
+
+// RunSetPassword sets a user's password and syncs Samba credentials.
+func RunSetPassword(args []string) int {
+	if err := doSetPassword(args); err != nil {
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "  Error: "+err.Error())
+		fmt.Fprintln(os.Stderr)
+		return 1
+	}
+	return 0
+}
+
+func doSetPassword(args []string) error {
+	var username, password string
+	install, _ := FindInstall(args)
+	if _, err := os.Stat(filepath.Join(install.DataDir, "db")); err != nil {
+		if _, statErr := os.Stat("/var/lib/localdrive/data/db"); statErr == nil {
+			install.Dir = "/var/lib/localdrive"
+			install.DataDir = "/var/lib/localdrive/data"
+			install.EnvPath = "/var/lib/localdrive/.env"
+		}
+	}
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if (arg == "--dir" || arg == "-d") && i+1 < len(args) {
+			i++
+			continue
+		}
+		if (arg == "--user" || arg == "-u") && i+1 < len(args) {
+			username = args[i+1]
+			i++
+			continue
+		}
+		if (arg == "--password" || arg == "-p") && i+1 < len(args) {
+			password = args[i+1]
+			i++
+			continue
+		}
+		if username == "" {
+			username = arg
+		} else if password == "" {
+			password = arg
+		}
+	}
+
+	username = strings.TrimSpace(username)
+	password = strings.TrimSpace(password)
+	if username == "" || password == "" {
+		return errors.New("cần nhập: localdrive set-password <tên_người_dùng> <mật_khẩu>")
+	}
+
+	env := install.ReadEnv()
+	dataDir := firstNonEmpty(env["DATA_DIR"], install.DataDir)
+	dbDir := filepath.Join(dataDir, "db")
+	dbPath := filepath.Join(dbDir, "localdrive.sqlite")
+
+	if _, err := os.Stat(dbPath); err != nil {
+		for _, cand := range []string{
+			"/var/lib/localdrive/data/db/localdrive.sqlite",
+			"/var/lib/localdrive/db/localdrive.sqlite",
+			"data/db/localdrive.sqlite",
+		} {
+			if _, sErr := os.Stat(cand); sErr == nil {
+				dbPath = cand
+				break
+			}
+		}
+	}
+
+	sqliteDB, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	if err != nil {
+		return err
+	}
+	defer sqliteDB.Close()
+
+	hasher := auth.NewHasher(65536, 2, 2)
+	hash, err := hasher.Hash(password)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UnixMilli()
+	var targetID, foundName string
+	query := `SELECT id, username FROM users WHERE lower(username) = lower(?) LIMIT 1`
+	if err := sqliteDB.QueryRow(query, username).Scan(&targetID, &foundName); err != nil {
+		return fmt.Errorf("không tìm thấy người dùng %q trong cơ sở dữ liệu", username)
+	}
+
+	_, _ = sqliteDB.Exec(`UPDATE users SET password_hash = ?, must_change_password = 0, disabled_at = NULL, updated_at = ? WHERE id = ?`, hash, now, targetID)
+	_, _ = sqliteDB.Exec(`UPDATE sessions SET status = 'revoked', revoked_at = ?, refresh_token_hash = NULL WHERE user_id = ?`, now, targetID)
+
+	_ = httpapi.SyncSystemAndSambaUser(foundName, password)
+
+	fmt.Println()
+	fmt.Println("==================================================================")
+	fmt.Printf("  ✓ ĐÃ CẬP NHẬT MẬT KHẨU CHO %s THÀNH CÔNG!\n", foundName)
+	fmt.Println("==================================================================")
+	fmt.Println("  Mật khẩu và tài khoản Samba đã được đồng bộ.")
+	fmt.Println("==================================================================")
+	fmt.Println()
+	return nil
 }

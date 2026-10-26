@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -83,6 +84,8 @@ func (a *API) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	go a.SyncSambaUser(created.Username, req.Password)
+	go a.SyncDatasetAndFolderACLs(context.Background())
 	writeJSON(w, http.StatusCreated, map[string]any{"user": userBody(created)})
 }
 
@@ -123,6 +126,10 @@ func (a *API) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	if req.Password != "" {
+		go a.SyncSambaUser(updated.Username, req.Password)
+	}
+	go a.SyncDatasetAndFolderACLs(context.Background())
 	writeJSON(w, http.StatusOK, map[string]any{"user": userBody(updated)})
 }
 
@@ -133,6 +140,7 @@ func (a *API) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	go a.SyncDatasetAndFolderACLs(context.Background())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -150,6 +158,9 @@ func (a *API) handleResetPassword(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.fail(w, r, err)
 		return
+	}
+	if u, err := a.auth.UserByID(r.Context(), chi.URLParam(r, "id")); err == nil {
+		go a.SyncSambaUser(u.Username, temporary)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"temporary_password": temporary,

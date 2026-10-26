@@ -633,6 +633,7 @@ func (a *API) handleUpdateDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go a.SyncDatasetAndFolderACLs(context.Background())
 	writeJSON(w, http.StatusOK, map[string]any{"dataset": d})
 }
 
@@ -849,15 +850,19 @@ func syncSystemNetworkShare(name string, path string, readOnly bool, guestOk boo
 	if readOnly {
 		roStr = "Everyone:R"
 	}
-	_ = exec.Command("net", "usershare", "add", trimmedName, trimmedPath, "LocalDrive Network Share", roStr, "guest_ok=y").Run()
+	goKStr := "guest_ok=n"
+	if guestOk {
+		goKStr = "guest_ok=y"
+	}
+	_ = exec.Command("net", "usershare", "add", trimmedName, trimmedPath, "LocalDrive Network Share", roStr, goKStr).Run()
 
-	// 3. Directly create usershare configuration file to guarantee guest access without password
+	// 3. Directly create usershare configuration file
 	usershareFile := filepath.Join("/var/lib/samba/usershares", strings.ToLower(trimmedName))
 	uAcl := "Everyone:F"
 	if readOnly {
 		uAcl = "Everyone:R"
 	}
-	cfgContent := fmt.Sprintf("# LocalDrive Auto-generated Share\npath=%s\ncomment=LocalDrive Network Share\nusershare_acl=%s\nguest_ok=y\n", trimmedPath, uAcl)
+	cfgContent := fmt.Sprintf("# LocalDrive Auto-generated Share\npath=%s\ncomment=LocalDrive Network Share\nusershare_acl=%s\n%s\n", trimmedPath, uAcl, goKStr)
 	_ = os.WriteFile(usershareFile, []byte(cfgContent), 0644)
 
 	// 4. Ensure datasets are linked into the share folder so it's never empty
@@ -865,8 +870,8 @@ func syncSystemNetworkShare(name string, path string, readOnly bool, guestOk boo
 		ensureDatasetsLinkedToShare(trimmedPath)
 	}
 
-	// 5. Update /etc/samba/smb.conf natively for rock-solid SMB guest access
-	updateLinuxSmbConf(trimmedName, trimmedPath, readOnly)
+	// 5. Update /etc/samba/smb.conf natively with strict ACL enforcement
+	updateLinuxSmbConf(trimmedName, trimmedPath, readOnly, guestOk)
 
 	// 6. Ensure firewall allows Samba ports (445, 139, 137:138)
 	_ = exec.Command("ufw", "allow", "445/tcp").Run()
@@ -881,7 +886,7 @@ func syncSystemNetworkShare(name string, path string, readOnly bool, guestOk boo
 	return nil
 }
 
-func updateLinuxSmbConf(shareName, sharePath string, readOnly bool) {
+func updateLinuxSmbConf(shareName, sharePath string, readOnly bool, guestOk bool) {
 	confPath := "/etc/samba/smb.conf"
 	data, err := os.ReadFile(confPath)
 	if err != nil {
@@ -889,9 +894,29 @@ func updateLinuxSmbConf(shareName, sharePath string, readOnly bool) {
 	}
 	content := string(data)
 
-	// Ensure [global] contains necessary wide links and guest permissions
-	if !strings.Contains(content, "guest account = root") {
-		content = strings.Replace(content, "[global]", "[global]\n   guest account = root\n   map to guest = Bad User\n   follow symlinks = yes\n   wide links = yes\n   unix extensions = no\n   allow insecure wide links = yes", 1)
+	// Clean up any rogue settings
+	content = strings.ReplaceAll(content, "guest account = root", "guest account = nobody")
+	content = strings.ReplaceAll(content, "force user = root", "")
+	content = strings.ReplaceAll(content, "guest only = yes", "")
+
+	// Ensure [global] contains necessary VFS and POSIX ACL parameters
+	if !strings.Contains(content, "vfs objects = acl_xattr") {
+		globalAdditions := `[global]
+   workgroup = WORKGROUP
+   server string = LocalDrive NAS
+   security = user
+   map to guest = Bad User
+   guest account = nobody
+   vfs objects = acl_xattr
+   map acl inherit = yes
+   store dos attributes = yes
+   inherit acls = yes
+   inherit permissions = yes
+   follow symlinks = yes
+   wide links = yes
+   unix extensions = no
+   allow insecure wide links = yes`
+		content = strings.Replace(content, "[global]", globalAdditions, 1)
 	}
 
 	// Remove existing share section if present
@@ -921,30 +946,34 @@ func updateLinuxSmbConf(shareName, sharePath string, readOnly bool) {
 		readOnlyStr = "yes"
 		writableStr = "no"
 	}
+	guestOkStr := "no"
+	if guestOk {
+		guestOkStr = "yes"
+	}
 
 	newSection := fmt.Sprintf(`[%s]
    comment = LocalDrive %s Share
    path = %s
    browseable = yes
    writable = %s
-   guest ok = yes
-   guest only = yes
    read only = %s
-   force user = root
-   create mask = 0777
-   directory mask = 0777
+   guest ok = %s
+   inherit acls = yes
+   inherit permissions = yes
+   create mask = 0660
+   directory mask = 0770
    follow symlinks = yes
    wide links = yes
+`, shareName, shareName, sharePath, writableStr, readOnlyStr, guestOkStr)
 
-`, shareName, shareName, sharePath, writableStr, readOnlyStr)
-
-	content = strings.TrimSpace(content) + "\n\n" + newSection
+	content = strings.TrimSpace(content) + "\n\n" + newSection + "\n"
 	_ = os.WriteFile(confPath, []byte(content), 0644)
 }
 
 func ensureDatasetsLinkedToShare(sharePath string) {
-	_ = os.MkdirAll(sharePath, 0777)
-	_ = exec.Command("chmod", "-R", "777", sharePath).Run()
+	_ = os.MkdirAll(sharePath, 0755)
+	_ = exec.Command("chmod", "0755", sharePath).Run()
+	_ = exec.Command("chown", "root:root", sharePath).Run()
 	datasets := []string{"1DATA", "DaoKy_5", "Long_4", "NgLoc_6", "NgSon_1"}
 	roots := []string{"/DATA/KiyoVN", "/mnt/DATA/KiyoVN", "/DATA", "/mnt/DATA", "/mnt/DỮ LIỆU/KiyoVN", "/mnt/DỮ LIỆU", "/mnt/zfs-recovery"}
 	for _, ds := range datasets {
@@ -991,11 +1020,15 @@ func removeSystemNetworkShare(name string) {
 func (a *API) SyncAllActiveNetworkShares(ctx context.Context) {
 	if runtime.GOOS == "linux" {
 		kiyoDir := "/DATA/KiyoVN"
-		_ = os.MkdirAll(kiyoDir, 0777)
+		_ = os.MkdirAll(kiyoDir, 0755)
 		ensureDatasetsLinkedToShare(kiyoDir)
-		_ = syncSystemNetworkShare("KiyoVN", kiyoDir, false, true, true)
-		if _, err := os.Stat("/DATA"); err == nil {
-			_ = syncSystemNetworkShare("DATA", "/DATA", false, true, true)
+
+		// Check if KiyoVN has custom guest_ok or read_only settings in network_shares
+		var kiyoGuestOk, kiyoReadOnly int
+		if err := a.db.Read().QueryRowContext(ctx, `SELECT guest_ok, read_only FROM network_shares WHERE lower(name) = 'kiyovn' LIMIT 1`).Scan(&kiyoGuestOk, &kiyoReadOnly); err == nil {
+			_ = syncSystemNetworkShare("KiyoVN", kiyoDir, kiyoReadOnly == 1, kiyoGuestOk == 1, true)
+		} else {
+			_ = syncSystemNetworkShare("KiyoVN", kiyoDir, false, false, true)
 		}
 	}
 
@@ -1015,6 +1048,9 @@ func (a *API) SyncAllActiveNetworkShares(ctx context.Context) {
 			_ = syncSystemNetworkShare(name, realP, ro == 1, goK == 1, true)
 		}
 	}
+
+	// Strictly synchronize and enforce filesystem POSIX ACLs across datasets
+	_ = a.SyncDatasetAndFolderACLs(ctx)
 }
 
 func (a *API) handleCreateNetworkShare(w http.ResponseWriter, r *http.Request) {
@@ -1082,6 +1118,7 @@ func (a *API) handleCreateNetworkShare(w http.ResponseWriter, r *http.Request) {
 	// Real OS Network Share publish
 	_ = syncSystemNetworkShare(name, realPath, req.ReadOnly, req.GuestOK, true)
 
+	go a.SyncDatasetAndFolderACLs(context.Background())
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"share": NetworkShareDTO{
 			ID:             id,

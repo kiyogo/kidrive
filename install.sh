@@ -279,7 +279,7 @@ main() {
     if command -v apt-get >/dev/null 2>&1; then
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -qq < /dev/null 2>/dev/null || true
-      apt-get install -y -qq samba smbclient < /dev/null 2>/dev/null || true
+      apt-get install -y -qq samba smbclient acl attr < /dev/null 2>/dev/null || true
     elif command -v yum >/dev/null 2>&1; then
       yum install -y -q samba samba-client < /dev/null 2>/dev/null || true
     elif command -v dnf >/dev/null 2>&1; then
@@ -290,7 +290,8 @@ main() {
   # Xác định thư mục chia sẻ mạng nội bộ thực tế
   TARGET_SHARE_DIR="/DATA/KiyoVN"
   mkdir -p "$TARGET_SHARE_DIR" "/DATA" 2>/dev/null || true
-  chmod -R 777 "$TARGET_SHARE_DIR" "/DATA" 2>/dev/null || true
+  chmod 0755 "$TARGET_SHARE_DIR" "/DATA" 2>/dev/null || true
+  chown root:root "$TARGET_SHARE_DIR" "/DATA" 2>/dev/null || true
   mkdir -p /var/lib/samba/usershares 2>/dev/null || true
   chmod 1777 /var/lib/samba/usershares 2>/dev/null || true
 
@@ -391,9 +392,14 @@ main() {
     fi
   done
 
-  # Cấu hình Samba hỗ trợ Guest Access hoàn toàn (Đảm bảo 100% không bị thư mục trống hoặc hỏi mật khẩu)
+  # Cấu hình Samba với phân quyền chặt chẽ theo POSIX ACL và tài khoản người dùng
   mkdir -p /etc/samba
   if [ -f /etc/samba/smb.conf ]; then
+    # Gỡ bỏ các cờ nguy hiểm guest account = root và force user = root
+    sed -i '/guest account = root/d' /etc/samba/smb.conf 2>/dev/null || true
+    sed -i '/force user = root/d' /etc/samba/smb.conf 2>/dev/null || true
+    sed -i '/guest only = yes/d' /etc/samba/smb.conf 2>/dev/null || true
+
     # Xóa section KiyoVN & DATA cũ một cách an toàn bằng awk
     awk '
       BEGIN { skip = 0 }
@@ -402,9 +408,9 @@ main() {
       skip == 0 { print }
     ' /etc/samba/smb.conf > /etc/samba/smb.conf.tmp 2>/dev/null && mv /etc/samba/smb.conf.tmp /etc/samba/smb.conf 2>/dev/null || true
 
-    # Đảm bảo guest account = root có trong smb.conf
-    if ! grep -q "guest account = root" /etc/samba/smb.conf 2>/dev/null; then
-      sed -i '/\[global\]/a \   map to guest = Bad User\n   guest account = root\n   follow symlinks = yes\n   wide links = yes\n   unix extensions = no\n   allow insecure wide links = yes' /etc/samba/smb.conf 2>/dev/null || true
+    # Đảm bảo [global] hỗ trợ VFS POSIX ACL
+    if ! grep -q "vfs objects = acl_xattr" /etc/samba/smb.conf 2>/dev/null; then
+      sed -i '/\[global\]/a \   vfs objects = acl_xattr\n   map acl inherit = yes\n   store dos attributes = yes\n   inherit acls = yes\n   inherit permissions = yes\n   guest account = nobody\n   follow symlinks = yes\n   wide links = yes\n   unix extensions = no\n   allow insecure wide links = yes' /etc/samba/smb.conf 2>/dev/null || true
     fi
 
     cat << EOF >> /etc/samba/smb.conf
@@ -414,26 +420,12 @@ main() {
    path = $TARGET_SHARE_DIR
    browseable = yes
    writable = yes
-   guest ok = yes
-   guest only = yes
+   guest ok = no
    read only = no
-   force user = root
-   create mask = 0777
-   directory mask = 0777
-   follow symlinks = yes
-   wide links = yes
-
-[DATA]
-   comment = LocalDrive DATA Root
-   path = /DATA
-   browseable = yes
-   writable = yes
-   guest ok = yes
-   guest only = yes
-   read only = no
-   force user = root
-   create mask = 0777
-   directory mask = 0777
+   inherit acls = yes
+   inherit permissions = yes
+   create mask = 0660
+   directory mask = 0770
    follow symlinks = yes
    wide links = yes
 EOF
@@ -444,7 +436,12 @@ EOF
    server string = LocalDrive NAS
    security = user
    map to guest = Bad User
-   guest account = root
+   guest account = nobody
+   vfs objects = acl_xattr
+   map acl inherit = yes
+   store dos attributes = yes
+   inherit acls = yes
+   inherit permissions = yes
    usershare path = /var/lib/samba/usershares
    usershare max shares = 100
    usershare allow guests = yes
@@ -459,26 +456,12 @@ EOF
    path = $TARGET_SHARE_DIR
    browseable = yes
    writable = yes
-   guest ok = yes
-   guest only = yes
+   guest ok = no
    read only = no
-   force user = root
-   create mask = 0777
-   directory mask = 0777
-   follow symlinks = yes
-   wide links = yes
-
-[DATA]
-   comment = LocalDrive DATA Root
-   path = /DATA
-   browseable = yes
-   writable = yes
-   guest ok = yes
-   guest only = yes
-   read only = no
-   force user = root
-   create mask = 0777
-   directory mask = 0777
+   inherit acls = yes
+   inherit permissions = yes
+   create mask = 0660
+   directory mask = 0770
    follow symlinks = yes
    wide links = yes
 EOF
@@ -554,14 +537,16 @@ EOF
     mount -o remount,rw /mnt/zfs-recovery/DATA 2>/dev/null || true
     for m in $(cat /proc/mounts 2>/dev/null | grep -E "zfs|zfs-recovery|DATA|KiyoVN" | awk '{print $2}'); do
       mount -o remount,rw "$m" 2>/dev/null || true
-      chmod -R 777 "$m" 2>/dev/null || true
     done
 
     systemctl daemon-reload 2>/dev/null || true
     systemctl reset-failed localdrive 2>/dev/null || true
     systemctl enable localdrive 2>/dev/null || true
     systemctl restart localdrive 2>/dev/null || true
-    sleep 3
+    sleep 2
+    # Đồng bộ phân quyền POSIX ACL cho toàn bộ tập dữ liệu và chia sẻ Samba
+    ${BIN_TARGET} sync-shares --dir ${INSTALL_DIR} 2>/dev/null || true
+    sleep 1
   fi
 
   # Kiểm tra tự động xem cổng 5437 đã hoạt động chưa

@@ -161,6 +161,8 @@ func (a *API) handleSetup(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	go a.SyncSambaUser(req.Username, req.Password)
+	go a.SyncDatasetAndFolderACLs(context.Background())
 	a.refreshDiscovery(r.Context())
 	writeJSON(w, http.StatusCreated, a.tokenBodyWithContext(r.Context(), pair))
 }
@@ -211,6 +213,7 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	go a.SyncSambaUser(req.Username, req.Password)
 	writeJSON(w, http.StatusOK, a.tokenBodyWithContext(r.Context(), result.Tokens))
 }
 
@@ -284,6 +287,9 @@ func (a *API) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if err := a.auth.ChangePassword(r.Context(), userID, req.CurrentPassword, req.NewPassword, ip); err != nil {
 		a.fail(w, r, err)
 		return
+	}
+	if u, ok := mw.UserFrom(r.Context()); ok {
+		go a.SyncSambaUser(u.Username, req.NewPassword)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

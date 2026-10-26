@@ -103,6 +103,16 @@ func Modes() []Mode {
 			Run:     RunResetAdmin,
 		},
 		{
+			Name:    "sync-shares",
+			Summary: "synchronize network shares, Samba users, and folder permissions (ACLs)",
+			Run:     RunSyncShares,
+		},
+		{
+			Name:    "set-password",
+			Summary: "set password for any user and sync Samba credentials",
+			Run:     RunSetPassword,
+		},
+		{
 			Name:    "backup",
 			Summary: "write a backup of the database and the library",
 			Run:     RunBackup,
