@@ -36,6 +36,10 @@ func (s *Service) ConsumeRecoveryMarker(ctx context.Context, dataDir string, log
 	}
 	path := filepath.Join(dataDir, RecoveryMarkerName)
 	raw, err := os.ReadFile(path)
+	if err != nil && os.IsNotExist(err) {
+		path = filepath.Join(dataDir, "db", RecoveryMarkerName)
+		raw, err = os.ReadFile(path)
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -45,9 +49,8 @@ func (s *Service) ConsumeRecoveryMarker(ctx context.Context, dataDir string, log
 	// remove it first, so a marker that somehow fails to apply cannot loop
 	// the server into resetting the password on every restart
 	defer func() {
-		if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
-			log.Error("could not remove recovery marker, remove it by hand", "path", path, "error", rmErr)
-		}
+		_ = os.Remove(filepath.Join(dataDir, RecoveryMarkerName))
+		_ = os.Remove(filepath.Join(dataDir, "db", RecoveryMarkerName))
 	}()
 
 	var marker RecoveryMarker
@@ -78,7 +81,7 @@ func (s *Service) ConsumeRecoveryMarker(ctx context.Context, dataDir string, log
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE users SET password_hash = ?, must_change_password = 1, disabled_at = NULL, updated_at = ?
+			UPDATE users SET password_hash = ?, must_change_password = 0, disabled_at = NULL, updated_at = ?
 			WHERE id = ?`, hash, db.NowMillis(), targetID); err != nil {
 			return err
 		}

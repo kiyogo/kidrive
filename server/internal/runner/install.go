@@ -60,6 +60,14 @@ func FindInstall(args []string) (Install, error) {
 		}
 	}
 	if dir == "" {
+		// On Linux, check default system service path
+		if _, statErr := os.Stat("/var/lib/localdrive/data/db"); statErr == nil {
+			dir = "/var/lib/localdrive"
+		} else if _, statErr := os.Stat("/var/lib/localdrive/.env"); statErr == nil {
+			dir = "/var/lib/localdrive"
+		}
+	}
+	if dir == "" {
 		dir = DefaultInstallDir()
 	}
 

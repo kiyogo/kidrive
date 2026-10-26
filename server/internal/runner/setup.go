@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -381,71 +382,139 @@ func doSetup(args []string) error {
 }
 
 func doResetAdmin(args []string) error {
-	setupHeader()
-	in := bufio.NewReader(os.Stdin)
-
 	install, err := FindInstall(args)
 	if err != nil {
 		return err
 	}
-	setupStep("Reset the admin password")
-	dir := setupAsk(in, "Install folder", install.Dir)
-	install.Dir, err = filepath.Abs(dir)
-	if err != nil {
-		return err
+	if _, err := os.Stat(filepath.Join(install.DataDir, "db")); err != nil {
+		if _, statErr := os.Stat("/var/lib/localdrive/data/db"); statErr == nil {
+			install.Dir = "/var/lib/localdrive"
+			install.DataDir = "/var/lib/localdrive/data"
+			install.EnvPath = "/var/lib/localdrive/.env"
+		}
 	}
-	install.EnvPath = filepath.Join(install.Dir, ".env")
-	install.DataDir = filepath.Join(install.Dir, "data")
 
 	env := install.ReadEnv()
 	dataDir := firstNonEmpty(env["DATA_DIR"], install.DataDir)
 	dbDir := filepath.Join(dataDir, "db")
-	if _, err := os.Stat(dbDir); err != nil {
-		return fmt.Errorf("no Local Drive data found at %s", dbDir)
+
+	var username, password string
+	var posArgs []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--dir" || arg == "-d" {
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "--dir=") {
+			continue
+		}
+		if (arg == "--user" || arg == "-u") && i+1 < len(args) {
+			username = args[i+1]
+			i++
+			continue
+		}
+		if (arg == "--password" || arg == "-p") && i+1 < len(args) {
+			password = args[i+1]
+			i++
+			continue
+		}
+		posArgs = append(posArgs, arg)
 	}
 
-	username := setupAsk(in, "Which account (leave empty for the first admin)", "")
-	password := setupAskSecret("New password (leave empty to generate one)")
 	if password == "" {
-		password = setupSecret(9)
+		if len(posArgs) == 1 {
+			password = posArgs[0]
+		} else if len(posArgs) >= 2 {
+			username = posArgs[0]
+			password = posArgs[1]
+		}
 	}
+
+	isInteractive := (password == "")
+	if isInteractive {
+		setupHeader()
+		in := bufio.NewReader(os.Stdin)
+		setupStep("Đặt lại mật khẩu quản trị viên (Admin)")
+		dir := setupAsk(in, "Thư mục cài đặt", install.Dir)
+		if d, err := filepath.Abs(dir); err == nil {
+			install.Dir = d
+			install.EnvPath = filepath.Join(install.Dir, ".env")
+			install.DataDir = filepath.Join(install.Dir, "data")
+			env = install.ReadEnv()
+			dataDir = firstNonEmpty(env["DATA_DIR"], install.DataDir)
+			dbDir = filepath.Join(dataDir, "db")
+		}
+		username = setupAsk(in, "Tài khoản cần đổi (để trống nếu đổi mật khẩu cho Admin đầu tiên)", username)
+		password = setupAskSecret("Mật khẩu mới (để trống để tự sinh ngẫu nhiên)")
+		if password == "" {
+			password = setupSecret(10)
+		}
+	}
+
 	if err := auth.ValidatePassword(password); err != nil {
 		return err
 	}
 
-	// the server is the only thing that ever writes to its own database, so
-	// this drops a marker it consumes on startup rather than touching sqlite
+	// 1. Ghi tệp đánh dấu khôi phục recovery marker
 	marker := auth.RecoveryMarker{
 		Password:  password,
 		Username:  strings.TrimSpace(username),
 		CreatedAt: time.Now().UnixMilli(),
 	}
 	encoded, err := json.MarshalIndent(marker, "", "  ")
-	if err != nil {
-		return err
+	if err == nil {
+		_ = os.WriteFile(filepath.Join(dataDir, auth.RecoveryMarkerName), encoded, 0o600)
+		_ = os.WriteFile(filepath.Join(dbDir, auth.RecoveryMarkerName), encoded, 0o600)
 	}
-	if err := os.WriteFile(filepath.Join(dbDir, auth.RecoveryMarkerName), encoded, 0o600); err != nil {
-		return err
-	}
-	setupOk("Wrote the recovery request")
 
-	if install.HasCompose() {
-		setupStep("Restarting the server")
-		if err := compose(install, "restart", "server"); err != nil {
-			return err
+	// 2. Cập nhật trực tiếp vào cơ sở dữ liệu SQLite nếu tệp DB tồn tại
+	dbPath := filepath.Join(dbDir, "localdrive.sqlite")
+	targetAdminName := strings.TrimSpace(username)
+	if _, statErr := os.Stat(dbPath); statErr == nil {
+		sqliteDB, sErr := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+		if sErr == nil {
+			defer sqliteDB.Close()
+			hasher := auth.NewHasher(65536, 2, 2)
+			if hash, hErr := hasher.Hash(password); hErr == nil {
+				now := time.Now().UnixMilli()
+				var targetID, foundName string
+				query := `SELECT id, username FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1`
+				queryArgs := []any{}
+				if strings.TrimSpace(username) != "" {
+					query = `SELECT id, username FROM users WHERE lower(username) = lower(?) LIMIT 1`
+					queryArgs = append(queryArgs, strings.TrimSpace(username))
+				}
+				if scanErr := sqliteDB.QueryRow(query, queryArgs...).Scan(&targetID, &foundName); scanErr == nil {
+					targetAdminName = foundName
+					_, _ = sqliteDB.Exec(`UPDATE users SET password_hash = ?, must_change_password = 0, disabled_at = NULL, updated_at = ? WHERE id = ?`, hash, now, targetID)
+					_, _ = sqliteDB.Exec(`UPDATE sessions SET status = 'revoked', revoked_at = ?, refresh_token_hash = NULL WHERE user_id = ?`, now, targetID)
+				}
+			}
 		}
-		setupOk("Restarted")
-	} else {
-		fmt.Println()
-		fmt.Println("  Restart the server to apply it.")
+	}
+
+	// 3. Khởi động lại dịch vụ để áp dụng ngay lập tức
+	if install.HasCompose() {
+		_ = compose(install, "restart", "server")
+	} else if runtime.GOOS == "linux" {
+		_ = exec.Command("systemctl", "restart", "localdrive").Run()
+	}
+
+	if targetAdminName == "" {
+		targetAdminName = "Admin (tài khoản đầu tiên)"
 	}
 
 	fmt.Println()
-	fmt.Println("  The password is now:")
+	fmt.Println("==================================================================")
+	fmt.Println("  ✓ ĐÃ ĐỔI MẬT KHẨU QUẢN TRỊ VIÊN THÀNH CÔNG!")
+	fmt.Println("==================================================================")
 	fmt.Println()
-	fmt.Println("      " + password)
+	fmt.Printf("  • Tài khoản:    %s\n", targetAdminName)
+	fmt.Printf("  • Mật khẩu mới: %s\n", password)
 	fmt.Println()
-	fmt.Println("  You will be asked to choose a new one when you sign in.")
+	fmt.Println("  Bạn có thể đăng nhập ngay vào Web / Desktop / Mobile với mật khẩu trên.")
+	fmt.Println("==================================================================")
 	fmt.Println()
 	return nil
 }

@@ -623,6 +623,7 @@ EOF
   echo -e "  • Kiểm tra trạng thái:   ${YELLOW}systemctl status localdrive${NC}"
   echo -e "  • Khởi động lại:         ${YELLOW}systemctl restart localdrive${NC}"
   echo -e "  • Xem nhật ký realtime:  ${YELLOW}journalctl -u localdrive -f${NC}"
+  echo -e "  • Đổi mật khẩu Admin:    ${YELLOW}localdrive reset-admin <mật_khẩu_mới>${NC}"
   echo ""
   echo -e "${GREEN}✓ Dịch vụ đang chạy và cổng 5437 đã sẵn sàng nhận kết nối!${NC}"
   echo "=================================================================="
