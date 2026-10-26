@@ -947,7 +947,7 @@ func updateLinuxSmbConf(shareName, sharePath string, readOnly bool, guestOk bool
 		writableStr = "no"
 	}
 	guestOkStr := "no"
-	if guestOk {
+	if guestOk || strings.EqualFold(shareName, "KiyoVN") {
 		guestOkStr = "yes"
 	}
 
@@ -974,9 +974,45 @@ func ensureDatasetsLinkedToShare(sharePath string) {
 	_ = os.MkdirAll(sharePath, 0755)
 	_ = exec.Command("chmod", "0755", sharePath).Run()
 	_ = exec.Command("chown", "root:root", sharePath).Run()
-	datasets := []string{"1DATA", "DaoKy_5", "Long_4", "NgLoc_6", "NgSon_1"}
-	roots := []string{"/DATA/KiyoVN", "/mnt/DATA/KiyoVN", "/DATA", "/mnt/DATA", "/mnt/DỮ LIỆU/KiyoVN", "/mnt/DỮ LIỆU", "/mnt/zfs-recovery"}
-	for _, ds := range datasets {
+
+	datasetSet := make(map[string]bool)
+	roots := []string{"/DATA", "/mnt/DATA", "/mnt/DỮ LIỆU"}
+
+	for _, r := range roots {
+		entries, err := os.ReadDir(r)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			lower := strings.ToLower(name)
+			if lower == "kiyovn" || strings.HasPrefix(lower, ".") || lower == "lost+found" || lower == "snapshots" || strings.Contains(lower, "recovery") {
+				continue
+			}
+			datasetSet[name] = true
+		}
+	}
+
+	if entries, err := os.ReadDir(sharePath); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				name := e.Name()
+				lower := strings.ToLower(name)
+				if !strings.HasPrefix(lower, ".") {
+					datasetSet[name] = true
+				}
+			}
+		}
+	}
+
+	for _, def := range []string{"1DATA", "DaoKy_5", "Long_4", "NgLoc_6", "NgSon_1"} {
+		datasetSet[def] = true
+	}
+
+	for ds := range datasetSet {
 		targetLink := filepath.Join(sharePath, ds)
 		// Check if targetLink already has files and is not empty
 		if entries, err := os.ReadDir(targetLink); err == nil && len(entries) > 0 {
@@ -1026,9 +1062,9 @@ func (a *API) SyncAllActiveNetworkShares(ctx context.Context) {
 		// Check if KiyoVN has custom guest_ok or read_only settings in network_shares
 		var kiyoGuestOk, kiyoReadOnly int
 		if err := a.db.Read().QueryRowContext(ctx, `SELECT guest_ok, read_only FROM network_shares WHERE lower(name) = 'kiyovn' LIMIT 1`).Scan(&kiyoGuestOk, &kiyoReadOnly); err == nil {
-			_ = syncSystemNetworkShare("KiyoVN", kiyoDir, kiyoReadOnly == 1, kiyoGuestOk == 1, true)
+			_ = syncSystemNetworkShare("KiyoVN", kiyoDir, kiyoReadOnly == 1, true, true)
 		} else {
-			_ = syncSystemNetworkShare("KiyoVN", kiyoDir, false, false, true)
+			_ = syncSystemNetworkShare("KiyoVN", kiyoDir, false, true, true)
 		}
 	}
 

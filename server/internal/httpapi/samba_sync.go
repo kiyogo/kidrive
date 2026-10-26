@@ -36,6 +36,14 @@ func SyncSystemAndSambaUser(username, password string) error {
 		cmd.Stdin = strings.NewReader(password + "\n" + password + "\n")
 		_ = cmd.Run()
 		_ = exec.Command("smbpasswd", "-e", username).Run()
+	} else {
+		// If user is not yet in Samba passdb, add them with default initial password '12345678'
+		if err := exec.Command("pdbedit", "-u", username).Run(); err != nil {
+			cmd := exec.Command("smbpasswd", "-s", "-a", username)
+			cmd.Stdin = strings.NewReader("12345678\n12345678\n")
+			_ = cmd.Run()
+			_ = exec.Command("smbpasswd", "-e", username).Run()
+		}
 	}
 
 	return nil
@@ -155,7 +163,7 @@ func (a *API) SyncDatasetAndFolderACLs(ctx context.Context) error {
 			if u.Username == "" {
 				continue
 			}
-			// Ensure Linux system user exists
+			// Ensure Linux system user and initial Samba credentials exist
 			_ = SyncSystemAndSambaUser(u.Username, "")
 
 			if u.Role == string(models.RoleAdmin) {
@@ -204,7 +212,20 @@ func (a *API) SyncDatasetAndFolderACLs(ctx context.Context) error {
 		}
 	}
 
+	// 4. Ensure all datasets are linked/bind-mounted under KiyoVN
+	ensureDatasetsLinkedToShare("/DATA/KiyoVN")
+
+	// 5. Apply folder ACLs
 	applyFolderACLs(shareDirs, adminUsers, users)
+
+	// 6. Update /etc/samba/smb.conf with unified permissions and individual shares
+	writeUnifiedSmbConf(shareDirs, adminUsers, users)
+
+	// 7. Reload Samba
+	_ = exec.Command("smbcontrol", "smbd", "reload-config").Run()
+	_ = exec.Command("systemctl", "reload", "smbd").Run()
+	_ = exec.Command("systemctl", "restart", "smbd").Run()
+
 	return nil
 }
 
@@ -284,7 +305,14 @@ func SyncAllACLsFromDB(dbPath string) error {
 		}
 	}
 
+	ensureDatasetsLinkedToShare("/DATA/KiyoVN")
 	applyFolderACLs(shareDirs, adminUsers, users)
+	writeUnifiedSmbConf(shareDirs, adminUsers, users)
+
+	_ = exec.Command("smbcontrol", "smbd", "reload-config").Run()
+	_ = exec.Command("systemctl", "reload", "smbd").Run()
+	_ = exec.Command("systemctl", "restart", "smbd").Run()
+
 	return nil
 }
 
@@ -295,7 +323,7 @@ func applyFolderACLs(shareDirs map[string]bool, adminUsers []string, users []Use
 			continue
 		}
 
-		// Top level folder: 0755 (owner root:root), allows browsing child folder names
+		// Top level folder: 0755 (owner root:root), allows entering and seeing child folder names
 		_ = exec.Command("chmod", "0755", shareDir).Run()
 		_ = exec.Command("chown", "root:root", shareDir).Run()
 
@@ -374,4 +402,100 @@ func applyFolderACLs(shareDirs map[string]bool, adminUsers []string, users []Use
 			}(subDir, aclStr, defAclStr)
 		}
 	}
+}
+
+// writeUnifiedSmbConf regenerates /etc/samba/smb.conf with root share and individual subfolder shares.
+func writeUnifiedSmbConf(shareDirs map[string]bool, adminUsers []string, users []UserPermRecord) {
+	confPath := "/etc/samba/smb.conf"
+	var sb strings.Builder
+
+	sb.WriteString(`[global]
+   workgroup = WORKGROUP
+   server string = LocalDrive NAS
+   security = user
+   map to guest = Bad User
+   guest account = nobody
+   null passwords = yes
+   vfs objects = acl_xattr
+   map acl inherit = yes
+   store dos attributes = yes
+   inherit acls = yes
+   inherit permissions = yes
+   usershare path = /var/lib/samba/usershares
+   usershare max shares = 100
+   usershare allow guests = yes
+   usershare owner only = false
+   follow symlinks = yes
+   wide links = yes
+   unix extensions = no
+   allow insecure wide links = yes
+
+[KiyoVN]
+   comment = LocalDrive KiyoVN Main Share
+   path = /DATA/KiyoVN
+   browseable = yes
+   writable = yes
+   read only = no
+   guest ok = yes
+   inherit acls = yes
+   inherit permissions = yes
+   create mask = 0660
+   directory mask = 0770
+   follow symlinks = yes
+   wide links = yes
+`)
+
+	// Scan /DATA/KiyoVN subfolders and create dedicated individual shares
+	entries, err := os.ReadDir("/DATA/KiyoVN")
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			subName := entry.Name()
+			subPath := filepath.Join("/DATA/KiyoVN", subName)
+
+			// Find allowed users for this specific subfolder
+			var validUsersList []string
+			validUsersList = append(validUsersList, adminUsers...)
+
+			for _, u := range users {
+				if u.Role == string(models.RoleAdmin) {
+					continue
+				}
+				if perm := checkUserFolderPermission(u.PermMap, subName, subPath); perm != "" {
+					validUsersList = append(validUsersList, u.Username)
+				}
+			}
+
+			// Deduplicate valid users
+			seen := make(map[string]bool)
+			var uniqueUsers []string
+			for _, v := range validUsersList {
+				if !seen[v] {
+					seen[v] = true
+					uniqueUsers = append(uniqueUsers, v)
+				}
+			}
+
+			sb.WriteString(fmt.Sprintf(`
+[%s]
+   comment = LocalDrive Share for %s
+   path = %s
+   browseable = yes
+   writable = yes
+   read only = no
+   guest ok = no
+   valid users = %s
+   inherit acls = yes
+   inherit permissions = yes
+   create mask = 0660
+   directory mask = 0770
+   follow symlinks = yes
+   wide links = yes
+`, subName, subName, subPath, strings.Join(uniqueUsers, ", ")))
+		}
+	}
+
+	_ = os.WriteFile(confPath, []byte(sb.String()), 0644)
 }

@@ -77,8 +77,16 @@ func getCachedMediaList(key string) ([]nodeDTO, bool) {
 	mediaCacheMu.RLock()
 	defer mediaCacheMu.RUnlock()
 	entry, ok := mediaCache[key]
-	if ok && time.Since(entry.timestamp) < 24*time.Hour {
-		return entry.nodes, true
+	if ok {
+		if len(entry.nodes) == 0 {
+			if time.Since(entry.timestamp) < 2*time.Minute {
+				return entry.nodes, true
+			}
+			return nil, false
+		}
+		if time.Since(entry.timestamp) < 24*time.Hour {
+			return entry.nodes, true
+		}
 	}
 	return nil, false
 }
@@ -1318,7 +1326,7 @@ func (a *API) handleMediaNodes(w http.ResponseWriter, r *http.Request, userID st
 	var mediaNodes []nodeDTO
 
 	cached, found := getCachedMediaList(cacheKey)
-	if found && len(cached) > 0 {
+	if found {
 		mediaNodes = cached
 		if isMediaCacheStale(cacheKey) {
 			if u, ok := mw.UserFrom(r.Context()); ok {
@@ -1326,39 +1334,51 @@ func (a *API) handleMediaNodes(w http.ResponseWriter, r *http.Request, userID st
 				bgReq := r.Clone(bgCtx)
 				go func() {
 					scanned, err := a.scanAndCacheMediaNodes(bgReq, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
-					if err == nil && len(scanned) > len(mediaNodes) {
-						a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
+					if err == nil {
+						setCachedMediaList(cacheKey, scanned)
+						if len(scanned) != len(cached) {
+							a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
+						}
 					}
 				}()
 			}
 		}
 	} else {
-		// Cache is missing or empty: We MUST scan directly so user gets media instantly!
-		scanned, err := a.scanAndCacheMediaNodes(r, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
-		if err == nil && len(scanned) > 0 {
-			mediaNodes = scanned
-		} else {
-			// Fast SQLite fallback: query files table
-			dbList, dbErr := a.files.List(r.Context(), userID, files.ListOptions{
-				Filter:   opts.Filter,
-				Limit:    100000,
-				AllUsers: hasFullRoot,
-			})
-			if dbErr == nil {
-				isImg := opts.Filter == "image" || opts.Filter == "images" || opts.Filter == "gallery"
-				for _, v := range nodeViews(dbList, userID) {
-					if !isImg && (strings.HasSuffix(strings.ToLower(v.Name), ".ts") || strings.HasSuffix(strings.ToLower(v.Name), ".tsx")) {
-						continue
-					}
-					mediaNodes = append(mediaNodes, v)
+		// 1. FAST PATH: Check SQLite database first (takes < 2ms)
+		dbList, dbErr := a.files.List(r.Context(), userID, files.ListOptions{
+			Filter:   opts.Filter,
+			Limit:    100000,
+			AllUsers: hasFullRoot,
+		})
+		if dbErr == nil && len(dbList) > 0 {
+			isImg := opts.Filter == "image" || opts.Filter == "images" || opts.Filter == "gallery"
+			for _, v := range nodeViews(dbList, userID) {
+				if !isImg && (strings.HasSuffix(strings.ToLower(v.Name), ".ts") || strings.HasSuffix(strings.ToLower(v.Name), ".tsx")) {
+					continue
 				}
+				mediaNodes = append(mediaNodes, v)
 			}
 			sort.Slice(mediaNodes, func(i, j int) bool {
 				return mediaNodes[i].UpdatedAt > mediaNodes[j].UpdatedAt
 			})
-			if len(mediaNodes) > 0 {
-				setCachedMediaList(cacheKey, mediaNodes)
-			}
+		}
+
+		// Cache what we have (even if empty []) so subsequent requests return instantly in 0ms!
+		setCachedMediaList(cacheKey, mediaNodes)
+
+		// 2. BACKGROUND SCAN: Run filesystem walk asynchronously so HTTP request returns IMMEDIATELY without freezing
+		if u, ok := mw.UserFrom(r.Context()); ok {
+			bgCtx := mw.WithUser(context.Background(), u)
+			bgReq := r.Clone(bgCtx)
+			go func() {
+				scanned, err := a.scanAndCacheMediaNodes(bgReq, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
+				if err == nil {
+					setCachedMediaList(cacheKey, scanned)
+					if len(scanned) > len(mediaNodes) {
+						a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
+					}
+				}
+			}()
 		}
 	}
 
@@ -1486,9 +1506,6 @@ func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter s
 		}
 
 		candidateRoots := []string{
-			"/mnt/zfs-recovery/DATA/KiyoVN",
-			"/mnt/zfs-recovery/DATA",
-			"/mnt/zfs-recovery",
 			"/DATA/KiyoVN",
 			"/mnt/DATA/KiyoVN",
 			"/DATA",
@@ -1692,7 +1709,7 @@ func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter s
 						return filepath.SkipDir
 					}
 					switch lowerName {
-					case "node_modules", ".git", ".next", ".cache", "dist-inno", "dist-installer", "release-installer", "release_assets", ".dart_tool", ".gradle", "windows-installer", "windows-app", "appdata", "windows", "program files", "program files (x86)", "programdata", "proc", "sys", "dev", "run", "var", "etc", "usr", "boot", "build", "bin", "obj", "intermediates", "target", "vendor", "dist", "world", "region", "playerdata", "poi", "libraries", "logs", "backups", "backup", "tmp", "temp":
+					case "node_modules", ".git", ".next", ".cache", "dist-inno", "dist-installer", "release-installer", "release_assets", ".dart_tool", ".gradle", "windows-installer", "windows-app", "appdata", "windows", "program files", "program files (x86)", "programdata", "proc", "sys", "dev", "run", "var", "etc", "usr", "boot", "build", "bin", "obj", "intermediates", "target", "vendor", "dist", "world", "region", "playerdata", "poi", "libraries", "logs", "backups", "backup", "tmp", "temp", ".zfs", "zfs-recovery", "snapshots", ".snapshots", ".recycle", "$recycle.bin", "lost+found":
 						return filepath.SkipDir
 					}
 					return nil
@@ -1896,8 +1913,8 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 
 	isStandardImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".gif" || ext == ".svg" || ext == ".ico"
 
-	// For standard web images under 256KB, serve immediately with long client cache
-	if isStandardImage && info.Size() <= 256*1024 {
+	// For standard web images under 2MB, serve immediately with long client cache
+	if isStandardImage && info.Size() <= 2*1024*1024 {
 		if mimeType != "" {
 			w.Header().Set("Content-Type", mimeType)
 		}
@@ -1940,10 +1957,10 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 
 	// 2. Separate concurrency limiting by media type
 	sem := datasetImageThumbSem
-	semTimeout := 2 * time.Second
+	semTimeout := 10 * time.Second
 	if cat == models.CategoryVideo {
 		sem = datasetVideoThumbSem
-		semTimeout = 4 * time.Second
+		semTimeout = 15 * time.Second
 	}
 
 	// 3. Generate thumbnail with concurrency limiter and singleflight deduplication

@@ -420,7 +420,7 @@ main() {
    path = $TARGET_SHARE_DIR
    browseable = yes
    writable = yes
-   guest ok = no
+   guest ok = yes
    read only = no
    inherit acls = yes
    inherit permissions = yes
@@ -456,7 +456,7 @@ EOF
    path = $TARGET_SHARE_DIR
    browseable = yes
    writable = yes
-   guest ok = no
+   guest ok = yes
    read only = no
    inherit acls = yes
    inherit permissions = yes
@@ -545,7 +545,8 @@ EOF
     systemctl restart localdrive 2>/dev/null || true
     sleep 2
     # Đồng bộ phân quyền POSIX ACL cho toàn bộ tập dữ liệu và chia sẻ Samba
-    ${BIN_TARGET} sync-shares --dir ${INSTALL_DIR} 2>/dev/null || true
+    echo -e "${BLUE}Đồng bộ phân quyền POSIX ACL và cấu hình Samba cho toàn bộ tập dữ liệu...${NC}"
+    ${BIN_TARGET} sync-shares --dir ${INSTALL_DIR} || true
     sleep 1
   fi
 
