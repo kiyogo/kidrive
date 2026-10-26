@@ -51,7 +51,7 @@ KiDrive is intended for personal cloud storage, home laboratories, private infra
 
 ---
 
-## 📸 Screenshots & Visual Preview
+## 📸 Screenshots
 
 <div align="center">
 
@@ -60,19 +60,19 @@ KiDrive is intended for personal cloud storage, home laboratories, private infra
 
 <br><br>
 
-### 🖼️ Media Gallery & Timeline
+### 🖼️ Media Gallery
 <img src="docs/assets/showcase/app/app-gallery.png" alt="KiDrive Media Gallery" width="95%">
 
 <br><br>
 
-### 🪟 Windows File Explorer Integration (KiyoDrive)
+### 🪟 Windows File Explorer Integration
 *Seamlessly integrated as a dedicated Network Location under **This PC** in Windows Explorer:*
 <br>
 <img src="docs/assets/showcase/app/kiyodrive-explorer.png" alt="KiyoDrive in Windows File Explorer" width="90%">
 
 <br><br>
 
-### 📱 Mobile Experience (Android / iOS)
+### 📱 Mobile Experience
 <p align="center">
   <img src="docs/assets/showcase/app/app-files-phone.png" alt="KiDrive Mobile Files" width="38%">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
   <img src="docs/assets/showcase/app/app-gallery-mobile.png" alt="KiDrive Mobile Gallery" width="38%">
@@ -112,7 +112,7 @@ Typical target distributions include:
 
 **Important:** Alpine Linux typically uses OpenRC rather than systemd and is not supported by the current automated systemd installation procedure without modifications.
 
-#### Method 1: Download and Run the Installer (Recommended)
+#### Method 1: Download and Run the Installer
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kiyogo/kidrive/main/install.sh -o install.sh
