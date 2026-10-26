@@ -125,6 +125,14 @@ func NewHandler(d HandlerDeps) (*handler.Handler, error) {
 				return handler.HTTPResponse{}, translate(err)
 			}
 
+			if strings.HasPrefix(node.ID, "dataset:") || node.LibraryID == "dataset" {
+				_ = os.Remove(binPath)
+				_ = os.Remove(infoPath)
+				return handler.HTTPResponse{
+					Header: handler.HTTPHeader{HeaderNodeID: node.ID},
+				}, nil
+			}
+
 			// the bytes are only adopted once the row exists, and the staging
 			// metadata goes with them
 			if err := d.Files.AdoptObject(node.LibraryID, binPath, sum); err != nil {

@@ -86,13 +86,14 @@ Future<void> showNodeActions(
       glyph: LdGlyph.copy,
       enabled: true,
     ),
-    if (node.isFolder)
-      LdMenuAction(
-        id: 'paste',
-        label: 'Dán',
-        glyph: LdGlyph.file,
-        enabled: clipboard != null && clipboard.nodes.isNotEmpty && node.role.canCreate,
-      ),
+    LdMenuAction(
+      id: 'paste',
+      label: 'Dán',
+      glyph: LdGlyph.file,
+      enabled: clipboard != null &&
+          clipboard.nodes.isNotEmpty &&
+          (node.isFolder ? node.role.canCreate : true),
+    ),
     LdMenuAction(
       id: 'share',
       label: l10n.actionShare,
@@ -214,24 +215,35 @@ Future<void> showNodeActions(
       final cb = ref.read(fileClipboardProvider);
       if (cb != null && cb.nodes.isNotEmpty) {
         final db = ref.read(filesDbProvider);
+        final transferCtrl = ref.read(transferControllerProvider.notifier);
+        final isCut = cb.action == ClipboardAction.cut;
+        final kindLabel = isCut ? 'Cắt & Dán' : 'Sao chép';
+        final targetId = (node.isFolder && !cb.nodes.any((n) => n.id == node.id))
+            ? node.id
+            : node.parentId;
         try {
           for (final item in cb.nodes) {
-            if (cb.action == ClipboardAction.cut) {
-              await db.moveNodeTo(item.id, node.id);
-            } else {
-              await db.copyNode(item.id, node.id);
-            }
+            await transferCtrl.enqueueServerOperation(
+              name: item.name,
+              kindName: kindLabel,
+              sizeBytes: item.sizeBytes,
+              action: () async {
+                if (isCut) {
+                  await db.moveNodeTo(item.id, targetId);
+                } else {
+                  await db.copyNode(item.id, targetId);
+                }
+              },
+            );
           }
-          if (cb.action == ClipboardAction.cut) {
+          if (isCut) {
             ref.read(fileClipboardProvider.notifier).clear();
           }
           refreshServerDataFrom(ref);
           if (context.mounted) {
             LdToast.success(
               context,
-              cb.action == ClipboardAction.cut
-                  ? 'Đã chuyển thành công!'
-                  : 'Đã dán thành công!',
+              isCut ? 'Đã chuyển thành công!' : 'Đã dán thành công!',
             );
           }
         } catch (e) {

@@ -61,8 +61,11 @@ export function Preview({
   // Load offline blob if available
   useEffect(() => {
     let url = "";
+    let cancelled = false;
+    setLocal("");
     void (async () => {
       const blob = await readKept(node.id);
+      if (cancelled) return;
       if (blob) {
         url = URL.createObjectURL(blob);
         setLocal(url);
@@ -71,6 +74,7 @@ export function Preview({
       }
     })();
     return () => {
+      cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
   }, [node.id]);

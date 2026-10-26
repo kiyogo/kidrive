@@ -112,8 +112,8 @@ class GalleryPageDesktop extends HookConsumerWidget {
           glyph: LdGlyph.image,
           tint: LdColors.fileMedia,
         ),
-        data: (nodes) => GalleryGrid(
-          sections: groupGallery(
+        data: (nodes) {
+          final sections = groupGallery(
             nodes,
             sort: sort.by,
             grouping: grouping,
@@ -123,12 +123,16 @@ class GalleryPageDesktop extends HookConsumerWidget {
               day: group == GalleryGrouping.day,
               month: group == GalleryGrouping.month,
             ),
-          ),
-          columns: columns.value,
-          selection: selection.value,
-          onOpen: (node) => openGalleryNode(context, node),
-          onToggleSelect: toggle,
-        ),
+          );
+          final orderedNodes = sections.expand((s) => s.items).toList();
+          return GalleryGrid(
+            sections: sections,
+            columns: columns.value,
+            selection: selection.value,
+            onOpen: (node) => openGalleryNode(context, node, orderedNodes),
+            onToggleSelect: toggle,
+          );
+        },
       ),
     );
   }

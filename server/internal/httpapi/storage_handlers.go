@@ -2480,7 +2480,13 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 				if mp != "" && mp != "none" && mp != "legacy" {
 					_ = exec.Command("zfs", "mount", tryName).Run()
 					if fi, sErr := os.Stat(mp); sErr == nil && fi.IsDir() {
-						return mp
+						if isDirWritable(mp) {
+							return mp
+						}
+						UnlockStorageRW(mp)
+						if isDirWritable(mp) {
+							return mp
+						}
 					}
 				}
 			}
@@ -2489,7 +2495,13 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 				if mp != "" && mp != "none" && mp != "legacy" {
 					_ = exec.Command("zfs", "mount", tryName).Run()
 					if fi, sErr := os.Stat(mp); sErr == nil && fi.IsDir() {
-						return mp
+						if isDirWritable(mp) {
+							return mp
+						}
+						UnlockStorageRW(mp)
+						if isDirWritable(mp) {
+							return mp
+						}
 					}
 				}
 			}
@@ -2507,7 +2519,13 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 						if zMount != "" && zMount != "none" && zMount != "legacy" {
 							_ = exec.Command("zfs", "mount", zName).Run()
 							if fi, sErr := os.Stat(zMount); sErr == nil && fi.IsDir() {
-								return zMount
+								if isDirWritable(zMount) {
+									return zMount
+								}
+								UnlockStorageRW(zMount)
+								if isDirWritable(zMount) {
+									return zMount
+								}
 							}
 						}
 					}
@@ -2594,9 +2612,43 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 		cleanStripped := strings.ReplaceAll(cleanMount, "/mnt/zfs-recovery/", "/mnt/")
 		candidateSet = append(candidateSet, cleanStripped)
 		candidateSet = append(candidateSet, strings.ReplaceAll(cleanMount, "/mnt/zfs-recovery/", "/"))
+		candidateSet = append(candidateSet, cleanMount)
+	}
+	candidateSet = append(candidateSet,
+		"/mnt/zfs-recovery/DATA/KiyoVN/"+trimmedName,
+		"/mnt/zfs-recovery/DATA/KiyoVN/"+leaf,
+		"/mnt/zfs-recovery/DATA/"+trimmedName,
+		"/mnt/zfs-recovery/DATA/"+leaf,
+		filepath.Join("/mnt/zfs-recovery", trimmedName),
+	)
+
+	hasFiles := func(dir string) bool {
+		entries, err := os.ReadDir(dir)
+		return err == nil && len(entries) > 0
 	}
 
-	// 2. Ưu tiên thư mục TỒN TẠI và CÓ QUYỀN GHI
+	// 2a. Ưu tiên thư mục CÓ DỮ LIỆU THẬT và CÓ QUYỀN GHI
+	for _, c := range candidateSet {
+		if c != "" && c != "/" && c != "." {
+			if hasFiles(c) && isDirWritable(c) {
+				return c
+			}
+		}
+	}
+
+	// 2b. Thử mở khóa quyền ghi (ZFS RW + OverlayFS fallback) trên thư mục CÓ DỮ LIỆU THẬT
+	for _, c := range candidateSet {
+		if c != "" && c != "/" && c != "." {
+			if hasFiles(c) {
+				UnlockStorageRW(c)
+				if isDirWritable(c) {
+					return c
+				}
+			}
+		}
+	}
+
+	// 2c. Ưu tiên thư mục TỒN TẠI và CÓ QUYỀN GHI
 	for _, c := range candidateSet {
 		if c != "" && c != "/" && c != "." {
 			if isDirWritable(c) {
@@ -2605,7 +2657,26 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 		}
 	}
 
-	// 3. Nếu chưa ghi được (read-only hoặc phân quyền hạn chế), ưu tiên thư mục TỒN TẠI
+	// 2d. Thử mở khóa quyền ghi trên các ứng viên tồn tại và kiểm tra lại
+	for _, c := range candidateSet {
+		if c != "" && c != "/" && c != "." {
+			if fi, err := os.Stat(c); err == nil && fi.IsDir() {
+				UnlockStorageRW(c)
+				if isDirWritable(c) {
+					return c
+				}
+			}
+		}
+	}
+
+	// 3. Nếu vẫn chưa ghi được, ưu tiên thư mục CÓ DỮ LIỆU THẬT trước, rồi tới thư mục TỒN TẠI
+	for _, c := range candidateSet {
+		if c != "" && c != "/" && c != "." {
+			if hasFiles(c) {
+				return c
+			}
+		}
+	}
 	for _, c := range candidateSet {
 		if c != "" && c != "/" && c != "." {
 			if fi, err := os.Stat(c); err == nil && fi.IsDir() {
@@ -2617,19 +2688,13 @@ func (a *API) resolveRealMountPath(name, mount string) string {
 	// 4. Nếu có zfs-recovery và là đường dẫn duy nhất còn lại
 	if cleanMount != "" && cleanMount != "/" && cleanMount != "." {
 		if fi, err := os.Stat(cleanMount); err == nil && fi.IsDir() {
-			if strings.Contains(cleanMount, "zfs-recovery") {
-				_ = exec.Command("mount", "-o", "remount,rw", cleanMount).Run()
-				_ = exec.Command("mount", "-o", "remount,rw", "/mnt/zfs-recovery").Run()
-				_ = exec.Command("zfs", "set", "readonly=off", trimmedName).Run()
-			}
+			UnlockStorageRW(cleanMount)
 			return cleanMount
 		}
 	}
 	recPath := filepath.Join("/mnt/zfs-recovery", trimmedName)
 	if fi, err := os.Stat(recPath); err == nil && fi.IsDir() {
-		_ = exec.Command("mount", "-o", "remount,rw", recPath).Run()
-		_ = exec.Command("mount", "-o", "remount,rw", "/mnt/zfs-recovery").Run()
-		_ = exec.Command("zfs", "set", "readonly=off", trimmedName).Run()
+		UnlockStorageRW(recPath)
 		return recPath
 	}
 
@@ -2797,14 +2862,20 @@ func (a *API) resolveDatasetTarget(ctx context.Context, rawID string) (canonical
 	}
 	for _, cr := range candidateRoots {
 		cand := filepath.Clean(filepath.Join(cr, clean))
-		if _, err := os.Stat(cand); err == nil {
+		if fi, err := os.Stat(cand); err == nil {
+			if fi.IsDir() && !isDirWritable(cand) {
+				UnlockStorageRW(cand)
+			}
 			return clean, parts[0], strings.Join(parts[1:], "/"), cand, nil
 		}
 		for _, prefix := range []string{"data/kiyovn/", "kiyovn/", "data/"} {
 			if strings.HasPrefix(strings.ToLower(clean), prefix) {
 				trimmed := clean[len(prefix):]
 				candTrimmed := filepath.Clean(filepath.Join(cr, trimmed))
-				if _, err := os.Stat(candTrimmed); err == nil {
+				if fi, err := os.Stat(candTrimmed); err == nil {
+					if fi.IsDir() && !isDirWritable(candTrimmed) {
+						UnlockStorageRW(candTrimmed)
+					}
 					return clean, parts[0], trimmed, candTrimmed, nil
 				}
 			}
@@ -2812,7 +2883,10 @@ func (a *API) resolveDatasetTarget(ctx context.Context, rawID string) (canonical
 	}
 
 	for _, direct := range []string{"/" + clean, clean, filepath.Join("/mnt", clean)} {
-		if _, err := os.Stat(direct); err == nil {
+		if fi, err := os.Stat(direct); err == nil {
+			if fi.IsDir() && !isDirWritable(direct) {
+				UnlockStorageRW(direct)
+			}
 			return clean, parts[0], strings.Join(parts[1:], "/"), direct, nil
 		}
 	}
@@ -3000,12 +3074,21 @@ func (a *API) handleCreateDatasetFolder(w http.ResponseWriter, r *http.Request) 
 	}
 
 	now := db.NowMillis()
-	relItemPath := filepath.Join(subpath, folderName)
-	relItemPath = strings.ReplaceAll(relItemPath, "\\", "/")
+	relItemPath := filepath.ToSlash(filepath.Join(subpath, folderName))
+	relItemPath = strings.TrimPrefix(relItemPath, "/")
+	fullIDPath := strings.TrimSuffix(dsName, "/")
+	if relItemPath != "" && relItemPath != "." {
+		fullIDPath = fullIDPath + "/" + relItemPath
+	}
+	parentIDPath := strings.TrimSuffix(dsName, "/")
+	if subpath != "" && subpath != "." {
+		parentIDPath = parentIDPath + "/" + strings.TrimPrefix(filepath.ToSlash(subpath), "/")
+	}
+	invalidateAllCaches()
 
 	writeJSON(w, http.StatusCreated, DatasetItemDTO{
-		ID:        fmt.Sprintf("dataset:%s:%s", dsName, relItemPath),
-		ParentID:  fmt.Sprintf("dataset:%s:%s", dsName, subpath),
+		ID:        fmt.Sprintf("dataset:%s", fullIDPath),
+		ParentID:  fmt.Sprintf("dataset:%s", parentIDPath),
 		OwnerID:   "system",
 		LibraryID: "",
 		Name:      folderName,
@@ -3092,6 +3175,7 @@ func (a *API) handleDeleteDatasetItem(w http.ResponseWriter, r *http.Request) {
 			return nil
 		})
 	}
+	invalidateAllCaches()
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -3110,30 +3194,25 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	subpath := r.URL.Query().Get("subpath")
+	combinedTarget := strings.Trim(nameOrID, "/")
+	if trimmedSub := strings.Trim(subpath, "/\\"); trimmedSub != "" && trimmedSub != "." {
+		combinedTarget = combinedTarget + "/" + strings.ReplaceAll(trimmedSub, "\\", "/")
+	}
 
-	dsName, mount, err := a.getDatasetMount(r.Context(), nameOrID)
+	canonicalPath, dsName, resolvedSub, mountPath, err := a.resolveDatasetTarget(r.Context(), combinedTarget)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
 
-	_, err = a.checkDatasetAccess(r, dsName, true)
+	_, err = a.checkDatasetAccess(r, canonicalPath, true)
 	if err != nil {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
 		return
 	}
 
-	cleanedSub := filepath.Clean("/" + subpath)
-	cleanedSub = strings.TrimPrefix(cleanedSub, "/")
-	cleanedSub = strings.TrimPrefix(cleanedSub, "\\")
-
-	targetDir := filepath.Join(mount, cleanedSub)
-	cleanTarget := filepath.Clean(targetDir)
-	cleanMount := filepath.Clean(mount)
-	if !strings.HasPrefix(cleanTarget, cleanMount) {
-		a.fail(w, r, errors.New("đường dẫn tải lên không hợp lệ"))
-		return
-	}
+	cleanTarget := filepath.Clean(mountPath)
+	cleanedSub := resolvedSub
 
 	if err := os.MkdirAll(cleanTarget, 0755); err != nil {
 		if isReadOnlyError(err) {
@@ -3193,9 +3272,11 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	uploaded := make([]DatasetItemDTO, 0, len(formFiles))
+	var lastErr error
 	for _, fh := range formFiles {
 		src, err := fh.Open()
 		if err != nil {
+			lastErr = err
 			continue
 		}
 		dstPath := filepath.Join(cleanTarget, filepath.Base(fh.Filename))
@@ -3207,20 +3288,25 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 			}
 			if err != nil {
 				src.Close()
+				lastErr = err
 				continue
 			}
 		}
-		size, err := io.Copy(dst, src)
+		size, copyErr := io.Copy(dst, src)
 		src.Close()
 		dst.Close()
+		if copyErr != nil {
+			lastErr = copyErr
+			continue
+		}
 
 		now := db.NowMillis()
-		relItemPath := filepath.Join(cleanedSub, filepath.Base(fh.Filename))
-		relItemPath = strings.ReplaceAll(relItemPath, "\\", "/")
+		fileCanonical := strings.TrimPrefix(filepath.ToSlash(filepath.Join(canonicalPath, filepath.Base(fh.Filename))), "/")
+		_ = cleanedSub
 
 		uploaded = append(uploaded, DatasetItemDTO{
-			ID:        fmt.Sprintf("dataset:%s:%s", dsName, relItemPath),
-			ParentID:  fmt.Sprintf("dataset:%s:%s", dsName, cleanedSub),
+			ID:        fmt.Sprintf("dataset:%s", fileCanonical),
+			ParentID:  fmt.Sprintf("dataset:%s", canonicalPath),
 			OwnerID:   "system",
 			LibraryID: "",
 			Name:      filepath.Base(fh.Filename),
@@ -3231,6 +3317,11 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: now,
 			UpdatedAt: now,
 		})
+	}
+
+	if len(uploaded) == 0 && lastErr != nil {
+		a.fail(w, r, lastErr)
+		return
 	}
 
 	var totalSaved int64 = 0
@@ -3251,6 +3342,7 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 			return nil
 		})
 	}
+	invalidateAllCaches()
 
 	writeJSON(w, http.StatusOK, map[string]any{"files": uploaded})
 }

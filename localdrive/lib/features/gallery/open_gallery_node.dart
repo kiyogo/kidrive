@@ -9,10 +9,18 @@ import '../files/models/node_model.dart';
 /// screen that owns the player.
 ///
 /// Both gallery layouts call this, so phone and desktop cannot disagree again.
-void openGalleryNode(BuildContext context, NodeModel node) {
+void openGalleryNode(
+  BuildContext context,
+  NodeModel node, [
+  List<NodeModel>? scopedNodes,
+]) {
   final playable =
       node.category == FileCategory.video || node.category == FileCategory.audio;
+  final imageNodes = scopedNodes
+      ?.where((n) => n.category == FileCategory.image)
+      .toList();
   context.push(
     playable ? Routes.previewOf(node.id) : Routes.photo(node.id),
+    extra: playable ? scopedNodes : imageNodes,
   );
 }

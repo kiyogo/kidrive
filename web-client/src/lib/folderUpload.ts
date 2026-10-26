@@ -162,22 +162,19 @@ export async function executeFolderUpload({
   const isDataset = destinationParentId.startsWith("dataset:");
 
   if (isDataset) {
-    const parts = destinationParentId.replace(/^dataset:/, "").split(":");
-    const dsName = parts[0];
-    const baseSubpath = parts.slice(1).join("/");
+    const baseCanonical = destinationParentId.replace(/^dataset:/, "").replace(/:/g, "/").replace(/^\/+|\/+$/g, "");
 
     // 1. Create dataset directories
     for (const folderPath of plan.folders) {
       const parentParts = folderPath.slice(0, -1);
-      const parentSub = parentParts.length > 0
-        ? (baseSubpath ? `${baseSubpath}/${parentParts.join("/")}` : parentParts.join("/"))
-        : baseSubpath;
+      const parentCanonical = parentParts.length > 0
+        ? (baseCanonical ? `${baseCanonical}/${parentParts.join("/")}` : parentParts.join("/"))
+        : baseCanonical;
       const folderName = folderPath[folderPath.length - 1];
 
       try {
-        await api.post(Api.datasetCreateFolder, {
-          dataset: dsName,
-          subpath: parentSub,
+        await api.post(Api.folder, {
+          parent_id: `dataset:${parentCanonical}`,
           name: folderName,
         });
       } catch (e) {
@@ -185,48 +182,30 @@ export async function executeFolderUpload({
       }
     }
 
-    // 2. Upload files per subpath
-    const bySubpath = new Map<string, File[]>();
-    for (const item of plan.files) {
+    // 2. Enqueue all files through the shared transfers queue
+    if (plan.files.length === 0) {
+      toast?.(`Đã tạo cấu trúc thư mục thành công!`, "success");
+      onDone?.();
+      return;
+    }
+
+    const enqueueItems: EnqueueUploadItem[] = plan.files.map((item) => {
       const rel = item.relativeDir.join("/");
-      const targetSub = rel
-        ? (baseSubpath ? `${baseSubpath}/${rel}` : rel)
-        : baseSubpath;
-      const arr = bySubpath.get(targetSub) || [];
-      arr.push(item.file);
-      bySubpath.set(targetSub, arr);
-    }
+      const targetCanonical = rel
+        ? (baseCanonical ? `${baseCanonical}/${rel}` : rel)
+        : baseCanonical;
+      const displayName = item.relativeDir.length > 0
+        ? `${item.relativeDir.join("/")}/${item.file.name}`
+        : item.file.name;
+      return {
+        file: item.file,
+        parentId: `dataset:${targetCanonical}`,
+        displayName,
+      };
+    });
 
-    toast?.(`Đang tải lên ${plan.files.length} tệp trong thư mục...`, "info");
-
-    for (const [subpath, files] of bySubpath.entries()) {
-      const formData = new FormData();
-      for (const file of files) {
-        formData.append("file", file);
-      }
-      try {
-        const token = api.token;
-        const res = await fetch(api.absolute(Api.datasetUpload(dsName, subpath)), {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: formData,
-        });
-        if (!res.ok) {
-          const errJson = await res.json().catch(() => ({}));
-          if (res.status === 507 || errJson.error === "quota_exceeded" || errJson.error === "ERR_QUOTA") {
-            throw new Error("Dung lượng lưu trữ đã đầy, không thể tải tệp lên");
-          }
-          throw new Error(errJson.error || "Lỗi tải lên máy chủ");
-        }
-      } catch (err: any) {
-        toast?.(err?.message || "Không thể tải lên một số tệp trong thư mục", "error");
-      }
-    }
-
-    toast?.(`Đã tải lên toàn bộ thư mục thành công!`, "success");
-    onDone?.();
+    toast?.(`Đang tải lên ${enqueueItems.length} tệp...`, "info");
+    await transfers.enqueue(enqueueItems, onDone);
     return;
   }
 

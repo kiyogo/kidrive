@@ -19,7 +19,7 @@ func TestMustEnableTOTP(t *testing.T) {
 		enabled bool
 		want    bool
 	}{
-		{"admin without two factor is required to set it up", models.RoleAdmin, false, true},
+		{"admin without two factor is not forced when 2FA is optional", models.RoleAdmin, false, false},
 		{"admin who already has it is left alone", models.RoleAdmin, true, false},
 		{"member without it is not forced", models.RoleMember, false, false},
 		{"member who chose it keeps it", models.RoleMember, true, false},
@@ -50,8 +50,8 @@ func TestMustEnableTOTP(t *testing.T) {
 // requirement rather than fail loudly.
 func TestUserBodyCarriesBothTOTPFields(t *testing.T) {
 	body := userBody(models.User{Role: models.RoleAdmin})
-	if !body.MustEnableTOTP {
-		t.Fatal("a fresh admin should be asked to enrol")
+	if body.MustEnableTOTP {
+		t.Fatal("a fresh admin should not be forced to enrol when 2FA is optional")
 	}
 	if body.TOTPEnabled {
 		t.Fatal("a fresh admin has not enrolled yet")

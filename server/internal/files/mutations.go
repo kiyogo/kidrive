@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -542,6 +544,150 @@ func (s *Service) releaseObjects(list []orphanObject) {
 	}
 }
 
+func (s *Service) resolveDatasetUploadTarget(ctx context.Context, userID, parentID string) (canonicalPath string, targetDir string, isDataset bool, err error) {
+	trimmed := strings.TrimSpace(parentID)
+	var role, perms string
+	if userID != "" {
+		_ = s.database.Read().QueryRowContext(ctx,
+			`SELECT role, COALESCE(dataset_permissions, '{}') FROM users WHERE id = ?`, userID).Scan(&role, &perms)
+	}
+	var pMap map[string]any
+	if perms != "" && perms != "{}" && perms != "null" {
+		_ = json.Unmarshal([]byte(perms), &pMap)
+	}
+	canWriteEntry := func(v any) bool {
+		if str, ok := v.(string); ok {
+			return str == "editor" || str == "writer" || str == "owner"
+		}
+		if obj, ok := v.(map[string]any); ok {
+			if wr, ok := obj["write"].(bool); ok && wr {
+				return true
+			}
+			if lvl, ok := obj["level"].(string); ok && (lvl == "editor" || lvl == "writer" || lvl == "owner") {
+				return true
+			}
+		}
+		return false
+	}
+
+	if trimmed == "" || trimmed == "root" {
+		var writeDatasets []string
+		for k, v := range pMap {
+			kClean := strings.Trim(k, "/")
+			if kClean != "" && kClean != "*" && canWriteEntry(v) {
+				writeDatasets = append(writeDatasets, kClean)
+			}
+		}
+		var unique []string
+		for _, ds := range writeDatasets {
+			isSub := false
+			for _, other := range writeDatasets {
+				if other != ds && strings.HasPrefix(strings.ToLower(ds), strings.ToLower(other)+"/") {
+					isSub = true
+					break
+				}
+			}
+			if !isSub {
+				exists := false
+				for _, u := range unique {
+					if strings.EqualFold(u, ds) {
+						exists = true
+						break
+					}
+				}
+				if !exists {
+					unique = append(unique, ds)
+				}
+			}
+		}
+		if len(unique) == 1 {
+			trimmed = "dataset:" + unique[0]
+		}
+	}
+
+	if !strings.HasPrefix(trimmed, "dataset:") {
+		return "", "", false, nil
+	}
+
+	raw := strings.TrimPrefix(trimmed, "dataset:")
+	if unescaped, uErr := url.PathUnescape(raw); uErr == nil {
+		raw = unescaped
+	}
+	raw = strings.ReplaceAll(raw, "\\", "/")
+	// Also normalize legacy "dataset:dsName:subpath" format
+	if strings.Contains(raw, ":") && !strings.HasPrefix(raw, "library:") {
+		raw = strings.ReplaceAll(raw, ":", "/")
+	}
+	clean := filepath.ToSlash(filepath.Clean("/" + raw))
+	clean = strings.Trim(clean, "/")
+	if clean == "" || clean == "." {
+		return "", "", true, ErrNotFound
+	}
+
+	// Permission check
+	if role != "admin" {
+		allowed := false
+		cleanLower := strings.ToLower(clean)
+		for k, v := range pMap {
+			kClean := strings.ToLower(strings.Trim(k, "/"))
+			if kClean == "" {
+				continue
+			}
+			if kClean == "*" || cleanLower == kClean || strings.HasPrefix(cleanLower, kClean+"/") {
+				if canWriteEntry(v) {
+					allowed = true
+					break
+				}
+			}
+		}
+		if !allowed {
+			return "", "", true, ErrForbidden
+		}
+	}
+
+	// Resolve physical directory on disk
+	parts := strings.Split(clean, "/")
+	if parts[0] == "localdrive" {
+		if vdf := GetVirtualDriveFolder(); vdf != "" {
+			return clean, filepath.Clean(filepath.Join(vdf, strings.Join(parts[1:], "/"))), true, nil
+		}
+	}
+	for i := len(parts); i >= 1; i-- {
+		testDs := strings.Join(parts[:i], "/")
+		var foundName, foundMount string
+		if qErr := s.database.Read().QueryRowContext(ctx,
+			`SELECT name, mount FROM datasets WHERE name = ? OR mount = ? OR name = ? LIMIT 1`,
+			testDs, testDs, "/"+testDs).Scan(&foundName, &foundMount); qErr == nil {
+			sub := strings.Join(parts[i:], "/")
+			candidates := []string{
+				foundMount,
+				"/DATA/KiyoVN/" + strings.Trim(foundName, "/"),
+				"/mnt/zfs-recovery/DATA/KiyoVN/" + strings.Trim(foundName, "/"),
+				"/mnt/zfs-recovery/" + strings.Trim(foundName, "/"),
+				"/DATA/" + strings.Trim(foundName, "/"),
+				"/mnt/" + strings.Trim(foundName, "/"),
+			}
+			chosenMount := foundMount
+			for _, c := range candidates {
+				if c != "" {
+					if fi, sErr := os.Stat(c); sErr == nil && fi.IsDir() {
+						chosenMount = c
+						break
+					}
+				}
+			}
+			return clean, filepath.Clean(filepath.Join(chosenMount, sub)), true, nil
+		}
+	}
+	for _, root := range []string{"/DATA/KiyoVN", "/mnt/zfs-recovery/DATA/KiyoVN", "/DATA", "/mnt/zfs-recovery/DATA", "/mnt"} {
+		cand := filepath.Clean(filepath.Join(root, clean))
+		if fi, sErr := os.Stat(cand); sErr == nil && fi.IsDir() {
+			return clean, cand, true, nil
+		}
+	}
+	return clean, filepath.Clean(filepath.Join("/mnt", clean)), true, nil
+}
+
 // PrepareUpload validates an upload before a single byte is accepted: the
 // caller's access to the destination, the library it lands in, and whether it
 // fits the owner's quota. Failing here means a client is told no at creation
@@ -549,6 +695,17 @@ func (s *Service) releaseObjects(list []orphanObject) {
 func (s *Service) PrepareUpload(ctx context.Context, userID, parentID, nodeID string, size int64) (libraryID, ownerID string, err error) {
 	if err := s.checkStorageAndPermissions(ctx, userID); err != nil {
 		return "", "", err
+	}
+	if nodeID == "" {
+		if canonicalPath, _, isDs, dsErr := s.resolveDatasetUploadTarget(ctx, userID, parentID); isDs {
+			if dsErr != nil {
+				return "", "", dsErr
+			}
+			if err := s.checkQuota(ctx, userID, size); err != nil {
+				return "", "", err
+			}
+			return "dataset:" + canonicalPath, userID, nil
+		}
 	}
 	if nodeID != "" {
 		acc, err := s.Resolve(ctx, userID, nodeID)
@@ -697,6 +854,61 @@ func (s *Service) CommitUpload(ctx context.Context, p CommitUploadParams) (model
 	name := strings.TrimSpace(p.Name)
 	if err := pathsafe.ValidateName(name); err != nil {
 		return models.Node{}, fmt.Errorf("%w: %v", ErrInvalidName, err)
+	}
+
+	if p.NodeID == "" {
+		if canonicalPath, targetDir, isDs, dsErr := s.resolveDatasetUploadTarget(ctx, p.UserID, p.ParentID); isDs {
+			if dsErr != nil {
+				return models.Node{}, dsErr
+			}
+			if err := s.checkQuota(ctx, p.UserID, p.Size); err != nil {
+				return models.Node{}, err
+			}
+			if err := os.MkdirAll(targetDir, 0o755); err != nil {
+				return models.Node{}, err
+			}
+			dstPath := filepath.Clean(filepath.Join(targetDir, name))
+			srcFile, err := os.Open(p.TempPath)
+			if err != nil {
+				return models.Node{}, err
+			}
+			dstFile, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+			if err != nil {
+				srcFile.Close()
+				return models.Node{}, err
+			}
+			written, copyErr := io.Copy(dstFile, srcFile)
+			srcFile.Close()
+			dstFile.Close()
+			if copyErr != nil {
+				return models.Node{}, copyErr
+			}
+			now := db.NowMillis()
+			_ = s.database.Write(ctx, func(c context.Context, tx *sql.Tx) error {
+				if p.UserID != "" {
+					_ = addQuotaTx(c, tx, p.UserID, written)
+				}
+				return nil
+			})
+			fileCanonical := strings.TrimPrefix(filepath.ToSlash(filepath.Join(canonicalPath, name)), "/")
+			resNode := models.Node{
+				ID:             "dataset:" + fileCanonical,
+				ParentID:       "dataset:" + canonicalPath,
+				OwnerID:        p.UserID,
+				LibraryID:      "dataset",
+				Name:           name,
+				Type:           models.NodeFile,
+				MimeType:       p.MimeType,
+				SizeBytes:      written,
+				ChecksumSHA256: p.Checksum,
+				VersionCount:   1,
+				CreatedAt:      now,
+				UpdatedAt:      now,
+			}
+			s.emit(ctx, ws.EventNodeCreated, resNode)
+			s.publishQuota(ctx, p.UserID)
+			return resNode, nil
+		}
 	}
 
 	var (

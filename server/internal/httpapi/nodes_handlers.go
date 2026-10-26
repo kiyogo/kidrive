@@ -155,6 +155,9 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 			if starPerm, exists := perms["*"]; exists && starPerm != nil && starPerm != "none" {
 				hasSlashOrStar = true
 			}
+			if hasSlashOrStar {
+				hasFullRoot = true
+			}
 
 			var rawKeys []string
 			for k, v := range perms {
@@ -583,14 +586,6 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			// Filter and prioritize: ONLY show the 5 allowed roots at root of Tệp của tôi
-			allowedRoots := map[string]bool{
-				"1DATA":   true,
-				"DaoKy_5": true,
-				"Long_4":  true,
-				"NgLoc_6": true,
-				"NgSon_1": true,
-			}
 			var finalRootNodes []nodeDTO
 			seenNames := make(map[string]bool)
 
@@ -605,30 +600,29 @@ func (a *API) handleListNodes(w http.ResponseWriter, r *http.Request) {
 			})
 			if dbErr == nil && len(dbList) > 0 {
 				for _, n := range nodeViews(dbList, userID) {
-					if allowedRoots[n.Name] && !seenNames[strings.ToLower(n.Name)] {
+					if !seenNames[strings.ToLower(n.Name)] {
 						finalRootNodes = append(finalRootNodes, n)
 						seenNames[strings.ToLower(n.Name)] = true
 					}
 				}
 			}
 
-			// If any of the 5 allowed roots is not yet in dbList, add from rootDsNodes
 			for _, n := range rootDsNodes {
-				targetName := ""
-				for allowed := range allowedRoots {
-					if strings.EqualFold(n.Name, allowed) || (strings.EqualFold(n.Name, "1data") && allowed == "1DATA") {
-						targetName = allowed
-						break
-					}
+				if seenNames[strings.ToLower(n.Name)] {
+					continue
 				}
-				if targetName != "" && !seenNames[strings.ToLower(targetName)] {
-					n.Name = targetName
-					finalRootNodes = append(finalRootNodes, n)
-					seenNames[strings.ToLower(targetName)] = true
+				if _, _, _, mountPath, mErr := a.resolveDatasetTarget(r.Context(), n.ID); mErr == nil && mountPath != "" {
+					if fi, sErr := os.Stat(mountPath); sErr == nil && fi.IsDir() {
+						finalRootNodes = append(finalRootNodes, n)
+						seenNames[strings.ToLower(n.Name)] = true
+					}
 				}
 			}
 
 			sort.Slice(finalRootNodes, func(i, j int) bool {
+				if finalRootNodes[i].Type != finalRootNodes[j].Type {
+					return finalRootNodes[i].Type == "folder"
+				}
 				return strings.ToLower(finalRootNodes[i].Name) < strings.ToLower(finalRootNodes[j].Name)
 			})
 
@@ -667,66 +661,82 @@ type createFolderRequest struct {
 	Color     string `json:"color"`
 }
 
+func (a *API) resolveDefaultDatasetParent(r *http.Request, parentID string) string {
+	trimmed := strings.TrimSpace(parentID)
+	if trimmed != "" && trimmed != "root" {
+		return trimmed
+	}
+	user, uOk := mw.UserFrom(r.Context())
+	if !uOk || user.DatasetPermissions == "" {
+		return trimmed
+	}
+	var pMap map[string]any
+	if err := json.Unmarshal([]byte(user.DatasetPermissions), &pMap); err != nil {
+		return trimmed
+	}
+	var writeDatasets []string
+	var allDatasets []string
+	for k, v := range pMap {
+		kClean := strings.Trim(k, "/")
+		if kClean == "" || kClean == "*" {
+			continue
+		}
+		allDatasets = append(allDatasets, kClean)
+		canWrite := false
+		if str, ok := v.(string); ok && (str == "editor" || str == "writer" || str == "owner") {
+			canWrite = true
+		} else if obj, ok := v.(map[string]any); ok {
+			if wr, ok := obj["write"].(bool); ok && wr {
+				canWrite = true
+			} else if lvl, ok := obj["level"].(string); ok && (lvl == "editor" || lvl == "writer" || lvl == "owner") {
+				canWrite = true
+			}
+		}
+		if canWrite {
+			writeDatasets = append(writeDatasets, kClean)
+		}
+	}
+	dedupTopLevel := func(list []string) []string {
+		var unique []string
+		for _, ds := range list {
+			isSub := false
+			for _, other := range list {
+				if other != ds && strings.HasPrefix(strings.ToLower(ds), strings.ToLower(other)+"/") {
+					isSub = true
+					break
+				}
+			}
+			if !isSub {
+				exists := false
+				for _, u := range unique {
+					if strings.EqualFold(u, ds) {
+						exists = true
+						break
+					}
+				}
+				if !exists {
+					unique = append(unique, ds)
+				}
+			}
+		}
+		return unique
+	}
+	if uniqueWrite := dedupTopLevel(writeDatasets); len(uniqueWrite) == 1 {
+		return "dataset:" + uniqueWrite[0]
+	}
+	if uniqueAll := dedupTopLevel(allDatasets); len(uniqueAll) == 1 {
+		return "dataset:" + uniqueAll[0]
+	}
+	return trimmed
+}
+
 func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	var req createFolderRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 	userID, ip := caller(r)
-
-	if req.ParentID == "" || req.ParentID == "root" {
-		user, uOk := mw.UserFrom(r.Context())
-		if uOk && user.Role != models.RoleAdmin && user.DatasetPermissions != "" {
-			var pMap map[string]any
-			if err := json.Unmarshal([]byte(user.DatasetPermissions), &pMap); err == nil {
-				var writeDatasets []string
-				for k, v := range pMap {
-					kClean := strings.Trim(k, "/")
-					if kClean == "" || kClean == "*" {
-						continue
-					}
-					canWrite := false
-					if str, ok := v.(string); ok && (str == "editor" || str == "writer" || str == "owner") {
-						canWrite = true
-					} else if obj, ok := v.(map[string]any); ok {
-						if wr, ok := obj["write"].(bool); ok && wr {
-							canWrite = true
-						} else if lvl, ok := obj["level"].(string); ok && (lvl == "editor" || lvl == "writer") {
-							canWrite = true
-						}
-					}
-					if canWrite {
-						writeDatasets = append(writeDatasets, kClean)
-					}
-				}
-				var uniqueRoots []string
-				for _, ds := range writeDatasets {
-					isSub := false
-					for _, other := range writeDatasets {
-						if other != ds && strings.HasPrefix(strings.ToLower(ds), strings.ToLower(other)+"/") {
-							isSub = true
-							break
-						}
-					}
-					if !isSub {
-						exists := false
-						for _, u := range uniqueRoots {
-							if strings.EqualFold(u, ds) {
-								exists = true
-								break
-							}
-						}
-						if !exists {
-							uniqueRoots = append(uniqueRoots, ds)
-						}
-					}
-				}
-				if len(uniqueRoots) == 1 {
-					req.ParentID = "dataset:" + uniqueRoots[0]
-				}
-			}
-		}
-	}
+	req.ParentID = a.resolveDefaultDatasetParent(r, req.ParentID)
 
 	if strings.HasPrefix(req.ParentID, "dataset:") {
 		canonicalPath, _, _, mountPath, err := a.resolveDatasetTarget(r.Context(), req.ParentID)
@@ -960,12 +970,19 @@ func (a *API) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if req.ParentID != nil {
-			destParent := strings.TrimSpace(*req.ParentID)
+			destParent := a.resolveDefaultDatasetParent(r, strings.TrimSpace(*req.ParentID))
+			if (destParent == "" || destParent == "root") && strings.Contains(canonicalPath, "/") {
+				destParent = "dataset:" + strings.TrimPrefix(filepath.ToSlash(filepath.Dir(canonicalPath)), "/")
+			}
 			oldTarget := filepath.Clean(mountPath)
 			destCanonical, _, _, destMount, err := a.resolveDatasetTarget(r.Context(), destParent)
 			if err != nil {
 				a.fail(w, r, err)
 				return
+			}
+			if filepath.Clean(destMount) == oldTarget {
+				destMount = filepath.Dir(oldTarget)
+				destCanonical = strings.TrimPrefix(filepath.ToSlash(filepath.Dir(canonicalPath)), "/")
 			}
 			destRole, accessErr := a.checkDatasetAccess(r, destCanonical, true)
 			if accessErr != nil {
@@ -974,23 +991,42 @@ func (a *API) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 			}
 			fileName := filepath.Base(oldTarget)
 			newTarget := filepath.Clean(filepath.Join(destMount, fileName))
-			if err := os.Rename(oldTarget, newTarget); err != nil {
-				if isReadOnlyError(err) {
-					UnlockStorageRW(newTarget)
-					err = os.Rename(oldTarget, newTarget)
+			if newTarget != oldTarget {
+				if strings.HasPrefix(strings.ToLower(newTarget)+string(filepath.Separator), strings.ToLower(oldTarget)+string(filepath.Separator)) {
+					a.fail(w, r, fmt.Errorf("không thể di chuyển thư mục vào chính thư mục con của nó"))
+					return
 				}
-				if err != nil {
-					if copyErr := copyPathRecursive(oldTarget, newTarget); copyErr != nil {
-						if isReadOnlyError(copyErr) {
-							UnlockStorageRW(newTarget)
-							copyErr = copyPathRecursive(oldTarget, newTarget)
-						}
-						if copyErr != nil {
-							a.fail(w, r, copyErr)
-							return
+				if _, statErr := os.Stat(newTarget); statErr == nil {
+					ext := filepath.Ext(fileName)
+					base := strings.TrimSuffix(fileName, ext)
+					for i := 2; i < 1000; i++ {
+						candName := fmt.Sprintf("%s (%d)%s", base, i, ext)
+						candPath := filepath.Clean(filepath.Join(destMount, candName))
+						if _, cErr := os.Stat(candPath); os.IsNotExist(cErr) {
+							newTarget = candPath
+							fileName = candName
+							break
 						}
 					}
-					_ = os.RemoveAll(oldTarget)
+				}
+				if err := os.Rename(oldTarget, newTarget); err != nil {
+					if isReadOnlyError(err) {
+						UnlockStorageRW(newTarget)
+						err = os.Rename(oldTarget, newTarget)
+					}
+					if err != nil {
+						if copyErr := copyPathRecursive(oldTarget, newTarget); copyErr != nil {
+							if isReadOnlyError(copyErr) {
+								UnlockStorageRW(newTarget)
+								copyErr = copyPathRecursive(oldTarget, newTarget)
+							}
+							if copyErr != nil {
+								a.fail(w, r, copyErr)
+								return
+							}
+						}
+						_ = os.RemoveAll(oldTarget)
+					}
 				}
 			}
 			newCanonical := filepath.ToSlash(filepath.Join(destCanonical, fileName))
@@ -1803,21 +1839,23 @@ func (a *API) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Fallback for image node if thumbnail file is missing: serve original content
-	if n, f, info, oErr := a.files.OpenForDownload(r.Context(), userID, nodeID); oErr == nil && strings.HasPrefix(n.MimeType, "image/") {
+	if n, f, info, oErr := a.files.OpenForDownload(r.Context(), userID, nodeID); oErr == nil {
 		defer f.Close()
-		ext := strings.ToLower(filepath.Ext(n.Name))
-		if ext == ".heic" || ext == ".heif" {
-			if f != nil && a.thumbs != nil && a.thumbs.Caps().FFmpeg {
-				a.serveDatasetThumbnail(w, r, f.Name())
+		if strings.HasPrefix(n.MimeType, "image/") {
+			ext := strings.ToLower(filepath.Ext(n.Name))
+			if ext == ".heic" || ext == ".heif" {
+				if f != nil && a.thumbs != nil && a.thumbs.Caps().FFmpeg {
+					a.serveDatasetThumbnail(w, r, f.Name())
+					return
+				}
+				writeError(w, http.StatusNotFound, "no_thumbnail", "cannot decode heic")
 				return
 			}
-			writeError(w, http.StatusNotFound, "no_thumbnail", "cannot decode heic")
+			w.Header().Set("Content-Type", n.MimeType)
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+			http.ServeContent(w, r, n.Name, info.ModTime(), f)
 			return
 		}
-		w.Header().Set("Content-Type", n.MimeType)
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		http.ServeContent(w, r, n.Name, info.ModTime(), f)
-		return
 	}
 	writeError(w, http.StatusNotFound, "no_thumbnail", "this file has no preview")
 }
@@ -2111,43 +2149,55 @@ func (a *API) handleActivity(w http.ResponseWriter, r *http.Request) {
 }
 
 func copyPathRecursive(src, dst string) error {
-	info, err := os.Stat(src)
+	cleanSrc := filepath.Clean(src)
+	cleanDst := filepath.Clean(dst)
+	if cleanSrc == cleanDst {
+		return nil
+	}
+	if strings.HasPrefix(strings.ToLower(cleanDst)+string(filepath.Separator), strings.ToLower(cleanSrc)+string(filepath.Separator)) {
+		return fmt.Errorf("không thể sao chép thư mục vào chính thư mục con của nó")
+	}
+	info, err := os.Stat(cleanSrc)
 	if err != nil {
 		return err
 	}
 	if info.IsDir() {
-		if err := os.MkdirAll(dst, 0755); err != nil {
+		if err := os.MkdirAll(cleanDst, 0755); err != nil {
 			if isReadOnlyError(err) {
-				UnlockStorageRW(dst)
-				err = os.MkdirAll(dst, 0755)
+				UnlockStorageRW(cleanDst)
+				err = os.MkdirAll(cleanDst, 0755)
 			}
 			if err != nil {
 				return err
 			}
 		}
-		entries, err := os.ReadDir(src)
+		entries, err := os.ReadDir(cleanSrc)
 		if err != nil {
 			return err
 		}
 		for _, e := range entries {
-			srcSub := filepath.Join(src, e.Name())
-			dstSub := filepath.Join(dst, e.Name())
+			srcSub := filepath.Join(cleanSrc, e.Name())
+			dstSub := filepath.Join(cleanDst, e.Name())
 			if err := copyPathRecursive(srcSub, dstSub); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	sFile, err := os.Open(src)
+	if err := os.MkdirAll(filepath.Dir(cleanDst), 0755); err != nil && isReadOnlyError(err) {
+		UnlockStorageRW(filepath.Dir(cleanDst))
+		_ = os.MkdirAll(filepath.Dir(cleanDst), 0755)
+	}
+	sFile, err := os.Open(cleanSrc)
 	if err != nil {
 		return err
 	}
 	defer sFile.Close()
-	dFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	dFile, err := os.OpenFile(cleanDst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		if isReadOnlyError(err) {
-			UnlockStorageRW(dst)
-			dFile, err = os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+			UnlockStorageRW(cleanDst)
+			dFile, err = os.OpenFile(cleanDst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 		}
 		if err != nil {
 			return err
@@ -2177,7 +2227,7 @@ func (a *API) handleCopyNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "node_id is required")
 		return
 	}
-	targetParentID := strings.TrimSpace(req.ParentID)
+	targetParentID := a.resolveDefaultDatasetParent(r, strings.TrimSpace(req.ParentID))
 	userID, ip := caller(r)
 
 	// 1. Dataset item copy
@@ -2192,10 +2242,18 @@ func (a *API) handleCopyNode(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
 			return
 		}
+		if (targetParentID == "" || targetParentID == "root") && strings.Contains(srcCanonical, "/") {
+			targetParentID = "dataset:" + strings.TrimPrefix(filepath.ToSlash(filepath.Dir(srcCanonical)), "/")
+		}
 		destCanonical, _, _, destMount, dErr := a.resolveDatasetTarget(r.Context(), targetParentID)
 		if dErr != nil {
 			a.fail(w, r, dErr)
 			return
+		}
+		// If user pasted onto the exact same folder they copied, paste into its parent folder alongside it
+		if filepath.Clean(destMount) == filepath.Clean(srcMount) {
+			destMount = filepath.Dir(filepath.Clean(srcMount))
+			destCanonical = strings.TrimPrefix(filepath.ToSlash(filepath.Dir(srcCanonical)), "/")
 		}
 		destRole, dErr := a.checkDatasetAccess(r, destCanonical, true)
 		if dErr != nil {
@@ -2210,8 +2268,18 @@ func (a *API) handleCopyNode(w http.ResponseWriter, r *http.Request) {
 		if _, statErr := os.Stat(newTarget); statErr == nil {
 			ext := filepath.Ext(fileName)
 			base := strings.TrimSuffix(fileName, ext)
-			newTarget = filepath.Clean(filepath.Join(destMount, fmt.Sprintf("%s - Copy%s", base, ext)))
-			fileName = filepath.Base(newTarget)
+			for i := 1; i < 1000; i++ {
+				candName := fmt.Sprintf("%s - Copy%s", base, ext)
+				if i > 1 {
+					candName = fmt.Sprintf("%s - Copy (%d)%s", base, i, ext)
+				}
+				candPath := filepath.Clean(filepath.Join(destMount, candName))
+				if _, cErr := os.Stat(candPath); os.IsNotExist(cErr) {
+					newTarget = candPath
+					fileName = candName
+					break
+				}
+			}
 		}
 		if err := copyPathRecursive(srcMount, newTarget); err != nil {
 			if isReadOnlyError(err) {
@@ -2223,6 +2291,15 @@ func (a *API) handleCopyNode(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		nType := "file"
+		var sizeBytes int64
+		if fi, sErr := os.Stat(newTarget); sErr == nil {
+			if fi.IsDir() {
+				nType = "folder"
+			} else {
+				sizeBytes = fi.Size()
+			}
+		}
 		newCanonical := filepath.ToSlash(filepath.Join(destCanonical, fileName))
 		newCanonical = strings.TrimPrefix(newCanonical, "/")
 		invalidateAllCaches()
@@ -2230,6 +2307,8 @@ func (a *API) handleCopyNode(w http.ResponseWriter, r *http.Request) {
 			ID:        fmt.Sprintf("dataset:%s", newCanonical),
 			ParentID:  targetParentID,
 			Name:      fileName,
+			Type:      nType,
+			SizeBytes: sizeBytes,
 			Role:      destRole,
 			CreatedAt: time.Now().UnixMilli(),
 			UpdatedAt: time.Now().UnixMilli(),
@@ -2269,8 +2348,18 @@ func (a *API) handleCopyNode(w http.ResponseWriter, r *http.Request) {
 		if _, statErr := os.Stat(newTarget); statErr == nil {
 			ext := filepath.Ext(newName)
 			base := strings.TrimSuffix(newName, ext)
-			newTarget = filepath.Clean(filepath.Join(destMount, fmt.Sprintf("%s - Copy%s", base, ext)))
-			newName = filepath.Base(newTarget)
+			for i := 1; i < 1000; i++ {
+				candName := fmt.Sprintf("%s - Copy%s", base, ext)
+				if i > 1 {
+					candName = fmt.Sprintf("%s - Copy (%d)%s", base, i, ext)
+				}
+				candPath := filepath.Clean(filepath.Join(destMount, candName))
+				if _, cErr := os.Stat(candPath); os.IsNotExist(cErr) {
+					newTarget = candPath
+					newName = candName
+					break
+				}
+			}
 		}
 		if srcNode.Type == models.NodeFolder {
 			if err := os.MkdirAll(newTarget, 0755); err != nil {
@@ -2311,6 +2400,8 @@ func (a *API) handleCopyNode(w http.ResponseWriter, r *http.Request) {
 			ID:        fmt.Sprintf("dataset:%s", newCanonical),
 			ParentID:  targetParentID,
 			Name:      newName,
+			Type:      string(srcNode.Type),
+			SizeBytes: srcNode.SizeBytes,
 			Role:      destRole,
 			CreatedAt: time.Now().UnixMilli(),
 			UpdatedAt: time.Now().UnixMilli(),
@@ -2384,20 +2475,27 @@ func (a *API) handleMoveNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "node_id is required")
 		return
 	}
-	targetParentID := strings.TrimSpace(req.ParentID)
+	targetParentID := a.resolveDefaultDatasetParent(r, strings.TrimSpace(req.ParentID))
 	userID, ip := caller(r)
 
 	if strings.HasPrefix(nodeID, "dataset:") {
-		_, _, _, mountPath, err := a.resolveDatasetTarget(r.Context(), nodeID)
+		srcCanonical, _, _, mountPath, err := a.resolveDatasetTarget(r.Context(), nodeID)
 		if err != nil {
 			a.fail(w, r, err)
 			return
+		}
+		if (targetParentID == "" || targetParentID == "root") && strings.Contains(srcCanonical, "/") {
+			targetParentID = "dataset:" + strings.TrimPrefix(filepath.ToSlash(filepath.Dir(srcCanonical)), "/")
 		}
 		oldTarget := filepath.Clean(mountPath)
 		destCanonical, _, _, destMount, dErr := a.resolveDatasetTarget(r.Context(), targetParentID)
 		if dErr != nil {
 			a.fail(w, r, dErr)
 			return
+		}
+		if filepath.Clean(destMount) == oldTarget {
+			destMount = filepath.Dir(oldTarget)
+			destCanonical = strings.TrimPrefix(filepath.ToSlash(filepath.Dir(srcCanonical)), "/")
 		}
 		destRole, accessErr := a.checkDatasetAccess(r, destCanonical, true)
 		if accessErr != nil {
@@ -2406,23 +2504,51 @@ func (a *API) handleMoveNode(w http.ResponseWriter, r *http.Request) {
 		}
 		fileName := filepath.Base(oldTarget)
 		newTarget := filepath.Clean(filepath.Join(destMount, fileName))
-		if err := os.Rename(oldTarget, newTarget); err != nil {
-			if isReadOnlyError(err) {
-				UnlockStorageRW(newTarget)
-				err = os.Rename(oldTarget, newTarget)
+		if newTarget != oldTarget {
+			if strings.HasPrefix(strings.ToLower(newTarget)+string(filepath.Separator), strings.ToLower(oldTarget)+string(filepath.Separator)) {
+				a.fail(w, r, fmt.Errorf("không thể di chuyển thư mục vào chính thư mục con của nó"))
+				return
 			}
-			if err != nil {
-				if copyErr := copyPathRecursive(oldTarget, newTarget); copyErr != nil {
-					if isReadOnlyError(copyErr) {
-						UnlockStorageRW(newTarget)
-						copyErr = copyPathRecursive(oldTarget, newTarget)
-					}
-					if copyErr != nil {
-						a.fail(w, r, copyErr)
-						return
+			if _, statErr := os.Stat(newTarget); statErr == nil {
+				ext := filepath.Ext(fileName)
+				base := strings.TrimSuffix(fileName, ext)
+				for i := 2; i < 1000; i++ {
+					candName := fmt.Sprintf("%s (%d)%s", base, i, ext)
+					candPath := filepath.Clean(filepath.Join(destMount, candName))
+					if _, cErr := os.Stat(candPath); os.IsNotExist(cErr) {
+						newTarget = candPath
+						fileName = candName
+						break
 					}
 				}
-				_ = os.RemoveAll(oldTarget)
+			}
+			if err := os.Rename(oldTarget, newTarget); err != nil {
+				if isReadOnlyError(err) {
+					UnlockStorageRW(newTarget)
+					err = os.Rename(oldTarget, newTarget)
+				}
+				if err != nil {
+					if copyErr := copyPathRecursive(oldTarget, newTarget); copyErr != nil {
+						if isReadOnlyError(copyErr) {
+							UnlockStorageRW(newTarget)
+							copyErr = copyPathRecursive(oldTarget, newTarget)
+						}
+						if copyErr != nil {
+							a.fail(w, r, copyErr)
+							return
+						}
+					}
+					_ = os.RemoveAll(oldTarget)
+				}
+			}
+		}
+		nType := "file"
+		var sizeBytes int64
+		if fi, sErr := os.Stat(newTarget); sErr == nil {
+			if fi.IsDir() {
+				nType = "folder"
+			} else {
+				sizeBytes = fi.Size()
 			}
 		}
 		newCanonical := filepath.ToSlash(filepath.Join(destCanonical, fileName))
@@ -2432,6 +2558,8 @@ func (a *API) handleMoveNode(w http.ResponseWriter, r *http.Request) {
 			ID:        fmt.Sprintf("dataset:%s", newCanonical),
 			ParentID:  targetParentID,
 			Name:      fileName,
+			Type:      nType,
+			SizeBytes: sizeBytes,
 			Role:      destRole,
 			UpdatedAt: time.Now().UnixMilli(),
 		})

@@ -15,6 +15,7 @@ import 'node_actions.dart';
 import 'node_tile.dart';
 import 'rename_sheet.dart';
 import 'files_toolbar.dart';
+import '../../../upload/controller/transfer_controller.dart';
 
 /// The listing itself, shared by every breakpoint. The page wrappers decide
 /// the chrome around it; this decides nothing about layout beyond the column
@@ -129,6 +130,7 @@ class FilesBrowser extends ConsumerWidget {
           // everything is a file manager nobody trusts with a hundred files.
           return _KeyboardSelection(
             nodes: nodes,
+            query: query,
             child: MarqueeSelection(
               onStart: () =>
                   ref.read(selectionProvider.notifier).startMarquee(),
@@ -362,25 +364,33 @@ Future<void> _showCanvasMenu(
       final cb = ref.read(fileClipboardProvider);
       if (cb != null && cb.nodes.isNotEmpty) {
         final db = ref.read(filesDbProvider);
+        final transferCtrl = ref.read(transferControllerProvider.notifier);
+        final isCut = cb.action == ClipboardAction.cut;
+        final kindLabel = isCut ? 'Cắt' : 'Sao chép';
         try {
           final targetId = query.parentId;
           for (final item in cb.nodes) {
-            if (cb.action == ClipboardAction.cut) {
-              await db.moveNodeTo(item.id, targetId);
-            } else {
-              await db.copyNode(item.id, targetId);
-            }
+            await transferCtrl.enqueueServerOperation(
+              name: item.name,
+              kindName: kindLabel,
+              sizeBytes: item.sizeBytes,
+              action: () async {
+                if (isCut) {
+                  await db.moveNodeTo(item.id, targetId);
+                } else {
+                  await db.copyNode(item.id, targetId);
+                }
+              },
+            );
           }
-          if (cb.action == ClipboardAction.cut) {
+          if (isCut) {
             ref.read(fileClipboardProvider.notifier).clear();
           }
           ref.invalidate(folderProvider(query));
           if (context.mounted) {
             LdToast.success(
               context,
-              cb.action == ClipboardAction.cut
-                  ? 'Đã chuyển thành công!'
-                  : 'Đã dán thành công!',
+              isCut ? 'Đã chuyển thành công!' : 'Đã dán thành công!',
             );
           }
         } catch (e) {
@@ -633,9 +643,14 @@ class SelectionActionBar extends ConsumerWidget {
 /// destructive without asking: a stray Delete on a full selection would be the
 /// worst possible thing to make silent.
 class _KeyboardSelection extends ConsumerWidget {
-  const _KeyboardSelection({required this.nodes, required this.child});
+  const _KeyboardSelection({
+    required this.nodes,
+    required this.query,
+    required this.child,
+  });
 
   final List<NodeModel> nodes;
+  final FolderQuery query;
   final Widget child;
 
   @override
@@ -646,6 +661,19 @@ class _KeyboardSelection extends ConsumerWidget {
             const _SelectAllIntent(),
         const SingleActivator(LogicalKeyboardKey.keyA, meta: true):
             const _SelectAllIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyC, control: true):
+            const _CopyIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyC, meta: true):
+            const _CopyIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyX, control: true):
+            const _CutIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyX, meta: true):
+            const _CutIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyV, control: true):
+            const _PasteIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyV, meta: true):
+            const _PasteIntent(),
+        const SingleActivator(LogicalKeyboardKey.f2): const _RenameIntent(),
         const SingleActivator(LogicalKeyboardKey.escape): const _ClearIntent(),
         const SingleActivator(LogicalKeyboardKey.delete): const _TrashIntent(),
         const SingleActivator(LogicalKeyboardKey.backspace):
@@ -658,6 +686,55 @@ class _KeyboardSelection extends ConsumerWidget {
               ref
                   .read(selectionProvider.notifier)
                   .selectAll(nodes.map((n) => n.id));
+              return null;
+            },
+          ),
+          _CopyIntent: CallbackAction<_CopyIntent>(
+            onInvoke: (_) {
+              final selection = ref.read(selectionProvider);
+              final chosen =
+                  nodes.where((n) => selection.contains(n.id)).toList();
+              if (chosen.isNotEmpty) {
+                ref.read(fileClipboardProvider.notifier).copy(chosen);
+                LdToast.success(
+                  context,
+                  'Đã sao chép ${chosen.length} mục vào bộ nhớ tạm',
+                );
+              }
+              return null;
+            },
+          ),
+          _CutIntent: CallbackAction<_CutIntent>(
+            onInvoke: (_) {
+              final selection = ref.read(selectionProvider);
+              final chosen = nodes
+                  .where((n) => selection.contains(n.id) && n.role.canMove)
+                  .toList();
+              if (chosen.isNotEmpty) {
+                ref.read(fileClipboardProvider.notifier).cut(chosen);
+                LdToast.success(
+                  context,
+                  'Đã cắt ${chosen.length} mục vào bộ nhớ tạm',
+                );
+              }
+              return null;
+            },
+          ),
+          _PasteIntent: CallbackAction<_PasteIntent>(
+            onInvoke: (_) {
+              unawaited(_pasteClipboard(context, ref));
+              return null;
+            },
+          ),
+          _RenameIntent: CallbackAction<_RenameIntent>(
+            onInvoke: (_) {
+              final selection = ref.read(selectionProvider);
+              final chosen = nodes
+                  .where((n) => selection.contains(n.id) && n.role.canRename)
+                  .toList();
+              if (chosen.length == 1) {
+                unawaited(showRenameSheet(context, ref, chosen.first));
+              }
               return null;
             },
           ),
@@ -679,6 +756,46 @@ class _KeyboardSelection extends ConsumerWidget {
         child: Focus(autofocus: true, child: child),
       ),
     );
+  }
+
+  Future<void> _pasteClipboard(BuildContext context, WidgetRef ref) async {
+    final cb = ref.read(fileClipboardProvider);
+    if (cb == null || cb.nodes.isEmpty) return;
+    final db = ref.read(filesDbProvider);
+    final transferCtrl = ref.read(transferControllerProvider.notifier);
+    final isCut = cb.action == ClipboardAction.cut;
+    final kindLabel = isCut ? 'Cắt & Dán' : 'Sao chép';
+    final targetId = query.parentId;
+    try {
+      for (final item in cb.nodes) {
+        await transferCtrl.enqueueServerOperation(
+          name: item.name,
+          kindName: kindLabel,
+          sizeBytes: item.sizeBytes,
+          action: () async {
+            if (isCut) {
+              await db.moveNodeTo(item.id, targetId);
+            } else {
+              await db.copyNode(item.id, targetId);
+            }
+          },
+        );
+      }
+      if (isCut) {
+        ref.read(fileClipboardProvider.notifier).clear();
+      }
+      ref.invalidate(folderProvider(query));
+      if (context.mounted) {
+        LdToast.success(
+          context,
+          isCut ? 'Đã chuyển thành công!' : 'Đã dán thành công!',
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        LdToast.error(context, e.toString());
+      }
+    }
   }
 
   Future<void> _trashSelected(BuildContext context, WidgetRef ref) async {
@@ -706,6 +823,22 @@ class _KeyboardSelection extends ConsumerWidget {
 
 class _SelectAllIntent extends Intent {
   const _SelectAllIntent();
+}
+
+class _CopyIntent extends Intent {
+  const _CopyIntent();
+}
+
+class _CutIntent extends Intent {
+  const _CutIntent();
+}
+
+class _PasteIntent extends Intent {
+  const _PasteIntent();
+}
+
+class _RenameIntent extends Intent {
+  const _RenameIntent();
 }
 
 class _ClearIntent extends Intent {

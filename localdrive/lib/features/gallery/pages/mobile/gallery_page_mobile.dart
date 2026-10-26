@@ -125,7 +125,11 @@ class GalleryPageMobile extends HookConsumerWidget {
                 sections: sections,
                 columns: columns.value,
                 selection: selection.value,
-                onOpen: (node) => openGalleryNode(context, node),
+                onOpen: (node) => openGalleryNode(
+                  context,
+                  node,
+                  sections.expand((s) => s.items).toList(),
+                ),
                 onToggleSelect: toggle,
               ),
             );

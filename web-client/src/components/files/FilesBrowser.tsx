@@ -27,6 +27,7 @@ import { categoryOf, isFolder, type NodeModel } from "@/lib/models";
 import { colorForCategory, folderSwatches, wash } from "@/lib/tokens";
 import { useKeptIds } from "@/lib/offline";
 import { useUploader, checkStorageReadiness } from "@/lib/uploads";
+import { transfers } from "@/lib/upload";
 import { ShareSheet } from "@/components/share/ShareSheet";
 import { DetailsPane, DetailsErrorBoundary } from "./DetailsPane";
 import { bandStyle, hasPointer, rangeBetween, useFileKeys, useMarquee, useNodeDrag } from "./desktop";
@@ -372,36 +373,12 @@ export function FilesBrowser({
     }
     setIsSubmitting(true);
     try {
-      if (folderId.startsWith("dataset:")) {
-        const parts = folderId.replace(/^dataset:/, "").split(":");
-        const dsName = parts[0];
-        const subpath = parts.slice(1).join("/");
-        await api.post(Api.datasetCreateFolder, {
-          dataset: dsName,
-          subpath: subpath,
-          name: folderName.trim(),
-        });
-        setCreateFolderOpen(false);
-        setFolderName("");
-        toast("Đã tạo thư mục mới thành công!", "success");
-        void load();
-      } else if (defaultSingleDataset) {
-        await api.post(Api.datasetCreateFolder, {
-          dataset: defaultSingleDataset,
-          subpath: "",
-          name: folderName.trim(),
-        });
-        setCreateFolderOpen(false);
-        setFolderName("");
-        toast("Đã tạo thư mục mới thành công!", "success");
-        void load();
-      } else {
-        await api.post(Api.folder, { name: folderName.trim(), parent_id: folderId });
-        setCreateFolderOpen(false);
-        setFolderName("");
-        toast("Đã tạo thư mục mới thành công!", "success");
-        void load();
-      }
+      const targetParent = currentFolderTarget || (defaultTargetDataset ? `dataset:${defaultTargetDataset}` : folderId);
+      await api.post(Api.folder, { name: folderName.trim(), parent_id: targetParent });
+      setCreateFolderOpen(false);
+      setFolderName("");
+      toast("Đã tạo thư mục mới thành công!", "success");
+      void load();
     } catch (e: any) {
       toast(e?.message || "Không thể tạo thư mục mới. Vui lòng thử lại sau!", "error");
     } finally {
@@ -417,27 +394,11 @@ export function FilesBrowser({
     }
     setIsSubmitting(true);
     try {
-      if (renamingNode.id.startsWith("dataset:") || folderId.startsWith("dataset:")) {
-        const storedKey = `ld_ds_files_${folderId}`;
-        const currentList = nodes || [];
-        const nextList = currentList.map((n) =>
-          n.id === renamingNode.id ? { ...n, name: renameName.trim(), updated_at: Date.now() } : n,
-        );
-        if (typeof window !== "undefined") {
-          try {
-            localStorage.setItem(storedKey, JSON.stringify(nextList));
-          } catch {}
-        }
-        setNodes(nextList);
-        setRenamingNode(null);
-        setRenameName("");
-        toast("Đã đổi tên thành công!", "success");
-      } else {
-        await api.patch(Api.node(renamingNode.id), { name: renameName.trim() });
-        setRenamingNode(null);
-        setRenameName("");
-        void load();
-      }
+      await api.patch(Api.node(renamingNode.id), { name: renameName.trim() });
+      setRenamingNode(null);
+      setRenameName("");
+      toast("Đã đổi tên thành công!", "success");
+      void load();
     } catch (e) {
       toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
     } finally {
@@ -487,30 +448,44 @@ export function FilesBrowser({
 
   const currentFolderTarget = useMemo(() => {
     let p = filter === "none" ? folderId : "";
-    if (filter === "none" && !folderId && defaultSingleDataset) {
-      p = `dataset:${defaultSingleDataset}`;
+    if (filter === "none" && !folderId && (defaultSingleDataset || defaultTargetDataset)) {
+      p = `dataset:${defaultSingleDataset || defaultTargetDataset}`;
     }
     return p;
-  }, [filter, folderId, defaultSingleDataset]);
+  }, [filter, folderId, defaultSingleDataset, defaultTargetDataset]);
 
   const handlePaste = async (targetParentId: string) => {
     if (!clipboard || clipboard.nodes.length === 0) return;
+    const isCut = clipboard.nodes.length > 0 && clipboard.action === "cut";
+    let effectiveTarget = targetParentId || currentFolderTarget;
+    // If user right-clicked one of the folders currently in clipboard and clicked Paste,
+    // paste into the current parent directory so a copy/move happens alongside it.
+    if (clipboard.nodes.some((n) => n.id === effectiveTarget)) {
+      effectiveTarget = currentFolderTarget;
+    }
     try {
       for (const node of clipboard.nodes) {
-        if (clipboard.action === "cut") {
-          await api.post(Api.moveNode, {
-            node_id: node.id,
-            parent_id: targetParentId,
-          });
-        } else {
-          await api.post(Api.copyNode, {
-            node_id: node.id,
-            parent_id: targetParentId,
-          });
-        }
+        await transfers.enqueueTask(
+          node.name,
+          isCut ? "move" : "copy",
+          async () => {
+            if (isCut) {
+              await api.post(Api.moveNode, {
+                node_id: node.id,
+                parent_id: effectiveTarget,
+              });
+            } else {
+              await api.post(Api.copyNode, {
+                node_id: node.id,
+                parent_id: effectiveTarget,
+              });
+            }
+          },
+          node.size_bytes || 100,
+        );
       }
-      toast(clipboard.action === "cut" ? "Đã chuyển thành công!" : "Đã dán thành công!", "success");
-      if (clipboard.action === "cut") {
+      toast(isCut ? "Đã di chuyển thành công!" : "Đã dán thành công!", "success");
+      if (isCut) {
         setClipboard(null);
       }
       void load();
@@ -559,39 +534,14 @@ export function FilesBrowser({
       }
     }
     let targetFolderId = folderId;
-    if (!targetFolderId && defaultTargetDataset) {
-      targetFolderId = `dataset:${defaultTargetDataset}`;
+    if (!targetFolderId && (defaultTargetDataset || defaultSingleDataset)) {
+      targetFolderId = `dataset:${defaultTargetDataset || defaultSingleDataset}`;
     }
-    const parts = targetFolderId.replace(/^dataset:/, "").split(":");
-    const dsName = parts[0];
-    const subpath = parts.slice(1).join("/");
 
-    const formData = new FormData();
-    for (let i = 0; i < files.length; i++) {
-      formData.append("file", files[i]);
-    }
-    try {
-      toast("Đang tải tệp lên máy chủ...", "info");
-      const token = api.token;
-      const res = await fetch(api.absolute(Api.datasetUpload(dsName, subpath)), {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
-      });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        if (res.status === 507 || errJson.error === "quota_exceeded" || errJson.error === "ERR_QUOTA") {
-          throw new Error("Dung lượng lưu trữ đã đầy, không thể tải tệp lên");
-        }
-        throw new Error(errJson.error || "Lỗi tải lên máy chủ");
-      }
+    await transfers.enqueue(Array.from(files), targetFolderId, () => {
       toast(`Đã tải lên ${files.length} tệp thành công!`, "success");
       void load();
-    } catch (err: any) {
-      toast(err?.message || "Không thể tải tệp lên", "error");
-    }
+    });
   };
 
   const folderCacheKey = `${folderId || "root"}:${filter}:${query}:${sortBy}:${sortDir}`;
@@ -826,20 +776,6 @@ export function FilesBrowser({
       toast("Bạn chỉ có quyền xem (Chỉ đọc), không thể xóa tập tin!", "error");
       return;
     }
-    if (folderId.startsWith("dataset:")) {
-      for (const node of list) {
-        try {
-          const parts = node.id.replace(/^dataset:/, "").split(":");
-          const dsName = parts[0];
-          const itemRelPath = parts.slice(1).join(":");
-          await api.del(Api.datasetDeleteItem(dsName, itemRelPath));
-        } catch {}
-      }
-      toast(t.confirmTrashTitle, "success");
-      setSelection(new Set());
-      void load();
-      return;
-    }
     for (const node of list) {
       try {
         await api.del(Api.node(node.id));
@@ -850,7 +786,7 @@ export function FilesBrowser({
     toast(t.confirmTrashTitle, "success");
     setSelection(new Set());
     void load();
-  }, [visible, selection, toast, load, isReadOnly, folderId, nodes, t]);
+  }, [visible, selection, toast, load, isReadOnly, t]);
 
   const handleRestore = useCallback(async (node: NodeModel) => {
     try {
@@ -881,6 +817,41 @@ export function FilesBrowser({
     onSelectAll: useCallback(() => setSelection(new Set(visible.map((n) => n.id))), [visible]),
     onDelete: () => void trashChosen(),
     onEscape: useCallback(() => setSelection(new Set()), []),
+    onCopy: useCallback(() => {
+      const list = visible.filter((n) => selection.has(n.id));
+      if (!list.length) return;
+      setClipboard({ action: "copy", nodes: list });
+      toast(`Đã sao chép ${list.length} mục vào bộ nhớ tạm`, "success");
+    }, [visible, selection, toast]),
+    onCut: useCallback(() => {
+      const list = visible.filter((n) => selection.has(n.id));
+      if (!list.length) return;
+      if (isReadOnly || list.some((n) => n.role === "viewer")) {
+        toast("Bạn chỉ có quyền xem (Chỉ đọc), không thể cắt mục này!", "error");
+        return;
+      }
+      setClipboard({ action: "cut", nodes: list });
+      toast(`Đã cắt ${list.length} mục vào bộ nhớ tạm`, "success");
+    }, [visible, selection, isReadOnly, toast]),
+    onPaste: useCallback(() => {
+      if (!clipboard || clipboard.nodes.length === 0) return;
+      if (isReadOnly) {
+        toast("Bạn chỉ có quyền xem (Chỉ đọc), không thể dán vào thư mục này!", "error");
+        return;
+      }
+      void handlePaste(currentFolderTarget);
+    }, [clipboard, isReadOnly, currentFolderTarget, toast]),
+    onRename: useCallback(() => {
+      const list = visible.filter((n) => selection.has(n.id));
+      if (list.length !== 1) return;
+      const target = list[0];
+      if (isReadOnly || target.role === "viewer") {
+        toast("Bạn chỉ có quyền xem (Chỉ đọc) trên mục này!", "error");
+        return;
+      }
+      setRenamingNode(target);
+      setRenameName(target.name);
+    }, [visible, selection, isReadOnly, toast]),
     enabled: !layered,
   });
 
@@ -891,8 +862,16 @@ export function FilesBrowser({
     useCallback(
       async (ids: string[], intoFolderId: string) => {
         for (const id of ids) {
+          const item = visible.find((n) => n.id === id);
           try {
-            await api.patch(Api.node(id), { parent_id: intoFolderId });
+            await transfers.enqueueTask(
+              item?.name || id,
+              "move",
+              async () => {
+                await api.post(Api.moveNode, { node_id: id, parent_id: intoFolderId });
+              },
+              item?.size_bytes || 100,
+            );
           } catch {
             /* a move the server refuses stays where it was */
           }
@@ -1812,26 +1791,17 @@ export function FilesBrowser({
                 ]
               : [
                   {
+                    label: t.actionOpen,
+                    glyph: (isFolder(menu.node) ? "folder" : "folder-open") as Glyph,
+                    onClick: () => activate(menu.node),
+                  },
+                  {
                     label: "Xem trước",
                     glyph: "eye" as Glyph,
                     onClick: () => {
                       setDetailsNode(menu.node);
                       setDetailsOpen(true);
                       setSelection(new Set([menu.node.id]));
-                    },
-                  },
-                  {
-                    label: t.actionOpen,
-                    glyph: (isFolder(menu.node) ? "folder" : "folder-open") as Glyph,
-                    onClick: () => activate(menu.node),
-                  },
-                  {
-                    label: t.starred,
-                    glyph: (menu.node.starred ? "star-filled" : "star") as Glyph,
-                    onClick: async () => {
-                      if (menu.node.starred) await api.del(Api.star(menu.node.id));
-                      else await api.post(Api.star(menu.node.id), {});
-                      void load();
                     },
                   },
                   ...(!isFolder(menu.node)
@@ -1843,80 +1813,84 @@ export function FilesBrowser({
                         },
                       ]
                     : []),
-                  ...(!isReadOnly && menu.node.role !== "viewer"
+                  {
+                    label: t.actionRename,
+                    glyph: "edit" as Glyph,
+                    disabled: isReadOnly || menu.node.role === "viewer",
+                    onClick: () => {
+                      setRenamingNode(menu.node);
+                      setRenameName(menu.node.name);
+                    },
+                  },
+                  ...(isFolder(menu.node) && !isReadOnly && menu.node.role !== "viewer"
                     ? [
                         {
-                          label: t.actionRename,
-                          glyph: "edit" as Glyph,
-                          onClick: () => {
-                            setRenamingNode(menu.node);
-                            setRenameName(menu.node.name);
-                          },
-                        },
-                        ...(isFolder(menu.node)
-                          ? [
-                              {
-                                label: t.folderColor,
-                                glyph: "grid" as Glyph,
-                                onClick: () => setRecoloringNode(menu.node),
-                              },
-                            ]
-                          : []),
-                        {
-                          label: "Cắt",
-                          glyph: "cut" as Glyph,
-                          disabled: isReadOnly || menu.node.role === "viewer",
-                          onClick: () => {
-                            setClipboard({ action: "cut", nodes: [menu.node] });
-                            toast("Đã cắt vào bộ nhớ tạm", "success");
-                          },
-                        },
-                        {
-                          label: t.actionCopy || "Sao chép",
-                          glyph: "copy" as Glyph,
-                          onClick: () => {
-                            setClipboard({ action: "copy", nodes: [menu.node] });
-                            toast("Đã sao chép vào bộ nhớ tạm", "success");
-                          },
-                        },
-                        ...(isFolder(menu.node)
-                          ? [
-                              {
-                                label: "Dán",
-                                glyph: "paste" as Glyph,
-                                disabled:
-                                  !clipboard ||
-                                  clipboard.nodes.length === 0 ||
-                                  isReadOnly ||
-                                  menu.node.role === "viewer",
-                                onClick: () => void handlePaste(menu.node.id),
-                              },
-                            ]
-                          : []),
-                        {
-                          label: t.actionShare,
-                          glyph: "share" as Glyph,
-                          onClick: () => setSharing(menu.node),
-                        },
-                        {
-                          label: t.trash,
-                          glyph: "trash" as Glyph,
-                          danger: true,
-                          onClick: async () => {
-                            if (menu.node.id.startsWith("dataset:")) {
-                              const parts = menu.node.id.replace(/^dataset:/, "").split(":");
-                              const dsName = parts[0];
-                              const itemRelPath = parts.slice(1).join(":");
-                              await api.del(Api.datasetDeleteItem(dsName, itemRelPath));
-                            } else {
-                              await api.del(Api.node(menu.node.id));
-                            }
-                            toast(t.trash, "success");
-                            void load();
-                          },
+                          label: t.folderColor,
+                          glyph: "grid" as Glyph,
+                          onClick: () => setRecoloringNode(menu.node),
                         },
                       ]
                     : []),
+                  {
+                    label: "Cắt",
+                    glyph: "cut" as Glyph,
+                    disabled: isReadOnly || menu.node.role === "viewer",
+                    onClick: () => {
+                      const targets = selection.has(menu.node.id)
+                        ? visible.filter((n) => selection.has(n.id))
+                        : [menu.node];
+                      setClipboard({ action: "cut", nodes: targets });
+                      toast(`Đã cắt ${targets.length} mục vào bộ nhớ tạm`, "success");
+                    },
+                  },
+                  {
+                    label: t.actionCopy || "Sao chép",
+                    glyph: "copy" as Glyph,
+                    onClick: () => {
+                      const targets = selection.has(menu.node.id)
+                        ? visible.filter((n) => selection.has(n.id))
+                        : [menu.node];
+                      setClipboard({ action: "copy", nodes: targets });
+                      toast(`Đã sao chép ${targets.length} mục vào bộ nhớ tạm`, "success");
+                    },
+                  },
+                  {
+                    label: "Dán",
+                    glyph: "paste" as Glyph,
+                    disabled:
+                      !clipboard ||
+                      clipboard.nodes.length === 0 ||
+                      isReadOnly ||
+                      (isFolder(menu.node) && menu.node.role === "viewer"),
+                    onClick: () =>
+                      void handlePaste(isFolder(menu.node) ? menu.node.id : currentFolderTarget),
+                  },
+                  {
+                    label: t.actionShare,
+                    glyph: "share" as Glyph,
+                    disabled: isReadOnly || menu.node.role === "viewer",
+                    onClick: () => setSharing(menu.node),
+                  },
+                  {
+                    label: t.starred,
+                    glyph: (menu.node.starred ? "star-filled" : "star") as Glyph,
+                    onClick: async () => {
+                      if (menu.node.starred) await api.del(Api.star(menu.node.id));
+                      else await api.post(Api.star(menu.node.id), {});
+                      void load();
+                    },
+                  },
+                  {
+                    label: t.trash,
+                    glyph: "trash" as Glyph,
+                    danger: true,
+                    disabled: isReadOnly || menu.node.role === "viewer",
+                    onClick: async () => {
+                      await api.del(Api.node(menu.node.id));
+                      toast(t.trash, "success");
+                      void load();
+                    },
+                  },
                 ]
             : []
         }

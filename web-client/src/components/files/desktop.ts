@@ -151,11 +151,19 @@ export function useFileKeys({
   onSelectAll,
   onDelete,
   onEscape,
+  onCopy,
+  onCut,
+  onPaste,
+  onRename,
   enabled = true,
 }: {
   onSelectAll: () => void;
   onDelete: () => void;
   onEscape: () => void;
+  onCopy?: () => void;
+  onCut?: () => void;
+  onPaste?: () => void;
+  onRename?: () => void;
   enabled?: boolean;
 }) {
   useEffect(() => {
@@ -171,6 +179,34 @@ export function useFileKeys({
         onSelectAll();
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+        if (onCopy) {
+          e.preventDefault();
+          onCopy();
+          return;
+        }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x") {
+        if (onCut) {
+          e.preventDefault();
+          onCut();
+          return;
+        }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+        if (onPaste) {
+          e.preventDefault();
+          onPaste();
+          return;
+        }
+      }
+      if (e.key === "F2") {
+        if (onRename) {
+          e.preventDefault();
+          onRename();
+          return;
+        }
+      }
       if (e.key === "Delete") {
         e.preventDefault();
         onDelete();
@@ -180,7 +216,7 @@ export function useFileKeys({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onSelectAll, onDelete, onEscape, enabled]);
+  }, [onSelectAll, onDelete, onEscape, onCopy, onCut, onPaste, onRename, enabled]);
 }
 
 /**

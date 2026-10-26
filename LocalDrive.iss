@@ -1,4 +1,4 @@
-#define MyAppName "Local Drive"
+﻿#define MyAppName "Local Drive"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Local Drive"
 #define MyAppURL "https://github.com/MultiX0/LocalDrive"
@@ -25,7 +25,7 @@ DisableProgramGroupPage=yes
 CloseApplications=yes
 RestartApplications=no
 ArchitecturesInstallIn64BitMode=x64compatible
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 LanguageDetectionMethod=none
 UsePreviousLanguage=no
@@ -65,25 +65,11 @@ Name: "{userappdata}\Microsoft\Windows\Network Shortcuts\KiyoDrive\target"; File
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "LocalDrive"; ValueData: """{app}\{#MyAppExeName}"""; Tasks: autostart; Flags: uninsdeletevalue
-Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel"; ValueType: string; ValueData: "KiDrive"; Tasks: kiyodrive; Flags: uninsdeletekey noerror
-Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico,0"; Tasks: kiyodrive; Flags: uninsdeletekey noerror
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultLabel"; ValueType: string; ValueData: "KiDrive"; Tasks: kiyodrive; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico,0"; Tasks: kiyodrive; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Applications\Explorer.exe\Drives\K\DefaultLabel"; ValueType: string; ValueData: "KiDrive"; Tasks: kiyodrive; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Applications\Explorer.exe\Drives\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico,0"; Tasks: kiyodrive; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultLabel"; ValueType: string; ValueData: "KiDrive"; Tasks: kiyodrive; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Applications\Explorer.exe\DriveIcons\K\DefaultIcon"; ValueType: string; ValueData: "{app}\app_icon.ico,0"; Tasks: kiyodrive; Flags: uninsdeletekey
 
 [Code]
-procedure SHChangeNotify(wEventId: LongInt; uFlags: Cardinal; dwItem1, dwItem2: LongInt);
-  external 'SHChangeNotify@shell32.dll stdcall';
-
-function DefineDosDeviceW(dwFlags: DWORD; lpDeviceName: String; lpTargetPath: String): Boolean;
-  external 'DefineDosDeviceW@kernel32.dll stdcall';
-
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  NetFolder, OldNetFolder, IniFile, IniContent, TargetDir: string;
+  NetFolder, OldNetFolder, IniFile, IniContent: string;
   ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
@@ -91,7 +77,6 @@ begin
     // Unmount any mapped drive L: so no red capacity bar or NTFS appears
     Exec('cmd.exe', '/c subst L: /D 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('cmd.exe', '/c net use L: /delete /y 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2\##localhost#c$#Users');
 
     // Delete old variants from Network Shortcuts
     OldNetFolder := ExpandConstant('{userappdata}\Microsoft\Windows\Network Shortcuts\Local Drive');
@@ -101,25 +86,6 @@ begin
 
     if WizardIsTaskSelected('kiyodrive') then
     begin
-      TargetDir := ExpandConstant('{%USERPROFILE}\Local Drive');
-      ForceDirectories(TargetDir);
-
-      // Copy icon and write autorun.inf
-      FileCopy(ExpandConstant('{app}\app_icon.ico'), TargetDir + '\app_icon.ico', False);
-      Exec('attrib', '+h "' + TargetDir + '\app_icon.ico"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-      IniFile := TargetDir + '\autorun.inf';
-      IniContent := '[autorun]' + #13#10 +
-                    'icon=app_icon.ico,0' + #13#10 +
-                    'label=KiDrive' + #13#10;
-      SaveStringToFile(IniFile, IniContent, False);
-      Exec('attrib', '+h +s "' + IniFile + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-      // Mount Drive K:
-      DefineDosDeviceW(0, 'K:', TargetDir);
-      Exec('cmd.exe', '/c subst K: /D 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      Exec('cmd.exe', '/c subst K: "' + TargetDir + '" 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
       // Setup desktop.ini for KiyoDrive Network Location
       NetFolder := ExpandConstant('{userappdata}\Microsoft\Windows\Network Shortcuts\KiyoDrive');
       ForceDirectories(NetFolder);
@@ -140,15 +106,6 @@ begin
       NetFolder := ExpandConstant('{userappdata}\Microsoft\Windows\Network Shortcuts\KiyoDrive');
       DelTree(NetFolder, True, True, True);
     end;
-
-    // Setup and publish KiyoVN network share (SMB)
-    if DirExists('E:\DATA\KiyoVN') then
-      Exec('cmd.exe', '/c net share KiyoVN="E:\DATA\KiyoVN" /GRANT:Everyone,FULL /Y 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
-    else if WizardIsTaskSelected('kiyodrive') then
-      Exec('cmd.exe', '/c net share KiyoVN="' + TargetDir + '" /GRANT:Everyone,FULL /Y 2>nul', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-    SHChangeNotify($08000000, 0, 0, 0);
-    SHChangeNotify($00000040, 0, 0, 0);
   end;
 end;
 

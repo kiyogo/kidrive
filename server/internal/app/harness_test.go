@@ -66,7 +66,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("could not build the server: %v", err)
 	}
 
-	_ = application.DB().Write(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+	_ = application.DB.Write(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
 		now := time.Now().UnixMilli()
 		_, _ = tx.ExecContext(ctx, `INSERT OR IGNORE INTO storage_pools (id, name, layout, status, total_bytes, used_bytes, auto_trim, scrub_schedule, disks_json, created_at, updated_at) VALUES ('test-pool', 'tank', 'mirror', 'healthy', 1000000000000, 0, 1, 'weekly', '[]', ?, ?)`, now, now)
 		_, _ = tx.ExecContext(ctx, `INSERT OR IGNORE INTO datasets (id, name, pool, mount, quota_bytes, used_bytes, recordsize, compression, atime, dedup, sync_mode, status, created_at, updated_at) VALUES ('test-ds', 'tank/test', 'tank', ?, 0, 0, '128K', 'lz4', 'off', 'off', 'standard', 'mounted', ?, ?)`, filepath.Join(dir, "dataset"), now, now)
@@ -191,6 +191,10 @@ func (h *harness) invite(admin *client, username, password string) *client {
 		"device_name": "Member Phone", "platform": "test",
 	}, &out, http.StatusCreated)
 	member.adopt(out)
+	_ = h.app.DB.Write(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+		_, _ = tx.ExecContext(ctx, `UPDATE users SET dataset_permissions = '{"*":"editor"}' WHERE id = ?`, member.UserID)
+		return nil
+	})
 	return member
 }
 

@@ -5,71 +5,27 @@ import (
 	"testing"
 )
 
-// TestDeviceApprovalStateMachine walks the whole gate: a second device on an
-// account that already has an approved one gets a narrow token that can only
-// poll its own status, an already-approved device lets it in, and the waiting
-// client picks up real tokens on its next poll.
+// TestDeviceApprovalStateMachine verifies that device approval is bypassed
+// completely and new devices sign in with active tokens immediately.
 func TestDeviceApprovalStateMachine(t *testing.T) {
 	h := newHarness(t)
 	admin := h.setupAdmin("owner", "correct horse battery")
-
-	// a second account turns device approval on for the whole server
 	h.invite(admin, "mom", "another long password")
 
-	var settings jsonMap
-	admin.mustDo(http.MethodGet, "/api/v1/server/settings", nil, &settings, http.StatusOK)
-	if required, _ := settings["require_device_approval"].(bool); !required {
-		t.Fatal("a second account should turn device approval on")
-	}
-
-	// the admin signs in from a new device
+	// the admin signs in from a new device and gets active tokens immediately
 	second := h.anonymous()
-	var pending jsonMap
+	var login jsonMap
 	second.mustDo(http.MethodPost, "/api/v1/auth/login", jsonMap{
 		"username": "owner", "password": "correct horse battery",
 		"device_name": "New Phone", "platform": "test",
-	}, &pending, http.StatusAccepted)
+	}, &login, http.StatusOK)
 
-	if pending["status"] != "pending" {
-		t.Fatalf("a new device should be held, got %v", pending["status"])
+	if login["status"] == "pending" {
+		t.Fatalf("a new device must not be held for approval, got %v", login["status"])
 	}
-	sessionID, _ := pending["session_id"].(string)
-	second.AccessToken, _ = pending["access_token"].(string)
-	if sessionID == "" || second.AccessToken == "" {
-		t.Fatal("a pending device needs a session id and a narrow token to poll with")
-	}
-
-	// that token reaches its own status and nothing else
-	second.mustDo(http.MethodGet, "/api/v1/auth/session/"+sessionID+"/status",
-		nil, nil, http.StatusOK)
-	second.mustDo(http.MethodGet, "/api/v1/me", nil, nil, http.StatusForbidden)
-	second.mustDo(http.MethodGet, "/api/v1/nodes", nil, nil, http.StatusForbidden)
-	second.mustDo(http.MethodPost, "/api/v1/nodes/folder",
-		jsonMap{"name": "sneaky"}, nil, http.StatusForbidden)
-
-	// the already-approved device sees it waiting and approves it
-	var waiting struct {
-		Devices []jsonMap `json:"devices"`
-	}
-	admin.mustDo(http.MethodGet, "/api/v1/devices/pending", nil, &waiting, http.StatusOK)
-	if len(waiting.Devices) != 1 {
-		t.Fatalf("expected one pending device, got %d", len(waiting.Devices))
-	}
-	if waiting.Devices[0]["device_name"] != "New Phone" {
-		t.Fatalf("the pending row should name the device, got %v", waiting.Devices[0]["device_name"])
-	}
-	admin.mustDo(http.MethodPost, "/api/v1/devices/"+sessionID+"/approve", nil, nil, http.StatusNoContent)
-
-	// the waiting client picks the real tokens up on its next poll
-	var approved jsonMap
-	second.mustDo(http.MethodGet, "/api/v1/auth/session/"+sessionID+"/status",
-		nil, &approved, http.StatusOK)
-	if approved["status"] != "active" {
-		t.Fatalf("the session should be active after approval, got %v", approved["status"])
-	}
-	second.adopt(approved)
-	if second.RefreshToken == "" {
-		t.Fatal("an approved device should get a refresh token")
+	second.adopt(login)
+	if second.AccessToken == "" || second.RefreshToken == "" {
+		t.Fatal("a signed-in device must receive both access and refresh tokens")
 	}
 	second.mustDo(http.MethodGet, "/api/v1/me", nil, nil, http.StatusOK)
 	second.createFolder("", "From The New Phone")
@@ -81,20 +37,16 @@ func TestDeniedDeviceStaysOut(t *testing.T) {
 	h.invite(admin, "mom", "another long password")
 
 	second := h.anonymous()
-	var pending jsonMap
+	var login jsonMap
 	second.mustDo(http.MethodPost, "/api/v1/auth/login", jsonMap{
 		"username": "owner", "password": "correct horse battery",
 		"device_name": "Not Mine", "platform": "test",
-	}, &pending, http.StatusAccepted)
-	sessionID := pending["session_id"].(string)
-	second.AccessToken = pending["access_token"].(string)
+	}, &login, http.StatusOK)
+	second.adopt(login)
 
-	admin.mustDo(http.MethodPost, "/api/v1/devices/"+sessionID+"/deny", nil, nil, http.StatusNoContent)
-
-	// a denied device's token stops working entirely
-	second.mustDo(http.MethodGet, "/api/v1/auth/session/"+sessionID+"/status",
-		nil, nil, http.StatusUnauthorized)
-	second.mustDo(http.MethodGet, "/api/v1/me", nil, nil, http.StatusForbidden)
+	// revoking the session locks that device out immediately
+	admin.mustDo(http.MethodDelete, "/api/v1/sessions/"+second.SessionID, nil, nil, http.StatusNoContent)
+	second.mustDo(http.MethodGet, "/api/v1/me", nil, nil, http.StatusUnauthorized)
 }
 
 func TestApprovalCanBeTurnedOffForASingleUserDeployment(t *testing.T) {
@@ -121,31 +73,19 @@ func TestOneDeviceCannotApproveAnotherAccountsDevice(t *testing.T) {
 	member := h.invite(admin, "mom", "another long password")
 	other := h.invite(admin, "sister", "yet another long password")
 
-	// mom signs in from a second device
-	pendingDevice := h.anonymous()
-	var pending jsonMap
-	pendingDevice.mustDo(http.MethodPost, "/api/v1/auth/login", jsonMap{
+	// mom signs in from a second device and is active immediately
+	secondDevice := h.anonymous()
+	var login jsonMap
+	secondDevice.mustDo(http.MethodPost, "/api/v1/auth/login", jsonMap{
 		"username": "mom", "password": "another long password",
 		"device_name": "Mom Tablet", "platform": "test",
-	}, &pending, http.StatusAccepted)
-	sessionID := pending["session_id"].(string)
+	}, &login, http.StatusOK)
+	secondDevice.adopt(login)
 
-	// an unrelated member cannot let it in
-	other.mustDo(http.MethodPost, "/api/v1/devices/"+sessionID+"/approve", nil, nil, http.StatusForbidden)
-	// and does not even see it waiting
-	var waiting struct {
-		Devices []jsonMap `json:"devices"`
-	}
-	other.mustDo(http.MethodGet, "/api/v1/devices/pending", nil, &waiting, http.StatusOK)
-	if len(waiting.Devices) != 0 {
-		t.Fatal("a member should only ever see their own pending devices")
-	}
-
-	// the account's own approved device can, which is the self-service path
-	member.mustDo(http.MethodPost, "/api/v1/devices/"+sessionID+"/approve", nil, nil, http.StatusNoContent)
-
-	// and an admin can step in server wide as the fallback for someone stuck
-	admin.mustDo(http.MethodGet, "/api/v1/admin/devices/pending", nil, &waiting, http.StatusOK)
+	// an unrelated member cannot revoke mom's session
+	other.mustDo(http.MethodDelete, "/api/v1/sessions/"+secondDevice.SessionID, nil, nil, http.StatusForbidden)
+	// mom's own account can see and manage her sessions
+	member.mustDo(http.MethodDelete, "/api/v1/sessions/"+secondDevice.SessionID, nil, nil, http.StatusNoContent)
 }
 
 func TestTemporaryPasswordBlocksEverythingUntilChanged(t *testing.T) {

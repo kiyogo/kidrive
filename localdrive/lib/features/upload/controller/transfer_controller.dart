@@ -294,6 +294,63 @@ class TransferController extends Notifier<List<TransferModel>> {
     _schedulePump();
   }
 
+  /// Enqueues an active server operation (such as copy, move, paste)
+  /// so it appears in the UploadsTray and TransfersPage with % progress.
+  Future<void> enqueueServerOperation({
+    required String name,
+    required String kindName,
+    required Future<void> Function() action,
+    int sizeBytes = 100,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final id = 'op-$now-${name.hashCode.abs()}';
+    final total = sizeBytes > 0 ? sizeBytes : 100;
+    int toBytes(int pct) => ((pct / 100.0) * total).round().clamp(0, total);
+
+    final model = TransferModel(
+      id: id,
+      kind: TransferKind.upload,
+      name: '$kindName: $name',
+      status: TransferStatus.inProgress,
+      totalBytes: total,
+      transferredBytes: toBytes(10),
+      createdAt: now,
+      updatedAt: now,
+    );
+    state = <TransferModel>[...state, model];
+
+    final startedAt = DateTime.now().millisecondsSinceEpoch;
+    Timer? ticker;
+    int progress = 10;
+    ticker = Timer.periodic(const Duration(milliseconds: 120), (t) {
+      if (progress < 88) {
+        progress = math.min(88, progress + 16);
+        _replace(model.copyWith(transferredBytes: toBytes(progress)));
+      }
+    });
+
+    try {
+      await action();
+      ticker.cancel();
+      final elapsed = DateTime.now().millisecondsSinceEpoch - startedAt;
+      if (elapsed < 260) {
+        _replace(model.copyWith(transferredBytes: toBytes(78)));
+        await Future<void>.delayed(const Duration(milliseconds: 140));
+      }
+      _replace(model.copyWith(
+        status: TransferStatus.completed,
+        transferredBytes: total,
+      ));
+    } catch (e) {
+      ticker.cancel();
+      _replace(model.copyWith(
+        status: TransferStatus.failed,
+        failureMessage: e.toString(),
+      ));
+      rethrow;
+    }
+  }
+
   Future<void> retry(String id) async {
     final transfer = _byId(id);
     if (transfer == null) return;

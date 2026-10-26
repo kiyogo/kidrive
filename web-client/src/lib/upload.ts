@@ -169,24 +169,43 @@ class Transfers {
     const auth = { Authorization: `Bearer ${token}` };
 
     if (parentId.startsWith("dataset:")) {
-      const parts = parentId.replace(/^dataset:/, "").split(":");
-      const dsName = parts[0];
-      const subpath = parts.slice(1).join("/");
+      const rawDs = parentId.replace(/^dataset:/, "").replace(/:/g, "/").replace(/^\/+|\/+$/g, "");
       const formData = new FormData();
       formData.append("file", file);
-      const url = api.absolute(Api.datasetUpload(dsName, subpath));
-      const res = await fetch(url, {
-        method: "POST",
-        headers: auth,
-        body: formData,
-      });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        if (res.status === 507 || errJson.error?.includes("hạn ngạch") || errJson.error?.includes("quota")) {
-          throw new Error("Dung lượng lưu trữ đã đầy, không thể tải tệp lên");
+      const url = api.absolute(Api.datasetUpload(rawDs, ""));
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", url, true);
+        if (token) {
+          xhr.setRequestHeader("Authorization", `Bearer ${token}`);
         }
-        throw new Error(errJson.message || errJson.error || "Không thể tải tệp lên tập dữ liệu");
-      }
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            this.patch(id, { sent: Math.min(file.size, e.loaded) });
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            this.patch(id, { sent: file.size });
+            resolve();
+            return;
+          }
+          let errJson: any = {};
+          try {
+            errJson = JSON.parse(xhr.responseText || "{}");
+          } catch (_) {}
+          const errStr = String(errJson.message || errJson.error?.message || errJson.error || "");
+          if (xhr.status === 507 || errStr.includes("hạn ngạch") || errStr.includes("quota")) {
+            reject(new Error("Dung lượng lưu trữ đã đầy, không thể tải tệp lên"));
+            return;
+          }
+          reject(new Error(errStr || "Không thể tải tệp lên tập dữ liệu"));
+        };
+        xhr.onerror = () => {
+          reject(new Error("Không thể kết nối máy chủ khi tải tệp lên"));
+        };
+        xhr.send(formData);
+      });
       return;
     }
 
@@ -247,6 +266,60 @@ class Transfers {
       const next = Number(res.headers.get("Upload-Offset") ?? end);
       offset = Number.isFinite(next) && next > offset ? next : end;
       this.patch(id, { sent: offset });
+    }
+  }
+
+  /**
+   * Enqueues an asynchronous server operation (such as copy, move, paste)
+   * so it appears in the Transfers list and shows real progress %.
+   */
+  async enqueueTask(
+    name: string,
+    operationType: "copy" | "move",
+    task: (onProgress: (pct: number) => void) => Promise<void>,
+    size: number = 100
+  ): Promise<void> {
+    const id = `op-${Date.now()}-${this.nextId++}`;
+    const opLabel = operationType === "copy" ? "Sao chép" : "Cắt & Dán";
+    const totalSize = size && size > 0 ? size : 100;
+    const toBytes = (pct: number) => Math.max(0, Math.min(totalSize, Math.round((pct / 100) * totalSize)));
+
+    const item: Transfer = {
+      id,
+      name: `${opLabel}: ${name}`,
+      size: totalSize,
+      sent: toBytes(8),
+      state: "uploading",
+    };
+    this.items = [item, ...this.items];
+    this.emit();
+
+    const startedAt = Date.now();
+    let currentPct = 8;
+    const ticker = setInterval(() => {
+      if (currentPct < 88) {
+        currentPct = Math.min(88, currentPct + 16);
+        this.patch(id, { sent: toBytes(currentPct) });
+      }
+    }, 120);
+
+    try {
+      await task((pct) => {
+        currentPct = Math.max(currentPct, Math.min(99, pct));
+        this.patch(id, { sent: toBytes(currentPct) });
+      });
+      clearInterval(ticker);
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < 260) {
+        this.patch(id, { sent: toBytes(78) });
+        await new Promise((r) => setTimeout(r, 140));
+      }
+      this.patch(id, { state: "done", sent: totalSize });
+    } catch (err: any) {
+      clearInterval(ticker);
+      const errMsg = err?.message || say().transferFailed;
+      this.patch(id, { state: "failed", error: errMsg });
+      throw err;
     }
   }
 }

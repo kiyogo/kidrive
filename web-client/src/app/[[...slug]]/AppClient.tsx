@@ -18,6 +18,7 @@ import { VideosScreen } from "@/components/gallery/VideosScreen";
 import { Preview } from "@/components/preview/Preview";
 import { SearchScreen } from "@/components/search/SearchScreen";
 import { Shell, type Section } from "@/components/Shell";
+import { FloatingTransfersTray } from "@/components/TransfersTray";
 import { Button, TextField } from "@/components/ui";
 import { api } from "@/lib/api";
 import { Api } from "@/lib/endpoints";
@@ -477,6 +478,9 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
           onClose={() => setPreview(null)}
           onNavigate={(next) => setPreview({ node: next, nodes: preview.nodes })}
         />
+      )}
+      {section !== "transfers" && (
+        <FloatingTransfersTray onOpenTransfers={() => navigateTo("transfers")} />
       )}
     </Shell>
   );

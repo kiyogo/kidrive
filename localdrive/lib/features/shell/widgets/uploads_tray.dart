@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../../../imports.dart';
 import '../../upload/controller/transfer_controller.dart';
 
@@ -6,19 +8,49 @@ import '../../upload/controller/transfer_controller.dart';
 /// It shows aggregate state, and tapping it opens the full queue where a
 /// failed item shows its specific reason and its own retry, never a generic
 /// "something went wrong" covering the whole batch.
-class UploadsTray extends ConsumerWidget {
+class UploadsTray extends ConsumerStatefulWidget {
   const UploadsTray({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<UploadsTray> createState() => _UploadsTrayState();
+}
+
+class _UploadsTrayState extends ConsumerState<UploadsTray> {
+  bool _lingering = false;
+  Timer? _lingerTimer;
+
+  @override
+  void dispose() {
+    _lingerTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final l10n = L10n.of(context);
-    // watching only the summary keeps every progress tick from rebuilding the
-    // screen behind it
     final summary = ref.watch(transferSummaryProvider);
     if (summary.isEmpty) return const SizedBox.shrink();
 
     final done = summary.completed == summary.total && !summary.needsAttention;
-    if (done) return const SizedBox.shrink();
+    if (!done) {
+      _lingerTimer?.cancel();
+      _lingering = true;
+    } else if (_lingering && (_lingerTimer == null || !_lingerTimer!.isActive)) {
+      _lingerTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted) {
+          setState(() => _lingering = false);
+        }
+      });
+    }
+
+    if (done && !_lingering) return const SizedBox.shrink();
+
+    final pct = done ? 100 : (summary.progress * 100).round().clamp(0, 100);
+    final barColor = summary.needsAttention
+        ? LdColors.accentWarning
+        : done
+            ? const Color(0xFF10B981)
+            : LdColors.accentPrimary;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -49,11 +81,13 @@ class UploadsTray extends ConsumerWidget {
               Row(
                 children: <Widget>[
                   LdIcon(
-                    summary.needsAttention ? LdGlyph.warning : LdGlyph.upload,
+                    summary.needsAttention
+                        ? LdGlyph.warning
+                        : done
+                            ? LdGlyph.check
+                            : LdGlyph.upload,
                     size: 18,
-                    color: summary.needsAttention
-                        ? LdColors.accentWarning
-                        : LdColors.accentPrimary,
+                    color: barColor,
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -62,6 +96,14 @@ class UploadsTray extends ConsumerWidget {
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                   ),
+                  Text(
+                    '$pct%',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: barColor,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(width: 6),
                   LdIcon(
                     LdGlyph.chevronRight,
                     size: 16,
@@ -71,10 +113,8 @@ class UploadsTray extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
               LdProgressBar(
-                value: summary.progress,
-                color: summary.needsAttention
-                    ? LdColors.accentWarning
-                    : LdColors.accentPrimary,
+                value: done ? 1.0 : summary.progress,
+                color: barColor,
               ),
               if (summary.needsAttention) ...<Widget>[
                 const SizedBox(height: 8),

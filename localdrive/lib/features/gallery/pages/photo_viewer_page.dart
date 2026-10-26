@@ -13,7 +13,6 @@ import '../../files/providers/files_providers.dart';
 import '../../files/widgets/shared/node_actions.dart';
 import '../../offline/controller/offline_controller.dart';
 import '../../share/widgets/share_sheet.dart';
-import '../providers/gallery_providers.dart';
 
 /// One picture, full screen, at full quality.
 ///
@@ -42,6 +41,7 @@ class PhotoViewerPage extends ConsumerStatefulWidget {
 class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
   PageController? _controller;
   int _index = 0;
+  int _lastNodesLength = 0;
   String? _currentNodeId;
 
   @override
@@ -124,49 +124,60 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
         defaultTargetPlatform == TargetPlatform.android ||
         defaultTargetPlatform == TargetPlatform.iOS;
 
-    final singleNode = ref.watch(nodeProvider(widget.nodeId)).valueOrNull;
-
     final List<NodeModel> sourceNodes;
     if (widget.scopedNodes != null && widget.scopedNodes!.isNotEmpty) {
       sourceNodes = widget.scopedNodes!;
-    } else if (singleNode != null && singleNode.parentId.isNotEmpty) {
-      final folderNodes = ref
-          .watch(folderProvider(FolderQuery(parentId: singleNode.parentId)))
-          .valueOrNull;
-      final folderImages = folderNodes
-          ?.where((n) => n.category == FileCategory.image)
-          .toList();
-      if (folderImages != null && folderImages.isNotEmpty) {
-        sourceNodes = folderImages;
-      } else {
-        // While folder images are loading, stay strictly on singleNode.
-        // NEVER fall back to the global gallery, which causes wrong folder / first photo jump bug!
-        sourceNodes = <NodeModel>[singleNode];
-      }
-    } else if (singleNode != null && singleNode.parentId.isEmpty) {
-      final gallery = ref.watch(galleryProvider);
-      sourceNodes = gallery.valueOrNull ?? <NodeModel>[singleNode];
     } else {
-      final gallery = ref.watch(galleryProvider);
-      sourceNodes = gallery.valueOrNull ?? const <NodeModel>[];
+      final singleNode = ref.watch(nodeProvider(widget.nodeId)).valueOrNull;
+      String? resolvedParentId = singleNode?.parentId;
+      if (resolvedParentId == null &&
+          widget.nodeId.startsWith('dataset:') &&
+          widget.nodeId.contains('/')) {
+        resolvedParentId =
+            widget.nodeId.substring(0, widget.nodeId.lastIndexOf('/'));
+      }
+      if (resolvedParentId != null) {
+        final folderNodes = ref
+            .watch(folderProvider(FolderQuery(parentId: resolvedParentId)))
+            .valueOrNull;
+        final folderImages = folderNodes
+            ?.where((n) => n.category == FileCategory.image)
+            .toList();
+        if (folderImages != null && folderImages.isNotEmpty) {
+          sourceNodes = folderImages;
+        } else if (singleNode != null) {
+          sourceNodes = <NodeModel>[singleNode];
+        } else {
+          sourceNodes = const <NodeModel>[];
+        }
+      } else if (singleNode != null) {
+        sourceNodes = <NodeModel>[singleNode];
+      } else {
+        sourceNodes = const <NodeModel>[];
+      }
     }
 
     final targetId = _currentNodeId ?? widget.nodeId;
     final List<NodeModel> effectiveNodes;
     if (sourceNodes.any((n) => n.id == targetId)) {
       effectiveNodes = sourceNodes;
-    } else if (singleNode != null) {
-      effectiveNodes = <NodeModel>[singleNode];
     } else {
-      effectiveNodes = <NodeModel>[
-        NodeModel(
-          id: widget.nodeId,
-          name: '',
-          isFolder: false,
-          category: FileCategory.image,
-          libraryId: '',
-        ),
-      ];
+      final singleNode = ref.watch(nodeProvider(targetId)).valueOrNull;
+      if (singleNode != null) {
+        effectiveNodes = <NodeModel>[singleNode];
+      } else {
+        effectiveNodes = <NodeModel>[
+          NodeModel(
+            id: targetId,
+            name: targetId.contains('/')
+                ? targetId.substring(targetId.lastIndexOf('/') + 1)
+                : '',
+            isFolder: false,
+            category: FileCategory.image,
+            libraryId: '',
+          ),
+        ];
+      }
     }
 
     if (effectiveNodes.isEmpty) {
@@ -182,19 +193,26 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
     final start = effectiveNodes.indexWhere((n) => n.id == targetId);
     final initial = start < 0 ? 0 : start;
 
-    if (_controller == null) {
+    if (_controller == null || _lastNodesLength != effectiveNodes.length) {
+      _controller?.dispose();
       _controller = PageController(initialPage: initial);
       _index = initial;
+      _lastNodesLength = effectiveNodes.length;
       _currentNodeId = effectiveNodes[initial].id;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _precacheAdjacent(effectiveNodes, initial);
       });
     } else if (_currentNodeId != null &&
-        (_index >= effectiveNodes.length || effectiveNodes[_index].id != _currentNodeId)) {
+        (_index >= effectiveNodes.length ||
+            effectiveNodes[_index].id != _currentNodeId)) {
       final newIdx = effectiveNodes.indexWhere((n) => n.id == _currentNodeId);
       if (newIdx >= 0 && newIdx != _index) {
         _index = newIdx;
-        _controller?.jumpToPage(newIdx);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && (_controller?.hasClients ?? false)) {
+            _controller?.jumpToPage(newIdx);
+          }
+        });
       }
     }
 
@@ -232,16 +250,18 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
                 child: Stack(
                   children: <Widget>[
                     _Pages(
+                      key: ValueKey<String>(
+                        'pv_${effectiveNodes.length}_${effectiveNodes.first.id}',
+                      ),
                       nodes: effectiveNodes,
                       controller: _controller!,
                       currentIndex: _index,
                       isMobile: isMobile,
                       onPageChanged: (index) {
+                        if (index < 0 || index >= effectiveNodes.length) return;
                         setState(() {
                           _index = index;
-                          if (index >= 0 && index < effectiveNodes.length) {
-                            _currentNodeId = effectiveNodes[index].id;
-                          }
+                          _currentNodeId = effectiveNodes[index].id;
                         });
                         _precacheAdjacent(effectiveNodes, index);
                       },
@@ -323,6 +343,7 @@ class _PhotoViewerPageState extends ConsumerState<PhotoViewerPage> {
 
 class _Pages extends ConsumerStatefulWidget {
   const _Pages({
+    super.key,
     required this.nodes,
     required this.controller,
     required this.currentIndex,
@@ -343,10 +364,11 @@ class _Pages extends ConsumerStatefulWidget {
 }
 
 class _PagesState extends ConsumerState<_Pages> {
-  final Map<int, PhotoViewController> _controllers = <int, PhotoViewController>{};
+  final Map<String, PhotoViewController> _controllers =
+      <String, PhotoViewController>{};
 
-  PhotoViewController _controllerFor(int index) {
-    return _controllers.putIfAbsent(index, () => PhotoViewController());
+  PhotoViewController _controllerFor(String nodeId) {
+    return _controllers.putIfAbsent(nodeId, () => PhotoViewController());
   }
 
   @override
@@ -381,17 +403,19 @@ class _PagesState extends ConsumerState<_Pages> {
           color: Colors.black,
         ),
         loadingBuilder: (context, event) {
-          final node = widget.nodes[widget.currentIndex.clamp(0, widget.nodes.length - 1)];
+          final node = widget
+              .nodes[widget.currentIndex.clamp(0, widget.nodes.length - 1)];
           return Stack(
             fit: StackFit.expand,
             children: [
-              Image(
-                image: LdRemoteImage.provider(
-                  url: db.thumbnailUrl(node.id),
-                  headers: db.authHeaders,
+              if (node.name.isNotEmpty)
+                Image(
+                  image: LdRemoteImage.provider(
+                    url: db.thumbnailUrl(node.id),
+                    headers: db.authHeaders,
+                  ),
+                  fit: BoxFit.contain,
                 ),
-                fit: BoxFit.contain,
-              ),
               const Center(child: LdSpinner(size: 28)),
             ],
           );
@@ -411,7 +435,7 @@ class _PagesState extends ConsumerState<_Pages> {
             initialScale: PhotoViewComputedScale.contained,
             minScale: PhotoViewComputedScale.contained,
             maxScale: PhotoViewComputedScale.covered * 5,
-            controller: widget.isMobile ? null : _controllerFor(index),
+            controller: widget.isMobile ? null : _controllerFor(node.id),
             onTapUp: (context, details, value) => widget.onTap(),
             errorBuilder: (context, error, stack) => LdErrorState(
               kind: LdErrorKind.unexpected,
@@ -427,7 +451,10 @@ class _PagesState extends ConsumerState<_Pages> {
       return gallery;
     }
 
-    final activeController = _controllerFor(widget.currentIndex);
+    final currentId = widget
+        .nodes[widget.currentIndex.clamp(0, widget.nodes.length - 1)]
+        .id;
+    final activeController = _controllerFor(currentId);
     return ZoomOnScroll(
       controller: activeController,
       child: gallery,

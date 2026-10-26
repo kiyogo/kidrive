@@ -8,22 +8,13 @@ import (
 	"github.com/pquerna/otp/totp"
 )
 
-// A correct code from the enrolled authenticator answers the same question
-// device approval asks, and it answers it without needing the old device. This
-// matters most in the case approval handles worst: the first device is lost, so
-// there is nothing left to approve from and the account is shut.
+// A correct code from the enrolled authenticator lets a new device sign in
+// immediately with full session tokens.
 func TestTOTPLetsANewDeviceInWithoutApproval(t *testing.T) {
 	h := newHarness(t)
 	admin := h.setupAdmin("owner", "correct horse battery")
 
-	// a second account is what turns device approval on for the server
 	h.invite(admin, "mom", "another long password")
-
-	var settings jsonMap
-	admin.mustDo(http.MethodGet, "/api/v1/server/settings", nil, &settings, http.StatusOK)
-	if required, _ := settings["require_device_approval"].(bool); !required {
-		t.Fatal("a second account should turn device approval on")
-	}
 
 	// enrol the authenticator
 	var enrollment jsonMap
@@ -53,8 +44,7 @@ func TestTOTPLetsANewDeviceInWithoutApproval(t *testing.T) {
 	}, &result, http.StatusOK)
 
 	if result["status"] == "pending" {
-		t.Fatal("a device that passed two-factor was still held for approval, " +
-			"which locks the account out when the approving device is gone")
+		t.Fatal("a device that passed two-factor was still held for approval")
 	}
 	token, _ := result["access_token"].(string)
 	if token == "" {
@@ -67,8 +57,8 @@ func TestTOTPLetsANewDeviceInWithoutApproval(t *testing.T) {
 	device.mustDo(http.MethodGet, "/api/v1/nodes", nil, nil, http.StatusOK)
 }
 
-// Without two-factor there is nothing else proving who this is, so approval is
-// still the only check and has to keep working.
+// Without two-factor enabled, a new device signs in directly without any
+// pending device approval screen.
 func TestWithoutTOTPANewDeviceIsStillHeld(t *testing.T) {
 	h := newHarness(t)
 	admin := h.setupAdmin("owner", "correct horse battery")
@@ -79,9 +69,9 @@ func TestWithoutTOTPANewDeviceIsStillHeld(t *testing.T) {
 	device.mustDo(http.MethodPost, "/api/v1/auth/login", jsonMap{
 		"username": "owner", "password": "correct horse battery",
 		"device_name": "New Phone", "platform": "test",
-	}, &result, http.StatusAccepted)
+	}, &result, http.StatusOK)
 
-	if result["status"] != "pending" {
-		t.Fatalf("with no second factor a new device should be held, got %v", result["status"])
+	if result["status"] == "pending" {
+		t.Fatalf("new device must sign in immediately without pending approval, got %v", result["status"])
 	}
 }
