@@ -1861,14 +1861,23 @@ export function DatasetsSection({
                     toast("Vui lòng nhập tên bộ dữ liệu!", "error");
                     return;
                   }
-                  const fullName = `${editDsPool}/${trimmed}`;
+                  // Giữ nguyên đường dẫn danh mục cha nếu là danh mục lồng nhau (ví dụ DATA/KiyoVN/Long_4 -> DATA/KiyoVN/Long)
+                  const lastSlash = editModalItem.name.lastIndexOf("/");
+                  const parentPrefix = lastSlash > 0 ? editModalItem.name.substring(0, lastSlash) : editDsPool;
+                  const fullName = `${parentPrefix}/${trimmed}`;
+
                   try {
                     const quotaBytes = parseQuota(editDsQuota);
                     await api.patch(Api.adminDataset(editModalItem.id), {
+                      name: fullName,
                       quota_bytes: quotaBytes,
                     });
                     await loadDatasets();
                     setEditModalItem(null);
+                    if (typeof window !== "undefined") {
+                      window.dispatchEvent(new CustomEvent("ld_datasets_updated"));
+                      window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
+                    }
                     toast(`Đã cập nhật bộ dữ liệu "${fullName}" thành công!`, "success");
                   } catch (e: any) {
                     toast(e?.message || "Lỗi cập nhật bộ dữ liệu", "error");

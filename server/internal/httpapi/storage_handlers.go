@@ -411,6 +411,7 @@ func (a *API) handleCreateDataset(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateDatasetReq struct {
+	Name        *string `json:"name"`
 	QuotaBytes  *int64  `json:"quota_bytes"`
 	Compression *string `json:"compression"`
 	Atime       *string `json:"atime"`
@@ -427,13 +428,162 @@ func (a *API) handleUpdateDataset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := db.NowMillis()
-	err := a.db.Write(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
-		var count int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM datasets WHERE id = ?`, id).Scan(&count); err != nil {
-			return err
+
+	// 1. Lấy thông tin bộ dữ liệu hiện tại
+	var currentName, currentPool, currentMount string
+	var currentQuota int64
+	err := a.db.Read().QueryRowContext(r.Context(),
+		`SELECT name, pool, mount, quota_bytes FROM datasets WHERE id = ?`, id).
+		Scan(&currentName, &currentPool, &currentMount, &currentQuota)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "not_found", "dataset not found")
+			return
 		}
-		if count == 0 {
-			return sql.ErrNoRows
+		a.fail(w, r, err)
+		return
+	}
+
+	targetName := currentName
+	targetMount := currentMount
+
+	// 2. Xử lý đổi tên bộ dữ liệu nếu req.Name khác currentName
+	if req.Name != nil {
+		newName := strings.Trim(filepath.ToSlash(strings.TrimSpace(*req.Name)), "/")
+		if newName != "" && !strings.EqualFold(newName, currentName) {
+			// Kiểm tra trùng tên
+			var existingID string
+			checkErr := a.db.Read().QueryRowContext(r.Context(),
+				`SELECT id FROM datasets WHERE lower(name) = lower(?) AND id != ?`, newName, id).Scan(&existingID)
+			if checkErr == nil {
+				writeError(w, http.StatusBadRequest, "already_exists", fmt.Sprintf("Tập dữ liệu '%s' đã tồn tại", newName))
+				return
+			}
+
+			// Tính toán mount point mới
+			newMount := currentMount
+			if currentMount != "" {
+				oldDir := filepath.Dir(currentMount)
+				newBase := filepath.Base(newName)
+				newMount = filepath.ToSlash(filepath.Clean(filepath.Join(oldDir, newBase)))
+			}
+
+			// Đổi tên trên ZFS nếu có OpenZFS
+			if err := exec.Command("zfs", "rename", currentName, newName).Run(); err != nil {
+				_ = exec.Command("zfs", "rename", "-p", currentName, newName).Run()
+			}
+
+			// Đổi tên thư mục vật lý trên ổ đĩa
+			if currentMount != "" && newMount != "" && currentMount != newMount {
+				if _, sErr := os.Stat(currentMount); sErr == nil {
+					_ = os.Rename(currentMount, newMount)
+				}
+				leafOld := filepath.Base(currentName)
+				leafNew := filepath.Base(newName)
+				altOlds := []string{
+					filepath.Join("/DATA/KiyoVN", leafOld),
+					filepath.Join("/mnt/DATA/KiyoVN", leafOld),
+					filepath.Join("/mnt/zfs-recovery/DATA/KiyoVN", leafOld),
+					filepath.Join("/DATA", leafOld),
+					filepath.Join("/mnt/DATA", leafOld),
+					filepath.Join("/mnt/zfs-recovery/DATA", leafOld),
+					filepath.Join("/var/lib/localdrive/data", leafOld),
+				}
+				for _, altOld := range altOlds {
+					if _, sErr := os.Stat(altOld); sErr == nil {
+						altNew := filepath.Join(filepath.Dir(altOld), leafNew)
+						_ = os.Rename(altOld, altNew)
+					}
+				}
+			}
+
+			targetName = newName
+			targetMount = newMount
+		}
+	}
+
+	txErr := a.db.Write(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
+		// Cập nhật bộ dữ liệu chính
+		if targetName != currentName {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE datasets SET name = ?, mount = ?, updated_at = ? WHERE id = ?`,
+				targetName, targetMount, now, id); err != nil {
+				return err
+			}
+
+			// Cập nhật các bộ dữ liệu con trực thuộc
+			oldPrefix := currentName + "/"
+			newPrefix := targetName + "/"
+			rows, qErr := tx.QueryContext(ctx, `SELECT id, name, mount FROM datasets WHERE name LIKE ?`, oldPrefix+"%")
+			if qErr == nil {
+				type childDs struct {
+					id, name, mount string
+				}
+				var children []childDs
+				for rows.Next() {
+					var c childDs
+					if err := rows.Scan(&c.id, &c.name, &c.mount); err == nil {
+						children = append(children, c)
+					}
+				}
+				rows.Close()
+
+				for _, c := range children {
+					cNewName := newPrefix + strings.TrimPrefix(c.name, oldPrefix)
+					cNewMount := c.mount
+					if c.mount != "" && strings.Contains(c.mount, currentName) {
+						cNewMount = strings.Replace(c.mount, currentName, targetName, 1)
+					}
+					_, _ = tx.ExecContext(ctx,
+						`UPDATE datasets SET name = ?, mount = ?, updated_at = ? WHERE id = ?`,
+						cNewName, cNewMount, now, c.id)
+				}
+			}
+
+			// Cập nhật quyền người dùng trong users.dataset_permissions
+			uRows, uErr := tx.QueryContext(ctx, `SELECT id, dataset_permissions FROM users WHERE dataset_permissions LIKE ?`, "%"+currentName+"%")
+			if uErr == nil {
+				type userPermUpdate struct {
+					id, perms string
+				}
+				var userUpdates []userPermUpdate
+				for uRows.Next() {
+					var up userPermUpdate
+					if err := uRows.Scan(&up.id, &up.perms); err == nil {
+						userUpdates = append(userUpdates, up)
+					}
+				}
+				uRows.Close()
+
+				for _, up := range userUpdates {
+					var permMap map[string]any
+					if json.Unmarshal([]byte(up.perms), &permMap) == nil {
+						if val, exists := permMap[currentName]; exists {
+							delete(permMap, currentName)
+							permMap[targetName] = val
+							for k, v := range permMap {
+								if strings.HasPrefix(k, currentName+"/") {
+									newKey := targetName + "/" + strings.TrimPrefix(k, currentName+"/")
+									delete(permMap, k)
+									permMap[newKey] = v
+								}
+							}
+							if updatedBytes, mErr := json.Marshal(permMap); mErr == nil {
+								_, _ = tx.ExecContext(ctx,
+									`UPDATE users SET dataset_permissions = ?, updated_at = ? WHERE id = ?`,
+									string(updatedBytes), now, up.id)
+							}
+						}
+					}
+				}
+			}
+
+			// Cập nhật chia sẻ mạng Samba nếu trỏ vào đường dẫn cũ
+			if currentMount != "" && targetMount != "" {
+				_, _ = tx.ExecContext(ctx,
+					`UPDATE network_shares SET path = ?, updated_at = ? WHERE path = ?`,
+					targetMount, now, currentMount)
+			}
 		}
 
 		if req.QuotaBytes != nil {
@@ -468,12 +618,8 @@ func (a *API) handleUpdateDataset(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
-	if err != nil {
-		if err == sql.ErrNoRows {
-			writeError(w, http.StatusNotFound, "not_found", "dataset not found")
-			return
-		}
-		a.fail(w, r, err)
+	if txErr != nil {
+		a.fail(w, r, txErr)
 		return
 	}
 
