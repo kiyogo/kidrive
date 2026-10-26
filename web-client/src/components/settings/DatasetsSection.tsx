@@ -951,9 +951,19 @@ export function DatasetsSection({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%", paddingBottom: isMobile ? 110 : 60 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%", paddingBottom: isMobile ? 110 : 30 }}>
       {/* Top action row: Tiêu đề & Nút Thêm */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", flexWrap: isMobile ? "wrap" : "nowrap" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          width: "100%",
+          minHeight: 36,
+          flexWrap: isMobile ? "wrap" : "nowrap",
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {onBack && (
             <Tappable
@@ -977,20 +987,18 @@ export function DatasetsSection({
             </Tappable>
           )}
           <Icon glyph="folder" size={22} color="var(--accent)" />
-          <h2 className="t-title-md" style={{ margin: 0, fontWeight: 600, color: "var(--fg-primary)", fontSize: 18 }}>
+          <h2 className="t-title-md" style={{ margin: 0, fontWeight: 600, color: "var(--fg-primary)", fontSize: 18, lineHeight: "24px" }}>
             {t.settingsDatasets}
           </h2>
         </div>
-        {pools.length > 0 && visibleNodes.length > 0 && (
-          <Button
-            label="Thêm"
-            glyph="plus"
-            variant="primary"
-            compact
-            expand={false}
-            onClick={() => handleOpenCreateModal()}
-          />
-        )}
+        <Button
+          label="Thêm"
+          glyph="plus"
+          variant="primary"
+          compact
+          expand={false}
+          onClick={() => handleOpenCreateModal()}
+        />
       </div>
 
       {/* Cấu trúc Tập dữ liệu */}

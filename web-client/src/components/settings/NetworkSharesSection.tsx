@@ -942,7 +942,17 @@ export function NetworkSharesSection({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%", paddingBottom: isMobile ? 110 : 30 }}>
       {/* Top action row: Tiêu đề & Nút Thêm */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", flexWrap: isMobile ? "wrap" : "nowrap" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          width: "100%",
+          minHeight: 36,
+          flexWrap: isMobile ? "wrap" : "nowrap",
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {onBack && (
             <Tappable
@@ -965,7 +975,7 @@ export function NetworkSharesSection({
               <Icon glyph="chevron-left" size={18} />
             </Tappable>
           )}
-          <h2 className="t-title-md" style={{ margin: 0, fontWeight: 600, color: "var(--fg-primary)", fontSize: 18 }}>
+          <h2 className="t-title-md" style={{ margin: 0, fontWeight: 600, color: "var(--fg-primary)", fontSize: 18, lineHeight: "24px" }}>
             Chia sẻ tệp mạng nội bộ
           </h2>
         </div>

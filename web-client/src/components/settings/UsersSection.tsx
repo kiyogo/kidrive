@@ -1437,7 +1437,17 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%", paddingBottom: isMobile ? 110 : 30 }}>
       {/* Top action row: Tiêu đề & Nút Thao tác */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", flexWrap: isMobile ? "wrap" : "nowrap" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          width: "100%",
+          minHeight: 36,
+          flexWrap: isMobile ? "wrap" : "nowrap",
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {onBack && (
             <Tappable
@@ -1460,7 +1470,7 @@ export function UsersSection({ onBack, embedded }: { onBack?: () => void; embedd
               <Icon glyph="chevron-left" size={18} />
             </Tappable>
           )}
-          <h2 className="t-title-md" style={{ margin: 0, fontWeight: 600, color: "var(--fg-primary)", fontSize: 18 }}>
+          <h2 className="t-title-md" style={{ margin: 0, fontWeight: 600, color: "var(--fg-primary)", fontSize: 18, lineHeight: "24px" }}>
             Người dùng
           </h2>
         </div>

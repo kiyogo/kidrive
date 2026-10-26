@@ -136,12 +136,14 @@ export function SettingsScreen({
   }, []);
 
   const selectSection = (id: SectionId) => {
+    if (mainRef.current) {
+      mainRef.current.scrollTop = 0;
+    }
     setDesktopSection(id);
     setMobileSection(id);
     setNavKey((k) => k + 1);
     if (typeof window !== "undefined") {
       window.history.pushState(null, "", `/settings/${id}`);
-      window.dispatchEvent(new PopStateEvent("popstate"));
     }
     onSelectSection?.(id);
   };

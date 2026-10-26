@@ -2307,22 +2307,33 @@ export function DisksSection({
 
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20, paddingBottom: isMobile ? 110 : 30 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: isMobile ? 110 : 30 }}>
       {/* Header & Nút Thêm Pool + Nhập Pool */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", minHeight: 36, gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {onBack && (
             <Tappable
               onClick={onBack}
               radius={999}
-              style={{ padding: 6, display: "flex", alignItems: "center", justifyContent: "center" }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 36,
+                height: 36,
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--stroke)",
+                borderRadius: "50%",
+                cursor: "pointer",
+                color: "var(--fg-secondary)",
+              }}
               title="Quay lại Cài đặt"
             >
-              <Icon glyph="chevron-left" size={20} color="var(--fg-primary)" />
+              <Icon glyph="chevron-left" size={18} />
             </Tappable>
           )}
           <Icon glyph="storage" size={22} color="var(--accent)" />
-          <h2 className="t-title-md" style={{ margin: 0, fontWeight: 600, color: "var(--fg-primary)", fontSize: 18 }}>{t.settingsStoragePools}</h2>
+          <h2 className="t-title-md" style={{ margin: 0, fontWeight: 600, color: "var(--fg-primary)", fontSize: 18, lineHeight: "24px" }}>{t.settingsStoragePools}</h2>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Button
