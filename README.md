@@ -30,7 +30,7 @@ Build and manage your own personal cloud with a modern web interface, cross-plat
 
 ## 📖 Overview
 
-**KiDrive (LocalDrive)** is a self-hosted personal cloud storage platform that allows individuals, families, developers, and organizations to store, access, organize, and manage their files on hardware they own or control.
+**KiDrive** is a self-hosted personal cloud storage platform that allows individuals, families, developers, and organizations to store, access, organize, and manage their files on hardware they own or control.
 
 Unlike traditional cloud storage services, KiDrive is designed to operate on your own infrastructure without requiring a third-party storage subscription.
 
