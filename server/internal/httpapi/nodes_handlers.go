@@ -2333,6 +2333,9 @@ func (a *API) handleCopyNode(w http.ResponseWriter, r *http.Request) {
 		newCanonical := filepath.ToSlash(filepath.Join(destCanonical, fileName))
 		newCanonical = strings.TrimPrefix(newCanonical, "/")
 		invalidateAllCaches()
+		if a.hub != nil {
+			a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
+		}
 		writeJSON(w, http.StatusCreated, nodeDTO{
 			ID:        fmt.Sprintf("dataset:%s", newCanonical),
 			ParentID:  targetParentID,
@@ -2426,6 +2429,9 @@ func (a *API) handleCopyNode(w http.ResponseWriter, r *http.Request) {
 		newCanonical := filepath.ToSlash(filepath.Join(destCanonical, newName))
 		newCanonical = strings.TrimPrefix(newCanonical, "/")
 		invalidateAllCaches()
+		if a.hub != nil {
+			a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
+		}
 		writeJSON(w, http.StatusCreated, nodeDTO{
 			ID:        fmt.Sprintf("dataset:%s", newCanonical),
 			ParentID:  targetParentID,
@@ -2584,6 +2590,9 @@ func (a *API) handleMoveNode(w http.ResponseWriter, r *http.Request) {
 		newCanonical := filepath.ToSlash(filepath.Join(destCanonical, fileName))
 		newCanonical = strings.TrimPrefix(newCanonical, "/")
 		invalidateAllCaches()
+		if a.hub != nil {
+			a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
+		}
 		writeJSON(w, http.StatusOK, nodeDTO{
 			ID:        fmt.Sprintf("dataset:%s", newCanonical),
 			ParentID:  targetParentID,
@@ -2650,6 +2659,9 @@ func (a *API) handleMoveNode(w http.ResponseWriter, r *http.Request) {
 		newCanonical := filepath.ToSlash(filepath.Join(destCanonical, fileName))
 		newCanonical = strings.TrimPrefix(newCanonical, "/")
 		invalidateAllCaches()
+		if a.hub != nil {
+			a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
+		}
 		writeJSON(w, http.StatusOK, nodeDTO{
 			ID:        fmt.Sprintf("dataset:%s", newCanonical),
 			ParentID:  targetParentID,

@@ -232,28 +232,70 @@ export function useUploader(parentId: string, onDone?: () => void) {
   );
 
   const dropDataTransfer = useCallback(
-    async (dt: DataTransfer, into = parentId) => {
+    async (dt: DataTransfer | File[] | FileList, into = parentId) => {
+      // Synchronously capture raw files and directory entries before any async await
+      let rawFiles: File[] = [];
+      let entries: any[] = [];
+      if (Array.isArray(dt)) {
+        rawFiles = dt;
+      } else if (typeof FileList !== "undefined" && dt instanceof FileList) {
+        rawFiles = Array.from(dt);
+      } else if (dt && typeof (dt as DataTransfer).files !== "undefined") {
+        const dataTransfer = dt as DataTransfer;
+        if (dataTransfer.files) {
+          rawFiles = Array.from(dataTransfer.files);
+        }
+        if (dataTransfer.items && dataTransfer.items.length > 0) {
+          for (let i = 0; i < dataTransfer.items.length; i++) {
+            const it = dataTransfer.items[i];
+            if (it.kind === "file" && typeof it.webkitGetAsEntry === "function") {
+              try {
+                const entry = it.webkitGetAsEntry();
+                if (entry) entries.push(entry);
+              } catch {}
+            }
+          }
+        }
+      }
+
+      if (!hasAssignedCategory) {
+        showToast("Tài khoản chưa được chỉ định danh mục lưu trữ. Vui lòng liên hệ quản trị viên để được cấp quyền trước khi tải lên!", "error");
+        return;
+      }
+      if (!hasWritePermission) {
+        showToast("Bạn chỉ có quyền xem (Chỉ đọc), không thể tải tệp lên!", "error");
+        return;
+      }
       if (!checkQuota()) return;
+
       const readiness = await checkStorageReadiness();
       if (!readiness.ready) {
         showToast(readiness.message, "error");
         return;
       }
-      const plan = await planDataTransfer(dt);
+
+      const finalInto = resolveTargetInto(into);
+      const plan = await planDataTransfer(dt, rawFiles, entries);
       const totalSize = plan.files.reduce((acc, f) => acc + (f.file.size || 0), 0);
       if (!checkQuota(totalSize)) return;
+
       if (plan.folders.length > 0) {
         await executeFolderUpload({
           plan,
-          destinationParentId: into,
-          onDone,
+          destinationParentId: finalInto,
+          onDone: () => {
+            onDone?.();
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
+            }
+          },
         });
       } else {
-        const plainFiles = plan.files.map((p) => p.file);
-        await pick(plainFiles, into);
+        const plainFiles = plan.files.length > 0 ? plan.files.map((p) => p.file) : rawFiles;
+        await pick(plainFiles, finalInto);
       }
     },
-    [parentId, onDone, pick, checkQuota],
+    [parentId, onDone, pick, checkQuota, resolveTargetInto, hasAssignedCategory, hasWritePermission],
   );
 
   // one question for the whole batch: asking per file would mean twelve

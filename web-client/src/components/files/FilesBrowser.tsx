@@ -987,6 +987,7 @@ export function FilesBrowser({
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => {
         e.preventDefault();
+        e.stopPropagation();
         setDragging(false);
         if (!hasAssignedCategory) {
           toast("Tài khoản chưa được chỉ định danh mục lưu trữ. Vui lòng liên hệ quản trị viên!", "error");

@@ -370,7 +370,7 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
   const uploadFolderId =
     current.id || (defaultSingleDataset ? `dataset:${defaultSingleDataset}` : "dataset:KiyoVN");
 
-  const { pick: pickFiles, pickFolder, sheet: clashSheet } = useUploader(
+  const { pick: pickFiles, pickFolder, dropDataTransfer, sheet: clashSheet } = useUploader(
     uploadFolderId,
     () => setRefresh((n) => n + 1),
   );
@@ -404,6 +404,7 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
       onNavigate={navigateTo}
       onUpload={(files) => void pickFiles(files)}
       onUploadFolder={(files) => void pickFolder(files)}
+      onDropDataTransfer={(dt) => void dropDataTransfer(dt, uploadFolderId)}
       onCreateFolder={() => {
         if (section !== "files") {
           setSection("files");

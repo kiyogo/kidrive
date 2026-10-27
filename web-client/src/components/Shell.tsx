@@ -51,6 +51,7 @@ export function Shell({
   onNavigate,
   onUpload,
   onUploadFolder,
+  onDropDataTransfer,
   onCreateFolder,
   children,
 }: {
@@ -61,6 +62,7 @@ export function Shell({
    *  from Settings, Gallery and everywhere else too. */
   onUpload: (files: FileList | null) => void;
   onUploadFolder?: (files: FileList | null) => void;
+  onDropDataTransfer?: (dt: DataTransfer) => void;
   onCreateFolder?: () => void;
   children: ReactNode;
 }) {
@@ -124,6 +126,77 @@ export function Shell({
   const shellFileInput = useRef<HTMLInputElement>(null);
   const shellFolderInput = useRef<HTMLInputElement>(null);
   const contentScrollRef = useRef<HTMLDivElement>(null);
+
+  const [isWindowDragging, setIsWindowDragging] = useState(false);
+  const dragCounter = useRef(0);
+
+  useEffect(() => {
+    const handleDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounter.current++;
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+        setIsWindowDragging(true);
+      }
+    };
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = "copy";
+      }
+    };
+    const handleDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounter.current--;
+      if (dragCounter.current <= 0) {
+        dragCounter.current = 0;
+        setIsWindowDragging(false);
+      }
+    };
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounter.current = 0;
+      setIsWindowDragging(false);
+      if (e.dataTransfer && onDropDataTransfer) {
+        onDropDataTransfer(e.dataTransfer);
+      }
+    };
+
+    window.addEventListener("dragenter", handleDragEnter);
+    window.addEventListener("dragover", handleDragOver);
+    window.addEventListener("dragleave", handleDragLeave);
+    window.addEventListener("drop", handleDrop);
+
+    return () => {
+      window.removeEventListener("dragenter", handleDragEnter);
+      window.removeEventListener("dragover", handleDragOver);
+      window.removeEventListener("dragleave", handleDragLeave);
+      window.removeEventListener("drop", handleDrop);
+    };
+  }, [onDropDataTransfer]);
+
+  const dragOverlay = isWindowDragging ? (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 999999,
+        background: "rgba(0, 0, 0, 0.65)",
+        backdropFilter: "blur(4px)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        pointerEvents: "none",
+        border: "3px dashed var(--accent, #3b82f6)",
+        gap: 16,
+      }}
+    >
+      <Icon glyph="upload" size={54} color="var(--accent, #3b82f6)" />
+      <span style={{ color: "#ffffff", fontSize: 20, fontWeight: 700 }}>
+        Thả tệp vào đây để tải lên
+      </span>
+    </div>
+  ) : null;
 
   useEffect(() => {
     if (contentScrollRef.current) {
@@ -529,6 +602,7 @@ export function Shell({
             {/* Mobile bottom padding */}
           </div>
         </Sheet>
+        {dragOverlay}
       </div>
     );
   }
@@ -701,6 +775,7 @@ export function Shell({
           {!(isDesktop && section === "settings") && <CanvasOverlayScrollbar targetRef={contentScrollRef} />}
         </div>
       </main>
+      {dragOverlay}
     </div>
   );
 }

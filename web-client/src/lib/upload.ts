@@ -161,6 +161,10 @@ class Transfers {
         }
       }
     }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
+      window.dispatchEvent(new CustomEvent("ld_datasets_updated"));
+    }
     completionCallback?.();
   }
 
@@ -277,6 +281,9 @@ class Transfers {
       offset = Number.isFinite(next) && next > offset ? next : end;
       this.patch(id, { sent: offset });
     }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
+    }
   }
 
   /**
@@ -290,13 +297,12 @@ class Transfers {
     size: number = 100
   ): Promise<void> {
     const id = `op-${Date.now()}-${this.nextId++}`;
-    const opLabel = operationType === "copy" ? "Sao chép" : "Dán";
     const totalSize = size && size > 0 ? size : 100;
     const toBytes = (pct: number) => Math.max(0, Math.min(totalSize, Math.round((pct / 100) * totalSize)));
 
     const item: Transfer = {
       id,
-      name: name ? `${opLabel}: ${name}` : opLabel,
+      name: name || "Tác vụ",
       size: totalSize,
       sent: toBytes(8),
       state: "uploading",

@@ -26,6 +26,7 @@ import (
 	"github.com/MultiX0/LocalDrive/server/internal/files"
 	mw "github.com/MultiX0/LocalDrive/server/internal/middleware"
 	"github.com/MultiX0/LocalDrive/server/internal/models"
+	"github.com/MultiX0/LocalDrive/server/internal/ws"
 )
 
 // DatasetDTO models a dataset record.
@@ -3304,6 +3305,9 @@ func (a *API) handleCreateDatasetFolder(w http.ResponseWriter, r *http.Request) 
 		parentIDPath = parentIDPath + "/" + strings.TrimPrefix(filepath.ToSlash(subpath), "/")
 	}
 	invalidateAllCaches()
+	if a.hub != nil {
+		a.hub.Publish(ws.NewEvent("node.updated", db.NowMillis(), nil))
+	}
 
 	writeJSON(w, http.StatusCreated, DatasetItemDTO{
 		ID:        fmt.Sprintf("dataset:%s", fullIDPath),
@@ -3395,6 +3399,10 @@ func (a *API) handleDeleteDatasetItem(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	invalidateAllCaches()
+	if a.hub != nil {
+		a.hub.Publish(ws.NewEvent("node.updated", db.NowMillis(), nil))
+		a.hub.Publish(ws.NewEvent("quota.updated", db.NowMillis(), nil))
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -3562,6 +3570,10 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	invalidateAllCaches()
+	if a.hub != nil {
+		a.hub.Publish(ws.NewEvent("node.updated", db.NowMillis(), nil))
+		a.hub.Publish(ws.NewEvent("quota.updated", db.NowMillis(), nil))
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"files": uploaded})
 }

@@ -81,9 +81,8 @@ export function FloatingTransfersTray({ onOpenTransfers }: { onOpenTransfers: ()
         transition: "all 200ms ease",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, overflow: "hidden", minWidth: 0 }}>
-          <Icon glyph={isDoneAll ? "check" : "upload"} size={18} color={barColor} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+        <div style={{ display: "flex", alignItems: "center", overflow: "hidden", minWidth: 0, flex: 1, textAlign: "left" }}>
           <span
             className="t-body-sm"
             style={{
@@ -91,9 +90,10 @@ export function FloatingTransfersTray({ onOpenTransfers }: { onOpenTransfers: ()
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
+              textAlign: "left",
             }}
           >
-            {current.name}
+            Trạng thái
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 10, flexShrink: 0 }}>
@@ -150,15 +150,13 @@ export function FloatingTransfersTray({ onOpenTransfers }: { onOpenTransfers: ()
         />
       </div>
 
-      <div style={{ display: "flex", alignItems: "center" }}>
-        <span className="t-body-xs" style={{ color: isFailed ? "var(--danger)" : "var(--fg-secondary)" }}>
-          {isFailed
-            ? current.error || `Thất bại (${failedItems.length} mục)`
-            : isDoneAll
-              ? `Hoàn tất ${completed}/${total} mục (100%)`
-              : `Đang xử lý ${Math.min(total, completed + 1)}/${total} mục (${pct}%)`}
-        </span>
-      </div>
+      {isFailed && current.error && (
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <span className="t-body-xs" style={{ color: "var(--danger)" }}>
+            {current.error}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

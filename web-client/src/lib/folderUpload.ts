@@ -41,15 +41,43 @@ async function getFileFromEntry(fileEntry: any): Promise<File> {
  * Inspects a drag-and-drop DataTransfer and walks any dropped directories
  * recursively using the standard webkitGetAsEntry API.
  */
-export async function planDataTransfer(dt: DataTransfer): Promise<FolderUploadPlan> {
+export async function planDataTransfer(
+  input: DataTransfer | File[] | FileList,
+  capturedFiles?: File[],
+  capturedEntries?: any[],
+): Promise<FolderUploadPlan> {
   const files: DroppedFileItem[] = [];
   const folders: string[][] = [];
   const seenFolders = new Set<string>();
 
-  const items = dt.items;
-  let usedWebkitEntries = false;
+  // Synchronously capture items and files from DataTransfer immediately
+  let rawFiles: File[] = capturedFiles || [];
+  let entries: any[] = capturedEntries || [];
 
-  if (items && items.length > 0 && typeof items[0].webkitGetAsEntry === "function") {
+  if (Array.isArray(input)) {
+    rawFiles = input;
+  } else if (typeof FileList !== "undefined" && input instanceof FileList) {
+    rawFiles = Array.from(input);
+  } else if (input && typeof (input as DataTransfer).files !== "undefined") {
+    const dt = input as DataTransfer;
+    if (rawFiles.length === 0 && dt.files && dt.files.length > 0) {
+      rawFiles = Array.from(dt.files);
+    }
+    if (entries.length === 0 && dt.items && dt.items.length > 0) {
+      for (let i = 0; i < dt.items.length; i++) {
+        const it = dt.items[i];
+        if (it.kind === "file" && typeof it.webkitGetAsEntry === "function") {
+          try {
+            const entry = it.webkitGetAsEntry();
+            if (entry) entries.push(entry);
+          } catch {}
+        }
+      }
+    }
+  }
+
+  let usedWebkitEntries = false;
+  if (entries.length > 0) {
     async function walk(entry: any, prefix: string[]) {
       if (!entry) return;
       if (entry.isFile) {
@@ -79,25 +107,16 @@ export async function planDataTransfer(dt: DataTransfer): Promise<FolderUploadPl
     }
 
     try {
-      const walkPromises: Promise<void>[] = [];
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
-        if (it.kind !== "file") continue;
-        const entry = it.webkitGetAsEntry();
-        if (entry) {
-          usedWebkitEntries = true;
-          walkPromises.push(walk(entry, []));
-        }
-      }
-      await Promise.all(walkPromises);
+      usedWebkitEntries = true;
+      await Promise.all(entries.map((entry) => walk(entry, [])));
     } catch {
       usedWebkitEntries = false;
     }
   }
 
   // Fallback to plain files if webkitGetAsEntry wasn't applicable or found nothing
-  if (!usedWebkitEntries || (files.length === 0 && folders.length === 0 && dt.files && dt.files.length > 0)) {
-    return planFromFiles(dt.files);
+  if (!usedWebkitEntries || (files.length === 0 && folders.length === 0 && rawFiles.length > 0)) {
+    return planFromFiles(rawFiles);
   }
 
   folders.sort((a, b) => a.length - b.length);
