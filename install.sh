@@ -529,8 +529,12 @@ EOF
     if command -v zfs >/dev/null 2>&1; then
       for ds in $(zfs list -H -o name 2>/dev/null); do
         zfs set readonly=off "$ds" 2>/dev/null || true
+        zfs set acltype=posix "$ds" 2>/dev/null || true
+        zfs set xattr=sa "$ds" 2>/dev/null || true
       done
       zfs set -r readonly=off DATA 2>/dev/null || true
+      zfs set -r acltype=posix DATA 2>/dev/null || true
+      zfs set -r xattr=sa DATA 2>/dev/null || true
       zfs mount -a 2>/dev/null || true
     fi
     mount -o remount,rw /mnt/zfs-recovery 2>/dev/null || true

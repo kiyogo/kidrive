@@ -628,12 +628,40 @@ func (s *Service) resolveDatasetUploadTarget(ctx context.Context, userID, parent
 	if role != "admin" {
 		allowed := false
 		cleanLower := strings.ToLower(clean)
+		stripPrefixes := func(s string) string {
+			for _, pr := range []string{
+				"mnt/zfs-recovery/data/kiyovn/",
+				"mnt/zfs-recovery/data/",
+				"mnt/zfs-recovery/",
+				"mnt/data/kiyovn/",
+				"mnt/data/",
+				"mnt/dữ liệu/kiyovn/",
+				"mnt/dữ liệu/",
+				"data/kiyovn/",
+				"dữ liệu/kiyovn/",
+				"kiyovn/",
+				"data/",
+			} {
+				if strings.HasPrefix(s, pr) {
+					return strings.TrimPrefix(s, pr)
+				}
+			}
+			return s
+		}
+		cStripped := stripPrefixes(cleanLower)
+
 		for k, v := range pMap {
 			kClean := strings.ToLower(strings.Trim(k, "/"))
 			if kClean == "" {
 				continue
 			}
-			if kClean == "*" || cleanLower == kClean || strings.HasPrefix(cleanLower, kClean+"/") {
+			kStripped := stripPrefixes(kClean)
+			kLeaf := filepath.Base(kClean)
+
+			if kClean == "*" || kClean == "/" ||
+				cleanLower == kClean || strings.HasPrefix(cleanLower, kClean+"/") ||
+				cStripped == kStripped || strings.HasPrefix(cStripped, kStripped+"/") ||
+				cStripped == kLeaf || strings.HasPrefix(cStripped, kLeaf+"/") {
 				if canWriteEntry(v) {
 					allowed = true
 					break
@@ -823,6 +851,10 @@ func (s *Service) checkStorageAndPermissions(ctx context.Context, userID string)
 		}
 		if obj, ok := v.(map[string]any); ok {
 			if wr, ok := obj["write"].(bool); ok && wr {
+				hasWrite = true
+				break
+			}
+			if lvl, ok := obj["level"].(string); ok && (lvl == "editor" || lvl == "writer" || lvl == "owner") {
 				hasWrite = true
 				break
 			}

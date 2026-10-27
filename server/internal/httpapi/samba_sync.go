@@ -340,13 +340,39 @@ func applyFolderACLs(shareDirs map[string]bool, adminUsers []string, users []Use
 			subDir := filepath.Join(shareDir, subName)
 
 			// Enable POSIX ACLs on ZFS if applicable
-			_ = exec.Command("zfs", "set", "acltype=posix", "DATA/KiyoVN/"+subName).Run()
-			_ = exec.Command("zfs", "set", "xattr=sa", "DATA/KiyoVN/"+subName).Run()
-			_ = exec.Command("zfs", "set", "acltype=posix", subName).Run()
+			_ = exec.Command("zfs", "set", "acltype=posix", "DATA").Run()
+			_ = exec.Command("zfs", "set", "xattr=sa", "DATA").Run()
+			_ = exec.Command("zfs", "set", "acltype=posix", "DATA/"+subName).Run()
+			_ = exec.Command("zfs", "set", "xattr=sa", "DATA/"+subName).Run()
 
-			// Set base ownership and restricted permissions (0770)
-			_ = exec.Command("chown", "root:root", subDir).Run()
-			_ = exec.Command("chmod", "0770", subDir).Run()
+			// Determine ownership: if subName matches a known user, make them owner
+			ownerUser := "root"
+			for _, u := range users {
+				if strings.EqualFold(u.Username, subName) {
+					ownerUser = u.Username
+					break
+				}
+			}
+			if ownerUser == "root" {
+				for _, u := range users {
+					if u.Role == string(models.RoleAdmin) {
+						continue
+					}
+					perm := checkUserFolderPermission(u.PermMap, subName, subDir)
+					if perm == "editor" || perm == "writer" || perm == "owner" {
+						ownerUser = u.Username
+						break
+					}
+				}
+			}
+
+			if ownerUser != "root" {
+				_ = exec.Command("chown", "-R", ownerUser+":root", subDir).Run()
+				_ = exec.Command("chmod", "0770", subDir).Run()
+			} else {
+				_ = exec.Command("chown", "-R", "root:root", subDir).Run()
+				_ = exec.Command("chmod", "0777", subDir).Run()
+			}
 
 			// Strip old ACLs
 			_ = exec.Command("setfacl", "-b", subDir).Run()
@@ -453,15 +479,16 @@ func writeUnifiedSmbConf(shareDirs map[string]bool, adminUsers []string, users [
    browseable = yes
    writable = yes
    read only = no
+   write list = %s
    guest ok = no
    valid users = %s
    inherit acls = yes
    inherit permissions = yes
-   create mask = 0660
-   directory mask = 0770
+   create mask = 0664
+   directory mask = 0775
    follow symlinks = yes
    wide links = yes
-`, kiyoValidUsers))
+`, kiyoValidUsers, kiyoValidUsers))
 
 	// Scan /DATA/KiyoVN subfolders and create dedicated individual shares
 	entries, err := os.ReadDir("/DATA/KiyoVN")
@@ -496,6 +523,14 @@ func writeUnifiedSmbConf(shareDirs map[string]bool, adminUsers []string, users [
 				}
 			}
 
+			uListStr := strings.Join(uniqueUsers, ", ")
+			forceUserStr := ""
+			for _, u := range users {
+				if strings.EqualFold(u.Username, subName) {
+					forceUserStr = fmt.Sprintf("   force user = %s\n", u.Username)
+					break
+				}
+			}
 			sb.WriteString(fmt.Sprintf(`
 [%s]
    comment = LocalDrive Share for %s
@@ -503,15 +538,16 @@ func writeUnifiedSmbConf(shareDirs map[string]bool, adminUsers []string, users [
    browseable = yes
    writable = yes
    read only = no
+   write list = %s
    guest ok = no
    valid users = %s
-   inherit acls = yes
+%s   inherit acls = yes
    inherit permissions = yes
-   create mask = 0660
-   directory mask = 0770
+   create mask = 0664
+   directory mask = 0775
    follow symlinks = yes
    wide links = yes
-`, subName, subName, subPath, strings.Join(uniqueUsers, ", ")))
+`, subName, subName, subPath, uListStr, uListStr, forceUserStr))
 		}
 	}
 
