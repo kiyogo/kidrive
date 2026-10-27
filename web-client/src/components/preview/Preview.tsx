@@ -79,7 +79,8 @@ export function Preview({
     };
   }, [node.id]);
 
-  const src = local || api.media(`${Api.download(node.id)}?inline=1`);
+  const isRawImage = /\.(dng|raw|cr2|cr3|nef|arw|orf|rw2|pef|raf)$/i.test(node.name);
+  const src = local || (isRawImage ? api.media(Api.thumbnail(node.id)) : api.media(`${Api.download(node.id)}?inline=1`));
   const isDocx = /\.docx$/i.test(node.name);
   const isMarkdown = /\.(md|markdown)$/i.test(node.name);
   const textual = category === "code" || category === "document" || isTextual(node.mime_type);

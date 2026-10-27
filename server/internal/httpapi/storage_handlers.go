@@ -3439,7 +3439,7 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cleanTarget := filepath.Clean(mountPath)
-	cleanedSub := resolvedSub
+	_ = resolvedSub
 
 	if err := os.MkdirAll(cleanTarget, 0755); err != nil {
 		if isReadOnlyError(err) {
@@ -3450,18 +3450,6 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, r, err)
 			return
 		}
-	}
-
-	err = r.ParseMultipartForm(128 << 20)
-	if err != nil {
-		a.fail(w, r, err)
-		return
-	}
-
-	formFiles := r.MultipartForm.File["file"]
-	if len(formFiles) == 0 {
-		a.fail(w, r, errors.New("không tìm thấy tệp tải lên"))
-		return
 	}
 
 	// 1. Quota check for user
@@ -3477,36 +3465,53 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 	_ = a.db.Read().QueryRowContext(r.Context(),
 		`SELECT quota_bytes, used_bytes FROM datasets WHERE name = ? OR id = ?`, dsName, dsName).Scan(&dsQuota, &dsUsed)
 
-	var totalIncoming int64 = 0
-	for _, fh := range formFiles {
-		totalIncoming += fh.Size
+	// Upfront quota check if ContentLength is provided
+	if r.ContentLength > 0 {
+		if userQuota > 0 && userUsed+r.ContentLength > userQuota {
+			writeJSON(w, http.StatusInsufficientStorage, map[string]any{
+				"error":   "quota_exceeded",
+				"message": fmt.Sprintf("Dung lượng vượt quá hạn ngạch cho phép của tài khoản (%d MB / %d MB)", (userUsed+r.ContentLength)/(1024*1024), userQuota/(1024*1024)),
+			})
+			return
+		}
+		if dsQuota > 0 && dsUsed+r.ContentLength > dsQuota {
+			writeJSON(w, http.StatusInsufficientStorage, map[string]any{
+				"error":   "quota_exceeded",
+				"message": fmt.Sprintf("Dung lượng vượt quá hạn ngạch cho phép của tập dữ liệu (%d MB / %d MB)", (dsUsed+r.ContentLength)/(1024*1024), dsQuota/(1024*1024)),
+			})
+			return
+		}
 	}
 
-	if userQuota > 0 && userUsed+totalIncoming > userQuota {
-		writeJSON(w, http.StatusInsufficientStorage, map[string]any{
-			"error":   "quota_exceeded",
-			"message": fmt.Sprintf("Dung lượng vượt quá hạn ngạch cho phép của tài khoản (%d MB / %d MB)", (userUsed+totalIncoming)/(1024*1024), userQuota/(1024*1024)),
-		})
+	mr, err := r.MultipartReader()
+	if err != nil {
+		a.fail(w, r, err)
 		return
 	}
 
-	if dsQuota > 0 && dsUsed+totalIncoming > dsQuota {
-		writeJSON(w, http.StatusInsufficientStorage, map[string]any{
-			"error":   "quota_exceeded",
-			"message": fmt.Sprintf("Dung lượng vượt quá hạn ngạch cho phép của tập dữ liệu (%d MB / %d MB)", (dsUsed+totalIncoming)/(1024*1024), dsQuota/(1024*1024)),
-		})
-		return
-	}
-
-	uploaded := make([]DatasetItemDTO, 0, len(formFiles))
+	uploaded := make([]DatasetItemDTO, 0)
 	var lastErr error
-	for _, fh := range formFiles {
-		src, err := fh.Open()
+	var totalSaved int64 = 0
+	buf := make([]byte, 1024*1024) // 1MB streaming buffer directly to disk (no /tmp buffering)
+
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
 		if err != nil {
 			lastErr = err
+			break
+		}
+
+		filename := part.FileName()
+		if filename == "" {
+			part.Close()
 			continue
 		}
-		dstPath := filepath.Join(cleanTarget, filepath.Base(fh.Filename))
+
+		cleanFileName := filepath.Base(filename)
+		dstPath := filepath.Join(cleanTarget, cleanFileName)
 		dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
 			if isReadOnlyError(err) {
@@ -3514,31 +3519,32 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 				dst, err = os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 			}
 			if err != nil {
-				src.Close()
+				part.Close()
 				lastErr = err
 				continue
 			}
 		}
-		size, copyErr := io.Copy(dst, src)
-		src.Close()
+
+		size, copyErr := io.CopyBuffer(dst, part, buf)
+		part.Close()
 		dst.Close()
 		if copyErr != nil {
 			lastErr = copyErr
 			continue
 		}
 
+		totalSaved += size
 		now := db.NowMillis()
-		fileCanonical := strings.TrimPrefix(filepath.ToSlash(filepath.Join(canonicalPath, filepath.Base(fh.Filename))), "/")
-		_ = cleanedSub
+		fileCanonical := strings.TrimPrefix(filepath.ToSlash(filepath.Join(canonicalPath, cleanFileName)), "/")
 
 		uploaded = append(uploaded, DatasetItemDTO{
 			ID:        fmt.Sprintf("dataset:%s", fileCanonical),
 			ParentID:  fmt.Sprintf("dataset:%s", canonicalPath),
 			OwnerID:   "system",
 			LibraryID: "",
-			Name:      filepath.Base(fh.Filename),
+			Name:      cleanFileName,
 			Type:      "file",
-			MimeType:  mime.TypeByExtension(filepath.Ext(fh.Filename)),
+			MimeType:  mime.TypeByExtension(filepath.Ext(cleanFileName)),
 			SizeBytes: size,
 			Role:      "editor",
 			CreatedAt: now,
@@ -3551,7 +3557,7 @@ func (a *API) handleUploadDatasetFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var totalSaved int64 = 0
+	totalSaved = 0
 	for _, it := range uploaded {
 		totalSaved += it.SizeBytes
 	}

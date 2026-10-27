@@ -30,10 +30,16 @@ var mimeByExtension = map[string]string{
 	".webp": "image/webp", ".bmp": "image/bmp", ".tif": "image/tiff", ".tiff": "image/tiff",
 	".heic": "image/heic", ".heif": "image/heif", ".svg": "image/svg+xml", ".avif": "image/avif",
 	".ico": "image/vnd.microsoft.icon",
+	// Camera RAW formats
+	".dng": "image/x-adobe-dng", ".raw": "image/x-panasonic-raw", ".cr2": "image/x-canon-cr2", ".cr3": "image/x-canon-cr3",
+	".nef": "image/x-nikon-nef", ".arw": "image/x-sony-arw", ".orf": "image/x-olympus-orf", ".rw2": "image/x-panasonic-rw2",
+	".pef": "image/x-pentax-pef", ".raf": "image/x-fuji-raf",
 
 	".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".mkv": "video/x-matroska",
 	".webm": "video/webm", ".avi": "video/x-msvideo", ".mpg": "video/mpeg", ".mpeg": "video/mpeg",
 	".3gp": "video/3gpp",
+	// RAW and professional video formats
+	".lrf": "video/mp4", ".braw": "video/x-braw", ".prores": "video/quicktime", ".mts": "video/mp2t", ".m2ts": "video/mp2t",
 
 	".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".wav": "audio/wav",
 	".flac": "audio/flac", ".ogg": "audio/ogg", ".opus": "audio/opus", ".wma": "audio/x-ms-wma",

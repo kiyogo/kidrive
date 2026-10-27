@@ -133,10 +133,33 @@ export function categoryFor(mimeType: string, isFolder = false, name = ""): File
   if (isFolder) return "folder";
   const lowerName = (name || "").toLowerCase();
   if (lowerName.endsWith(".ts") || lowerName.endsWith(".tsx")) return "code";
+  if (
+    lowerName.endsWith(".dng") ||
+    lowerName.endsWith(".raw") ||
+    lowerName.endsWith(".cr2") ||
+    lowerName.endsWith(".cr3") ||
+    lowerName.endsWith(".nef") ||
+    lowerName.endsWith(".arw") ||
+    lowerName.endsWith(".orf") ||
+    lowerName.endsWith(".rw2") ||
+    lowerName.endsWith(".pef") ||
+    lowerName.endsWith(".raf")
+  ) {
+    return "image";
+  }
+  if (
+    lowerName.endsWith(".lrf") ||
+    lowerName.endsWith(".braw") ||
+    lowerName.endsWith(".prores") ||
+    lowerName.endsWith(".mts") ||
+    lowerName.endsWith(".m2ts")
+  ) {
+    return "video";
+  }
   const m = (mimeType || "").toLowerCase();
   if (m.includes("typescript")) return "code";
   if (m.startsWith("image/")) return "image";
-  if (m.startsWith("video/") && !m.includes("mp2t")) return "video";
+  if (m.startsWith("video/")) return "video";
   if (m.startsWith("audio/")) return "audio";
   if (m.includes("pdf")) return "pdf";
   if (m.includes("spreadsheet") || m.includes("excel") || m.includes("csv"))

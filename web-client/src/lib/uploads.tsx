@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Button, Sheet, showToast } from "@/components/ui";
+import { Button, Dialog, showToast } from "@/components/ui";
 import { api } from "./api";
 import { Api } from "./endpoints";
 import { useL10n } from "./l10n";
@@ -34,6 +34,20 @@ export async function checkStorageReadiness(): Promise<{ ready: boolean; message
  * copies of this rule would eventually disagree, and the one that forgot to
  * ask would silently make a second file instead of a new version.
  */
+function makeUniqueFile(file: File, existingNames: Set<string>): File {
+  const dot = file.name.lastIndexOf(".");
+  const base = dot > 0 ? file.name.slice(0, dot) : file.name;
+  const ext = dot > 0 ? file.name.slice(dot) : "";
+  let counter = 1;
+  let newName = `${base} (${counter})${ext}`;
+  while (existingNames.has(newName.toLowerCase())) {
+    counter++;
+    newName = `${base} (${counter})${ext}`;
+  }
+  existingNames.add(newName.toLowerCase());
+  return new File([file], newName, { type: file.type, lastModified: file.lastModified });
+}
+
 export function useUploader(parentId: string, onDone?: () => void) {
   const t = useL10n();
   const { user } = useSession();
@@ -189,12 +203,6 @@ export function useUploader(parentId: string, onDone?: () => void) {
 
       const finalInto = resolveTargetInto(into);
 
-      // If destination is a dataset, send directly without node clash check
-      if (finalInto.startsWith("dataset:")) {
-        await send(list, finalInto);
-        return;
-      }
-
       // If any file has relative path, it's a folder upload
       const hasRelativePath = list.some(
         (f) => (f as any).webkitRelativePath && String((f as any).webkitRelativePath).includes("/"),
@@ -298,58 +306,75 @@ export function useUploader(parentId: string, onDone?: () => void) {
     [parentId, onDone, pick, checkQuota, resolveTargetInto, hasAssignedCategory, hasWritePermission],
   );
 
-  // one question for the whole batch: asking per file would mean twelve
-  // identical sheets for twelve photos dropped at once
   const sheet = clash ? (
-    <Sheet
+    <Dialog
       open
       onClose={() => setClash(null)}
-      title={clash.clashes.length === 1 ? t.uploadClashTitle : t.uploadClashTitleMany}
+      title="Tệp đã tồn tại"
+      maxWidth={440}
     >
-      <p className="t-body-md" style={{ color: "var(--fg-secondary)", margin: "0 0 18px" }}>
-        {clash.clashes.length === 1
-          ? t.uploadClashBody({ name: clash.clashes[0].name })
-          : t.uploadClashBodyMany({ count: clash.clashes.length })}
-      </p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <Button
-          label={t.uploadClashKeepBoth}
-          glyph="copy"
-          onClick={() => {
-            // every file goes up under its own name; the server is what
-            // renames the second one, not this screen
-            const all = clash.files;
-            setClash(null);
-            void send(all, clash.into);
-          }}
-        />
-        <Button
-          label={t.uploadClashReplace}
-          glyph="upload"
-          onClick={() => {
-            const replacing = new Map<File, string>();
-            for (const file of clash.clashes) {
-              const node = clash.existing.get(file.name.toLowerCase());
-              if (node) replacing.set(file, node.id);
-            }
-            const all = clash.files;
-            setClash(null);
-            void send(all, clash.into, replacing);
-          }}
-        />
-        <Button
-          label={t.uploadClashSkip}
-          variant="quiet"
-          onClick={() => {
-            // the ones that did not clash still go
-            const rest = clash.files.filter((f) => !clash.clashes.includes(f));
-            setClash(null);
-            void send(rest, clash.into);
-          }}
-        />
-        <Button label={t.actionCancel} variant="quiet" onClick={() => setClash(null)} />
+      <div style={{ padding: "6px 0 0" }}>
+        <p style={{ margin: "0 0 18px", fontSize: 14, color: "var(--fg-secondary, #909090)", lineHeight: 1.5 }}>
+          {clash.clashes.length === 1
+            ? `Tệp "${clash.clashes[0].name}" đã tồn tại trong thư mục đích.`
+            : `${clash.clashes.length} tệp tải lên bị trùng tên trong thư mục đích.`}
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <Button
+            label="Ghi đè"
+            glyph="upload"
+            onClick={() => {
+              const replacing = new Map<File, string>();
+              for (const file of clash.clashes) {
+                const node = clash.existing.get(file.name.toLowerCase());
+                if (node) replacing.set(file, node.id);
+              }
+              const all = clash.files;
+              setClash(null);
+              void send(all, clash.into, replacing);
+            }}
+          />
+          <Button
+            label="Giữ cả hai"
+            glyph="copy"
+            variant="secondary"
+            onClick={() => {
+              const existingSet = new Set(Array.from(clash.existing.keys()));
+              const renamedFiles = clash.files.map((f) => {
+                if (clash.clashes.includes(f)) {
+                  return makeUniqueFile(f, existingSet);
+                }
+                return f;
+              });
+              setClash(null);
+              void send(renamedFiles, clash.into);
+            }}
+          />
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <div style={{ flex: 1 }}>
+              <Button
+                label="Bỏ qua"
+                variant="quiet"
+                onClick={() => {
+                  const rest = clash.files.filter((f) => !clash.clashes.includes(f));
+                  setClash(null);
+                  if (rest.length > 0) {
+                    void send(rest, clash.into);
+                  }
+                }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <Button
+                label="Hủy"
+                variant="quiet"
+                onClick={() => setClash(null)}
+              />
+            </div>
+          </div>
+        </div>
       </div>
-    </Sheet>
+    </Dialog>
   ) : null;
 
   return { pick, pickFolder, dropDataTransfer, sheet, busy: clash !== null };

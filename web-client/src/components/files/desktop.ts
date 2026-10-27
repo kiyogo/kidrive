@@ -119,6 +119,10 @@ export function useMarquee({
     };
 
     const onSelectStart = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")) {
+        return;
+      }
       if (from.current || dragged.current) {
         e.preventDefault();
       }

@@ -221,6 +221,10 @@ func (a *API) SyncDatasetAndFolderACLs(ctx context.Context) error {
 	// 6. Update /etc/samba/smb.conf with unified permissions and individual shares
 	writeUnifiedSmbConf(shareDirs, adminUsers, users)
 
+	// Clean up any legacy conflicting usershare
+	_ = os.Remove("/var/lib/samba/usershares/kiyovn")
+	_ = os.Remove("/var/lib/samba/usershares/KiyoVN")
+
 	// 7. Reload Samba
 	_ = exec.Command("smbcontrol", "smbd", "reload-config").Run()
 	_ = exec.Command("systemctl", "reload", "smbd").Run()
@@ -368,11 +372,11 @@ func applyFolderACLs(shareDirs map[string]bool, adminUsers []string, users []Use
 
 			if ownerUser != "root" {
 				_ = exec.Command("chown", "-R", ownerUser+":root", subDir).Run()
-				_ = exec.Command("chmod", "0770", subDir).Run()
 			} else {
 				_ = exec.Command("chown", "-R", "root:root", subDir).Run()
-				_ = exec.Command("chmod", "0777", subDir).Run()
 			}
+			_ = exec.Command("chmod", "-R", "0770", subDir).Run()
+			_ = exec.Command("chmod", "-R", "o-rwx", subDir).Run()
 
 			// Strip old ACLs
 			_ = exec.Command("setfacl", "-b", subDir).Run()
@@ -458,12 +462,20 @@ func writeUnifiedSmbConf(shareDirs map[string]bool, adminUsers []string, users [
    security = user
    map to guest = Never
    guest account = nobody
+   server min protocol = SMB2
+   server max protocol = SMB3
+   client min protocol = SMB2
+   client max protocol = SMB3
+   lanman auth = no
+   ntlm auth = yes
    null passwords = yes
    vfs objects = acl_xattr
    map acl inherit = yes
    store dos attributes = yes
    inherit acls = yes
    inherit permissions = yes
+   hide unreadable = yes
+   access based share enum = yes
    usershare path = /var/lib/samba/usershares
    usershare max shares = 100
    usershare allow guests = no
@@ -484,10 +496,14 @@ func writeUnifiedSmbConf(shareDirs map[string]bool, adminUsers []string, users [
    valid users = %s
    inherit acls = yes
    inherit permissions = yes
-   create mask = 0664
-   directory mask = 0775
+   create mask = 0660
+   directory mask = 0770
    follow symlinks = yes
    wide links = yes
+
+[kiyovn]
+   copy = KiyoVN
+   browseable = no
 `, kiyoValidUsers, kiyoValidUsers))
 
 	// Scan /DATA/KiyoVN subfolders and create dedicated individual shares

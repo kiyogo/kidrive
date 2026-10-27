@@ -770,6 +770,14 @@ func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, r, fmt.Errorf("đường dẫn không hợp lệ"))
 			return
 		}
+		if _, statErr := os.Stat(targetPath); statErr == nil {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":   fmt.Sprintf("Thư mục '%s' đã tồn tại!", folderName),
+				"message": fmt.Sprintf("Thư mục '%s' đã tồn tại!", folderName),
+				"code":    "folder_exists",
+			})
+			return
+		}
 		if err := os.MkdirAll(targetPath, 0755); err != nil {
 			if isReadOnlyError(err) || strings.Contains(mountPath, "zfs-recovery") {
 				UnlockStorageRW(targetPath)
@@ -781,6 +789,10 @@ func (a *API) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		relPath := filepath.ToSlash(filepath.Join(canonicalPath, folderName))
+		invalidateAllCaches()
+		if a.hub != nil {
+			a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
+		}
 		body := nodeDTO{
 			ID:        fmt.Sprintf("dataset:%s", relPath),
 			ParentID:  req.ParentID,
@@ -958,6 +970,14 @@ func (a *API) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 			}
 			oldTarget := filepath.Clean(mountPath)
 			newTarget := filepath.Clean(filepath.Join(filepath.Dir(oldTarget), newName))
+			if _, statErr := os.Stat(newTarget); statErr == nil && !strings.EqualFold(oldTarget, newTarget) {
+				writeJSON(w, http.StatusConflict, map[string]any{
+					"error":   fmt.Sprintf("Tên '%s' đã tồn tại!", newName),
+					"message": fmt.Sprintf("Tên '%s' đã tồn tại!", newName),
+					"code":    "already_exists",
+				})
+				return
+			}
 			if err := os.Rename(oldTarget, newTarget); err != nil {
 				if isReadOnlyError(err) {
 					UnlockStorageRW(newTarget)
@@ -970,6 +990,10 @@ func (a *API) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 			}
 			newCanonical := filepath.ToSlash(filepath.Join(filepath.Dir(canonicalPath), newName))
 			newCanonical = strings.TrimPrefix(newCanonical, "/")
+			invalidateAllCaches()
+			if a.hub != nil {
+				a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
+			}
 			writeJSON(w, http.StatusOK, nodeDTO{
 				ID:        fmt.Sprintf("dataset:%s", newCanonical),
 				ParentID:  "",
@@ -1107,6 +1131,10 @@ func (a *API) handleTrashNode(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	invalidateAllCaches()
+	if a.hub != nil {
+		a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
+	}
 	writeJSON(w, http.StatusOK, plainNode(node))
 }
 
@@ -1130,6 +1158,10 @@ func (a *API) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
 	if err := a.files.PermanentDelete(r.Context(), userID, chi.URLParam(r, "id"), ip); err != nil {
 		a.fail(w, r, err)
 		return
+	}
+	invalidateAllCaches()
+	if a.hub != nil {
+		a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

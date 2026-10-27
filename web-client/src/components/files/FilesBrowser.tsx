@@ -377,6 +377,8 @@ export function FilesBrowser({
       await api.post(Api.folder, { name: folderName.trim(), parent_id: targetParent });
       setCreateFolderOpen(false);
       setFolderName("");
+      browserFolderCache.clear();
+      window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
       toast("Đã tạo thư mục mới thành công!", "success");
       void load();
     } catch (e: any) {
@@ -397,10 +399,12 @@ export function FilesBrowser({
       await api.patch(Api.node(renamingNode.id), { name: renameName.trim() });
       setRenamingNode(null);
       setRenameName("");
+      browserFolderCache.clear();
+      window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
       toast("Đã đổi tên thành công!", "success");
       void load();
-    } catch (e) {
-      toast(e instanceof Error ? e.message : t.errorUnexpectedTitle, "error");
+    } catch (e: any) {
+      toast(e?.message || (e instanceof Error ? e.message : t.errorUnexpectedTitle), "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -862,6 +866,8 @@ export function FilesBrowser({
     }
     toast(t.confirmTrashTitle, "success");
     setSelection(new Set());
+    browserFolderCache.clear();
+    window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
     void load();
   }, [visible, selection, toast, load, isReadOnly, t]);
 
@@ -1859,6 +1865,8 @@ export function FilesBrowser({
                     onClick: async () => {
                       try {
                         await api.del(Api.permanent(menu.node.id));
+                        browserFolderCache.clear();
+                        window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
                         toast(t.permanentlyDelete, "success");
                         void load();
                       } catch (e) {
@@ -1965,6 +1973,8 @@ export function FilesBrowser({
                     disabled: isReadOnly || menu.node.role === "viewer",
                     onClick: async () => {
                       await api.del(Api.node(menu.node.id));
+                      browserFolderCache.clear();
+                      window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
                       toast(t.trash, "success");
                       void load();
                     },
@@ -2229,6 +2239,8 @@ export function FilesBrowser({
           if (!confirmDeleteNode) return;
           try {
             await api.del(Api.permanent(confirmDeleteNode.id));
+            browserFolderCache.clear();
+            window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
             toast(t.permanentlyDelete, "success");
             setConfirmDeleteNode(null);
             void load();
@@ -2258,6 +2270,8 @@ export function FilesBrowser({
           }
           toast(t.emptyTrashAction, "success");
           setConfirmEmptyTrash(false);
+          browserFolderCache.clear();
+          window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
           void load();
         }}
       />

@@ -131,33 +131,50 @@ export function Shell({
   const dragCounter = useRef(0);
 
   useEffect(() => {
+    const isFileInputTarget = (e: DragEvent | PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      return target && target.closest("input, textarea, [contenteditable='true'], [role='dialog'], .ld-dialog");
+    };
+
     const handleDragEnter = (e: DragEvent) => {
+      if (isFileInputTarget(e)) return;
+      if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes("Files")) return;
       e.preventDefault();
       dragCounter.current++;
-      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
-        setIsWindowDragging(true);
-      }
+      setIsWindowDragging(true);
     };
+
     const handleDragOver = (e: DragEvent) => {
+      if (isFileInputTarget(e)) return;
+      if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes("Files")) return;
       e.preventDefault();
-      if (e.dataTransfer) {
-        e.dataTransfer.dropEffect = "copy";
-      }
+      e.dataTransfer.dropEffect = "copy";
     };
+
     const handleDragLeave = (e: DragEvent) => {
-      e.preventDefault();
+      if (isFileInputTarget(e)) return;
       dragCounter.current--;
       if (dragCounter.current <= 0) {
         dragCounter.current = 0;
         setIsWindowDragging(false);
       }
     };
+
     const handleDrop = (e: DragEvent) => {
-      e.preventDefault();
       dragCounter.current = 0;
       setIsWindowDragging(false);
-      if (e.dataTransfer && onDropDataTransfer) {
+      if (isFileInputTarget(e)) return;
+      if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes("Files")) return;
+      e.preventDefault();
+      if (onDropDataTransfer) {
         onDropDataTransfer(e.dataTransfer);
+      }
+    };
+
+    const handlePointerDown = () => {
+      if (dragCounter.current > 0 || isWindowDragging) {
+        dragCounter.current = 0;
+        setIsWindowDragging(false);
       }
     };
 
@@ -165,12 +182,14 @@ export function Shell({
     window.addEventListener("dragover", handleDragOver);
     window.addEventListener("dragleave", handleDragLeave);
     window.addEventListener("drop", handleDrop);
+    window.addEventListener("pointerdown", handlePointerDown);
 
     return () => {
       window.removeEventListener("dragenter", handleDragEnter);
       window.removeEventListener("dragover", handleDragOver);
       window.removeEventListener("dragleave", handleDragLeave);
       window.removeEventListener("drop", handleDrop);
+      window.removeEventListener("pointerdown", handlePointerDown);
     };
   }, [onDropDataTransfer]);
 
@@ -192,7 +211,7 @@ export function Shell({
       }}
     >
       <Icon glyph="upload" size={54} color="var(--accent, #3b82f6)" />
-      <span style={{ color: "#ffffff", fontSize: 20, fontWeight: 700 }}>
+      <span style={{ color: "#ffffff", fontSize: 20, fontWeight: 700, pointerEvents: "none" }}>
         Thả tệp vào đây để tải lên
       </span>
     </div>
