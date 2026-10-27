@@ -420,7 +420,7 @@ main() {
    path = $TARGET_SHARE_DIR
    browseable = yes
    writable = yes
-   guest ok = yes
+   guest ok = no
    read only = no
    inherit acls = yes
    inherit permissions = yes
@@ -435,7 +435,7 @@ EOF
    workgroup = WORKGROUP
    server string = LocalDrive NAS
    security = user
-   map to guest = Bad User
+   map to guest = Never
    guest account = nobody
    vfs objects = acl_xattr
    map acl inherit = yes
@@ -444,7 +444,7 @@ EOF
    inherit permissions = yes
    usershare path = /var/lib/samba/usershares
    usershare max shares = 100
-   usershare allow guests = yes
+   usershare allow guests = no
    usershare owner only = false
    follow symlinks = yes
    wide links = yes
@@ -456,7 +456,7 @@ EOF
    path = $TARGET_SHARE_DIR
    browseable = yes
    writable = yes
-   guest ok = yes
+   guest ok = no
    read only = no
    inherit acls = yes
    inherit permissions = yes

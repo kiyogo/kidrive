@@ -409,11 +409,28 @@ func writeUnifiedSmbConf(shareDirs map[string]bool, adminUsers []string, users [
 	confPath := "/etc/samba/smb.conf"
 	var sb strings.Builder
 
-	sb.WriteString(`[global]
+	// Collect all unique user accounts for KiyoVN valid users
+	var allValidUsers []string
+	allValidUsers = append(allValidUsers, adminUsers...)
+	for _, u := range users {
+		allValidUsers = append(allValidUsers, u.Username)
+	}
+	seenUsers := make(map[string]bool)
+	var uniqueAllUsers []string
+	for _, v := range allValidUsers {
+		trimmed := strings.TrimSpace(v)
+		if trimmed != "" && !seenUsers[trimmed] {
+			seenUsers[trimmed] = true
+			uniqueAllUsers = append(uniqueAllUsers, trimmed)
+		}
+	}
+	kiyoValidUsers := strings.Join(uniqueAllUsers, ", ")
+
+	sb.WriteString(fmt.Sprintf(`[global]
    workgroup = WORKGROUP
    server string = LocalDrive NAS
    security = user
-   map to guest = Bad User
+   map to guest = Never
    guest account = nobody
    null passwords = yes
    vfs objects = acl_xattr
@@ -423,7 +440,7 @@ func writeUnifiedSmbConf(shareDirs map[string]bool, adminUsers []string, users [
    inherit permissions = yes
    usershare path = /var/lib/samba/usershares
    usershare max shares = 100
-   usershare allow guests = yes
+   usershare allow guests = no
    usershare owner only = false
    follow symlinks = yes
    wide links = yes
@@ -436,14 +453,15 @@ func writeUnifiedSmbConf(shareDirs map[string]bool, adminUsers []string, users [
    browseable = yes
    writable = yes
    read only = no
-   guest ok = yes
+   guest ok = no
+   valid users = %s
    inherit acls = yes
    inherit permissions = yes
    create mask = 0660
    directory mask = 0770
    follow symlinks = yes
    wide links = yes
-`)
+`, kiyoValidUsers))
 
 	// Scan /DATA/KiyoVN subfolders and create dedicated individual shares
 	entries, err := os.ReadDir("/DATA/KiyoVN")

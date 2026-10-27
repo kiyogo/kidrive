@@ -905,7 +905,7 @@ func updateLinuxSmbConf(shareName, sharePath string, readOnly bool, guestOk bool
    workgroup = WORKGROUP
    server string = LocalDrive NAS
    security = user
-   map to guest = Bad User
+   map to guest = Never
    guest account = nobody
    vfs objects = acl_xattr
    map acl inherit = yes
@@ -947,7 +947,7 @@ func updateLinuxSmbConf(shareName, sharePath string, readOnly bool, guestOk bool
 		writableStr = "no"
 	}
 	guestOkStr := "no"
-	if guestOk || strings.EqualFold(shareName, "KiyoVN") {
+	if guestOk {
 		guestOkStr = "yes"
 	}
 
@@ -1062,9 +1062,9 @@ func (a *API) SyncAllActiveNetworkShares(ctx context.Context) {
 		// Check if KiyoVN has custom guest_ok or read_only settings in network_shares
 		var kiyoGuestOk, kiyoReadOnly int
 		if err := a.db.Read().QueryRowContext(ctx, `SELECT guest_ok, read_only FROM network_shares WHERE lower(name) = 'kiyovn' LIMIT 1`).Scan(&kiyoGuestOk, &kiyoReadOnly); err == nil {
-			_ = syncSystemNetworkShare("KiyoVN", kiyoDir, kiyoReadOnly == 1, true, true)
+			_ = syncSystemNetworkShare("KiyoVN", kiyoDir, kiyoReadOnly == 1, kiyoGuestOk == 1, true)
 		} else {
-			_ = syncSystemNetworkShare("KiyoVN", kiyoDir, false, true, true)
+			_ = syncSystemNetworkShare("KiyoVN", kiyoDir, false, false, true)
 		}
 	}
 
