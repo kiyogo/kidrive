@@ -347,7 +347,6 @@ function LazyGalleryTile({
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
   const [imgError, setImgError] = useState(false);
-  const [usingFallback, setUsingFallback] = useState(false);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -363,23 +362,20 @@ function LazyGalleryTile({
           } else {
             const rect = entry.boundingClientRect;
             const viewH = window.innerHeight || 800;
-            if (rect.bottom < -800 || rect.top > viewH + 800) {
+            if (rect.bottom < -600 || rect.top > viewH + 600) {
               setIsVisible(false);
             }
           }
         }
       },
-      { rootMargin: "400px 0px 400px 0px" }
+      { rootMargin: "200px 0px 200px 0px" }
     );
 
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
-  const isHeic = /\.(heic|heif)$/i.test(node.name);
   const thumbUrl = api.media(Api.thumbnail(node.id));
-  const canFallback = !isHeic && (node.size_bytes || 0) <= 25 * 1024 * 1024;
-  const fallbackUrl = canFallback ? api.media(Api.download(node.id)) : "";
 
   return (
     <div
@@ -416,17 +412,11 @@ function LazyGalleryTile({
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={usingFallback && canFallback ? fallbackUrl : thumbUrl}
+            src={thumbUrl}
             alt={node.name}
             loading="lazy"
             decoding="async"
-            onError={() => {
-              if (!usingFallback && canFallback) {
-                setUsingFallback(true);
-              } else {
-                setImgError(true);
-              }
-            }}
+            onError={() => setImgError(true)}
             style={{
               width: "100%",
               height: "100%",

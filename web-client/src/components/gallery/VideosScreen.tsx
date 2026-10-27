@@ -43,7 +43,6 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
   const [sortDesc, setSortDesc] = useState(true);
   const [sortMenuAnchor, setSortMenuAnchor] = useState<{ left: number; right: number; top: number; bottom: number } | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
-  const [ratios, setRatios] = useState<Record<string, number>>({});
   const sortBtnRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{
     x?: number;
@@ -200,11 +199,10 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
 
     for (const node of nodes) {
       const r =
-        ratios[node.id] ??
-        (node.image_width && node.image_height && node.image_height > 0
+        node.image_width && node.image_height && node.image_height > 0
           ? node.image_width / node.image_height
-          : 16 / 9);
-      const clamped = Math.min(Math.max(r, 0.2), 5.0);
+          : 16 / 9;
+      const clamped = Math.min(Math.max(r, 0.4), 2.5);
       const heightUnits = 1 / clamped;
 
       let minCol = 0;
@@ -218,7 +216,7 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
     }
 
     return buckets;
-  }, [nodes, effectiveColumns, ratios]);
+  }, [nodes, effectiveColumns]);
 
   return (
     <div style={{ minHeight: "100dvh" }}>
@@ -387,11 +385,10 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
               {bucket.map((node) => {
                 const isSelected = selection.has(node.id);
                 const r =
-                  ratios[node.id] ??
-                  (node.image_width && node.image_height && node.image_height > 0
+                  node.image_width && node.image_height && node.image_height > 0
                     ? node.image_width / node.image_height
-                    : 16 / 9);
-                const clampedRatio = Math.min(Math.max(r, 0.2), 5.0);
+                    : 16 / 9;
+                const clampedRatio = Math.min(Math.max(r, 0.4), 2.5);
 
                 return (
                   <VideoCard
@@ -400,12 +397,6 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
                     ratio={clampedRatio}
                     selected={isSelected}
                     selecting={selection.size > 0}
-                    onRatioResolved={(resolvedRatio) => {
-                      setRatios((prev) => {
-                        if (prev[node.id] === resolvedRatio) return prev;
-                        return { ...prev, [node.id]: resolvedRatio };
-                      });
-                    }}
                     onOpen={() => {
                       if (selection.size > 0) {
                         toggleSelect(node.id);
@@ -592,7 +583,6 @@ function VideoCard({
   selecting,
   onOpen,
   onToggleSelect,
-  onRatioResolved,
   onMenu,
 }: {
   node: NodeModel;
@@ -601,11 +591,9 @@ function VideoCard({
   selecting: boolean;
   onOpen: () => void;
   onToggleSelect: () => void;
-  onRatioResolved: (r: number) => void;
   onMenu: (m: { x?: number; y?: number; node: NodeModel; isBulk?: boolean }) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
   const [isVisible, setIsVisible] = useState(false);
   const [thumbError, setThumbError] = useState(false);
 
@@ -614,7 +602,7 @@ function VideoCard({
     if (!el) return;
 
     // Viewport-only thumbnail loading: only mount when in/near viewport
-    // Unmount when far offscreen (>800px) to reclaim RAM and texture memory
+    // Unmount when far offscreen (>600px) to reclaim RAM and texture memory
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -623,24 +611,18 @@ function VideoCard({
           } else {
             const rect = entry.boundingClientRect;
             const viewH = window.innerHeight || 800;
-            if (rect.bottom < -800 || rect.top > viewH + 800) {
+            if (rect.bottom < -600 || rect.top > viewH + 600) {
               setIsVisible(false);
             }
           }
         }
       },
-      { rootMargin: "400px 0px 400px 0px" }
+      { rootMargin: "200px 0px 200px 0px" }
     );
 
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-
-  useEffect(() => {
-    if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth && imgRef.current.naturalHeight) {
-      onRatioResolved(imgRef.current.naturalWidth / imgRef.current.naturalHeight);
-    }
-  }, [node.id, onRatioResolved, isVisible]);
 
   return (
     <div ref={containerRef} style={{ width: "100%", contain: "paint layout" }}>
@@ -676,18 +658,11 @@ function VideoCard({
         {isVisible && !thumbError ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            ref={imgRef}
             src={api.media(Api.thumbnail(node.id))}
             alt={node.name}
             loading="lazy"
             decoding="async"
             onError={() => setThumbError(true)}
-            onLoad={(e) => {
-              const img = e.currentTarget;
-              if (img.naturalWidth && img.naturalHeight) {
-                onRatioResolved(img.naturalWidth / img.naturalHeight);
-              }
-            }}
             style={{
               width: "100%",
               height: "100%",

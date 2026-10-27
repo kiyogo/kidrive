@@ -29,13 +29,12 @@ import (
 
 // Output settings, one shape for every generated preview.
 const (
-	// 512 was soft on a high density screen, where a 210 point tile is 420
-	// physical pixels and a grid of them is the first thing anyone looks at
-	MaxEdge = 1024
-	Quality = 88
+	// 512 produces crisp Retina previews while keeping thumbnail sizes ultra small (~25KB)
+	MaxEdge = 512
+	Quality = 80
 	// a generator that has not produced anything by now is stuck; the file
 	// simply keeps its type badge
-	generatorTimeout = 45 * time.Second
+	generatorTimeout = 25 * time.Second
 )
 
 // ErrUnsupported means this MIME type intentionally has no rendered preview.
@@ -288,6 +287,7 @@ func (g *Generator) fromFFmpegImage(ctx context.Context, path string) ([]byte, e
 		"-hide_banner", "-loglevel", "error", "-y",
 		"-i", path,
 		"-frames:v", "1",
+		"-q:v", "3",
 		"-vf", fmt.Sprintf("scale='min(%d,iw)':-2", MaxEdge),
 		out,
 	)
@@ -337,6 +337,7 @@ func (g *Generator) fromVideo(ctx context.Context, path string) ([]byte, error) 
 		"-ss", "00:00:03",
 		"-i", path,
 		"-frames:v", "1",
+		"-q:v", "3",
 		"-vf", fmt.Sprintf("scale='min(%d,iw)':-2", MaxEdge),
 		out,
 	)
@@ -353,6 +354,7 @@ func (g *Generator) fromVideo(ctx context.Context, path string) ([]byte, error) 
 		cmd = exec.CommandContext(ctx, g.Caps().FFmpegPath,
 			"-hide_banner", "-loglevel", "error", "-y",
 			"-i", path, "-frames:v", "1",
+			"-q:v", "3",
 			"-vf", fmt.Sprintf("scale='min(%d,iw)':-2", MaxEdge), out)
 		stderr.Reset()
 		cmd.Stderr = &stderr
@@ -364,7 +366,14 @@ func (g *Generator) fromVideo(ctx context.Context, path string) ([]byte, error) 
 				strings.TrimSpace(stderr.String()))
 		}
 	}
-	return g.fromImage(out)
+	data, err := os.ReadFile(out)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, errors.New("thumbnails: ffmpeg produced empty video frame")
+	}
+	return data, nil
 }
 
 func (g *Generator) fromPDF(ctx context.Context, path string) ([]byte, error) {
@@ -439,7 +448,7 @@ func resize(src image.Image) image.Image {
 		dstH = 1
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
-	draw.CatmullRom.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
+	draw.BiLinear.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
 	return dst
 }
 

@@ -42,8 +42,8 @@ type mediaCacheEntry struct {
 
 var (
 	datasetThumbGroup     singleflight.Group
-	datasetImageThumbSem = make(chan struct{}, 32) // max 32 concurrent image thumbnail jobs
-	datasetVideoThumbSem = make(chan struct{}, 4)  // max 4 concurrent video ffmpeg frame extraction jobs
+	datasetImageThumbSem = make(chan struct{}, 6) // max 6 concurrent image thumbnail jobs (smooth on CPU)
+	datasetVideoThumbSem = make(chan struct{}, 2) // max 2 concurrent video ffmpeg frame extraction jobs
 	mediaScanGroup        singleflight.Group
 
 	dirListCacheMu sync.RWMutex
@@ -1900,17 +1900,12 @@ func (a *API) handleThumbnail(w http.ResponseWriter, r *http.Request) {
 		serveThumbnail(w, r, node, path)
 		return
 	}
-	// Fallback for image node if thumbnail file is missing: serve original content
+	// Fallback for image node if thumbnail file is missing: generate thumbnail or serve if tiny
 	if n, f, info, oErr := a.files.OpenForDownload(r.Context(), userID, nodeID); oErr == nil {
 		defer f.Close()
 		if strings.HasPrefix(n.MimeType, "image/") {
-			ext := strings.ToLower(filepath.Ext(n.Name))
-			if ext == ".heic" || ext == ".heif" {
-				if f != nil && a.thumbs != nil && a.thumbs.Caps().FFmpeg {
-					a.serveDatasetThumbnail(w, r, f.Name())
-					return
-				}
-				writeError(w, http.StatusNotFound, "no_thumbnail", "cannot decode heic")
+			if f != nil && info.Size() > 64*1024 {
+				a.serveDatasetThumbnail(w, r, f.Name())
 				return
 			}
 			w.Header().Set("Content-Type", n.MimeType)
@@ -1956,11 +1951,9 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 
 	isStandardImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".gif" || ext == ".svg" || ext == ".ico"
 
-	// For standard web images under 8MB, serve immediately with client cache
-	if isStandardImage && info.Size() <= 8*1024*1024 {
-		if mimeType != "" {
-			w.Header().Set("Content-Type", mimeType)
-		}
+	// For SVG vector or tiny images under 64KB, serve immediately with client cache
+	if (ext == ".svg" || ext == ".ico" || info.Size() <= 64*1024) && mimeType != "" {
+		w.Header().Set("Content-Type", mimeType)
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		http.ServeFile(w, r, cleanTarget)
 		return
@@ -2052,13 +2045,6 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 			http.ServeContent(w, r, "thumbnail.jpg", cinfo.ModTime(), cf)
 			return
 		}
-	}
-
-	// 5. Graceful fallback for standard images: serve directly if <= 25MB rather than leaving a blank tile!
-	if cat == models.CategoryImage && isStandardImage && info.Size() <= 25*1024*1024 {
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		http.ServeFile(w, r, cleanTarget)
-		return
 	}
 
 	writeError(w, http.StatusNotFound, "no_thumbnail", "this file has no preview")
