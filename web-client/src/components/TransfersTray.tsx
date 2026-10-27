@@ -4,8 +4,10 @@ import React, { useEffect, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { transfers, type Transfer } from "@/lib/upload";
 import { bytes } from "@/lib/format";
+import { useDeviceClass } from "@/components/ui";
 
 export function FloatingTransfersTray({ onOpenTransfers }: { onOpenTransfers: () => void }) {
+  const { isDesktop } = useDeviceClass();
   const [items, setItems] = useState<Transfer[]>([]);
   const [lingering, setLingering] = useState(false);
   const [dismissedCount, setDismissedCount] = useState(0);
@@ -44,11 +46,16 @@ export function FloatingTransfersTray({ onOpenTransfers }: { onOpenTransfers: ()
 
   const isDoneAll = active.length === 0 && failedItems.length === 0;
   const isFailed = active.length === 0 && failedItems.length > 0;
+
+  const totalBytes = items.reduce((acc, x) => acc + (x.size || 0), 0);
+  const sentBytes = items.reduce((acc, x) => acc + (x.sent || 0), 0);
   const pct = isDoneAll
     ? 100
-    : current.size
-      ? Math.min(100, Math.round((current.sent / current.size) * 100))
-      : 0;
+    : totalBytes > 0
+      ? Math.max(1, Math.min(99, Math.round((sentBytes / totalBytes) * 100)))
+      : current.size
+        ? Math.max(1, Math.min(99, Math.round((current.sent / current.size) * 100)))
+        : 10;
   const barColor = isFailed ? "var(--danger)" : isDoneAll ? "var(--ok)" : "var(--accent)";
 
   return (
@@ -56,16 +63,17 @@ export function FloatingTransfersTray({ onOpenTransfers }: { onOpenTransfers: ()
       onClick={onOpenTransfers}
       style={{
         position: "fixed",
-        bottom: 24,
-        right: 24,
+        bottom: isDesktop ? 24 : "calc(84px + env(safe-area-inset-bottom))",
+        right: isDesktop ? 24 : 16,
+        left: isDesktop ? "auto" : 16,
         zIndex: 9999,
         background: "var(--bg-elevated)",
         border: "1px solid var(--stroke)",
         borderRadius: "var(--r-card, 14px)",
         boxShadow: "0 10px 36px rgba(0,0,0,0.45)",
         padding: "14px 18px",
-        minWidth: 310,
-        maxWidth: 390,
+        minWidth: isDesktop ? 310 : "auto",
+        maxWidth: isDesktop ? 390 : "100%",
         cursor: "pointer",
         display: "flex",
         flexDirection: "column",

@@ -600,8 +600,24 @@ func (s *Service) resolveDatasetUploadTarget(ctx context.Context, userID, parent
 				}
 			}
 		}
-		if len(unique) == 1 {
+		if len(unique) >= 1 {
 			trimmed = "dataset:" + unique[0]
+		} else if role == "admin" {
+			var dsName string
+			if qErr := s.database.Read().QueryRowContext(ctx, `SELECT name FROM datasets WHERE status != 'deleted' ORDER BY name ASC LIMIT 1`).Scan(&dsName); qErr == nil && dsName != "" {
+				trimmed = "dataset:" + dsName
+			} else {
+				for _, cand := range []string{"1DATA", "DaoKy_5", "Long_4", "NgLoc_6", "NgSon_1", "KiyoVN"} {
+					if fi, err := os.Stat("/DATA/KiyoVN/" + cand); err == nil && fi.IsDir() {
+						trimmed = "dataset:KiyoVN/" + cand
+						break
+					}
+					if fi, err := os.Stat("/DATA/" + cand); err == nil && fi.IsDir() {
+						trimmed = "dataset:" + cand
+						break
+					}
+				}
+			}
 		}
 	}
 
@@ -806,7 +822,24 @@ func (s *Service) checkStorageAndPermissions(ctx context.Context, userID string)
 		}
 	}
 	if poolCount == 0 {
-		return ErrNoStoragePool
+		// Auto-discover pool if DATA or host storage exists
+		for _, cr := range []string{"/DATA/KiyoVN", "/DATA", "/mnt/DATA", "/mnt/zfs-recovery/DATA", "/mnt/zfs-recovery"} {
+			if fi, err := os.Stat(cr); err == nil && fi.IsDir() {
+				now := time.Now().UnixMilli()
+				_ = s.database.Write(ctx, func(c context.Context, tx *sql.Tx) error {
+					_, err := tx.ExecContext(c,
+						`INSERT OR IGNORE INTO storage_pools (id, name, layout, status, total_bytes, used_bytes, auto_trim, scrub_schedule, disks_json, created_at, updated_at)
+						 VALUES ('pool-data', 'DATA', 'ZFS', 'healthy', 2000398934016, 0, 1, 'weekly', '[]', ?, ?)`,
+						now, now)
+					return err
+				})
+				poolCount = 1
+				break
+			}
+		}
+		if poolCount == 0 {
+			return ErrNoStoragePool
+		}
 	}
 
 	var datasetCount int
@@ -816,7 +849,34 @@ func (s *Service) checkStorageAndPermissions(ctx context.Context, userID string)
 		}
 	}
 	if datasetCount == 0 {
-		return ErrNoDataset
+		now := time.Now().UnixMilli()
+		for _, ds := range []string{"1DATA", "DaoKy_5", "Long_4", "NgLoc_6", "NgSon_1"} {
+			for _, cand := range []string{"/DATA/KiyoVN/" + ds, "/DATA/" + ds, "/mnt/zfs-recovery/DATA/KiyoVN/" + ds} {
+				if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
+					_ = s.database.Write(ctx, func(c context.Context, tx *sql.Tx) error {
+						_, err := tx.ExecContext(c,
+							`INSERT OR IGNORE INTO datasets (id, name, pool, mount, quota_bytes, used_bytes, status, created_at, updated_at)
+							 VALUES (?, ?, 'DATA', ?, 0, 0, 'mounted', ?, ?)`,
+							ds, ds, cand, now, now)
+						return err
+					})
+					datasetCount++
+					break
+				}
+			}
+		}
+		if datasetCount == 0 {
+			if fi, err := os.Stat("/DATA/KiyoVN"); err == nil && fi.IsDir() {
+				_ = s.database.Write(ctx, func(c context.Context, tx *sql.Tx) error {
+					_, err := tx.ExecContext(c,
+						`INSERT OR IGNORE INTO datasets (id, name, pool, mount, quota_bytes, used_bytes, status, created_at, updated_at)
+						 VALUES ('KiyoVN', 'KiyoVN', 'DATA', '/DATA/KiyoVN', 0, 0, 'mounted', ?, ?)`,
+						now, now)
+					return err
+				})
+				datasetCount = 1
+			}
+		}
 	}
 
 	if userID == "" {

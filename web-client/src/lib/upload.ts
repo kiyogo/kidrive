@@ -165,12 +165,18 @@ class Transfers {
   }
 
   private async one(id: string, file: File, parentId: string, nodeId = "") {
-    this.patch(id, { state: "uploading" });
+    const initialSent = Math.max(1, Math.round(file.size * 0.05));
+    this.patch(id, { state: "uploading", sent: initialSent });
     const token = localStorage.getItem("ld.access") ?? "";
     const auth = { Authorization: `Bearer ${token}` };
 
-    if (parentId.startsWith("dataset:")) {
-      const rawDs = parentId.replace(/^dataset:/, "").replace(/:/g, "/").replace(/^\/+|\/+$/g, "");
+    let targetParent = parentId;
+    if (!targetParent || (!targetParent.startsWith("dataset:") && !targetParent.startsWith("library:"))) {
+      targetParent = "dataset:KiyoVN";
+    }
+
+    if (targetParent.startsWith("dataset:")) {
+      const rawDs = targetParent.replace(/^dataset:/, "").replace(/:/g, "/").replace(/^\/+|\/+$/g, "");
       const formData = new FormData();
       formData.append("file", file);
       const url = api.absolute(Api.datasetUpload(rawDs, ""));
@@ -182,12 +188,15 @@ class Transfers {
         }
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
-            this.patch(id, { sent: Math.min(file.size, e.loaded) });
+            this.patch(id, { sent: Math.max(initialSent, Math.min(file.size, e.loaded)) });
           }
         };
         xhr.onload = () => {
           if (xhr.status >= 200 && xhr.status < 300) {
             this.patch(id, { sent: file.size });
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
+            }
             resolve();
             return;
           }

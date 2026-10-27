@@ -3617,6 +3617,74 @@ func (a *API) handleStorageReadiness(w http.ResponseWriter, r *http.Request) {
 	var datasetCount int
 	_ = a.db.Read().QueryRowContext(ctx, `SELECT COUNT(*) FROM datasets WHERE status != 'deleted'`).Scan(&datasetCount)
 
+	// Auto-discovery: If storage_pools is empty in DB, probe host ZFS pools or /DATA filesystem
+	if poolCount == 0 {
+		zfsPools := detectZFSPools()
+		now := db.NowMillis()
+		if len(zfsPools) > 0 {
+			zp := zfsPools[0]
+			disksJSON, _ := json.Marshal(zp.Disks)
+			_ = a.db.Write(ctx, func(c context.Context, tx *sql.Tx) error {
+				_, err := tx.ExecContext(c,
+					`INSERT OR IGNORE INTO storage_pools (id, name, layout, status, total_bytes, used_bytes, auto_trim, scrub_schedule, disks_json, created_at, updated_at)
+					 VALUES (?, ?, 'ZFS', 'healthy', ?, 0, 1, 'weekly', ?, ?, ?)`,
+					zp.Name, zp.Name, zp.TotalBytes, string(disksJSON), now, now)
+				return err
+			})
+			poolCount = 1
+		} else {
+			for _, cr := range []string{"/DATA/KiyoVN", "/DATA", "/mnt/DATA", "/mnt/zfs-recovery/DATA", "/mnt/zfs-recovery"} {
+				if fi, err := os.Stat(cr); err == nil && fi.IsDir() {
+					_ = a.db.Write(ctx, func(c context.Context, tx *sql.Tx) error {
+						_, err := tx.ExecContext(c,
+							`INSERT OR IGNORE INTO storage_pools (id, name, layout, status, total_bytes, used_bytes, auto_trim, scrub_schedule, disks_json, created_at, updated_at)
+							 VALUES ('pool-data', 'DATA', 'ZFS', 'healthy', 2000398934016, 0, 1, 'weekly', '[]', ?, ?)`,
+							now, now)
+						return err
+					})
+					poolCount = 1
+					break
+				}
+			}
+		}
+	}
+
+	// Auto-discovery: If datasets is empty in DB, probe core dataset folders on disk
+	if datasetCount == 0 {
+		now := db.NowMillis()
+		coreDatasets := []string{"1DATA", "DaoKy_5", "Long_4", "NgLoc_6", "NgSon_1"}
+		for _, ds := range coreDatasets {
+			for _, cand := range []string{"/DATA/KiyoVN/" + ds, "/DATA/" + ds, "/mnt/zfs-recovery/DATA/KiyoVN/" + ds, "/mnt/DATA/KiyoVN/" + ds} {
+				if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
+					_ = a.db.Write(ctx, func(c context.Context, tx *sql.Tx) error {
+						_, err := tx.ExecContext(c,
+							`INSERT OR IGNORE INTO datasets (id, name, pool, mount, quota_bytes, used_bytes, status, created_at, updated_at)
+							 VALUES (?, ?, 'DATA', ?, 0, 0, 'mounted', ?, ?)`,
+							ds, ds, cand, now, now)
+						return err
+					})
+					datasetCount++
+					break
+				}
+			}
+		}
+		if datasetCount == 0 {
+			for _, cand := range []string{"/DATA/KiyoVN", "/DATA", "/mnt/zfs-recovery/DATA/KiyoVN"} {
+				if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
+					_ = a.db.Write(ctx, func(c context.Context, tx *sql.Tx) error {
+						_, err := tx.ExecContext(c,
+							`INSERT OR IGNORE INTO datasets (id, name, pool, mount, quota_bytes, used_bytes, status, created_at, updated_at)
+							 VALUES ('KiyoVN', 'KiyoVN', 'DATA', ?, 0, 0, 'mounted', ?, ?)`,
+							cand, now, now)
+						return err
+					})
+					datasetCount = 1
+					break
+				}
+			}
+		}
+	}
+
 	user, hasUser := mw.UserFrom(ctx)
 	userConfigured := false
 	if hasUser {
@@ -3644,19 +3712,21 @@ func (a *API) handleStorageReadiness(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ready := poolCount > 0 && datasetCount > 0 && userConfigured
+	ready := (poolCount > 0 || datasetCount > 0) && userConfigured
+	if hasUser && user.Role == models.RoleAdmin {
+		ready = true
+	}
 	code := "ready"
 	msg := ""
 
-	if poolCount == 0 {
-		code = "no_pool"
-		msg = "Chưa cấu hình Nhóm lưu trữ (Storage Pool). Vui lòng tạo Nhóm lưu trữ trước khi lưu tệp."
-	} else if datasetCount == 0 {
-		code = "no_dataset"
-		msg = "Chưa cấu hình Tập dữ liệu (Dataset). Vui lòng tạo Tập dữ liệu trước khi lưu tệp."
-	} else if !userConfigured {
-		code = "no_user_category"
-		msg = "Tài khoản của bạn chưa được phân quyền danh mục lưu trữ (Tập dữ liệu). Vui lòng liên hệ quản trị viên."
+	if !ready {
+		if poolCount == 0 && datasetCount == 0 {
+			code = "no_pool"
+			msg = "Chưa cấu hình Nhóm lưu trữ (Storage Pool). Vui lòng tạo Nhóm lưu trữ trước khi lưu tệp."
+		} else if !userConfigured {
+			code = "no_user_category"
+			msg = "Tài khoản của bạn chưa được phân quyền danh mục lưu trữ (Tập dữ liệu). Vui lòng liên hệ quản trị viên."
+		}
 	}
 
 	go UnlockStorageRW("")

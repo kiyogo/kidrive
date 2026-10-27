@@ -368,9 +368,7 @@ function Drive({ initialSlug }: { initialSlug?: string[] }) {
   const current = folder.length ? folder[folder.length - 1] : { id: "", name: t.myFiles };
 
   const uploadFolderId =
-    section === "files"
-      ? (current.id || (defaultSingleDataset ? `dataset:${defaultSingleDataset}` : ""))
-      : "";
+    current.id || (defaultSingleDataset ? `dataset:${defaultSingleDataset}` : "dataset:KiyoVN");
 
   const { pick: pickFiles, pickFolder, sheet: clashSheet } = useUploader(
     uploadFolderId,

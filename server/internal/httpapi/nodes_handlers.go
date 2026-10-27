@@ -1363,22 +1363,30 @@ func (a *API) handleMediaNodes(w http.ResponseWriter, r *http.Request, userID st
 			})
 		}
 
-		// Cache what we have (even if empty []) so subsequent requests return instantly in 0ms!
-		setCachedMediaList(cacheKey, mediaNodes)
-
-		// 2. BACKGROUND SCAN: Run filesystem walk asynchronously so HTTP request returns IMMEDIATELY without freezing
-		if u, ok := mw.UserFrom(r.Context()); ok {
-			bgCtx := mw.WithUser(context.Background(), u)
-			bgReq := r.Clone(bgCtx)
-			go func() {
-				scanned, err := a.scanAndCacheMediaNodes(bgReq, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
-				if err == nil {
-					setCachedMediaList(cacheKey, scanned)
-					if len(scanned) > len(mediaNodes) {
+		if len(mediaNodes) > 0 {
+			setCachedMediaList(cacheKey, mediaNodes)
+			// Supplement with background filesystem scan if not done yet
+			if u, ok := mw.UserFrom(r.Context()); ok {
+				bgCtx := mw.WithUser(context.Background(), u)
+				bgReq := r.Clone(bgCtx)
+				go func() {
+					scanned, err := a.scanAndCacheMediaNodes(bgReq, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
+					if err == nil && len(scanned) > len(mediaNodes) {
+						setCachedMediaList(cacheKey, scanned)
 						a.hub.Publish(ws.NewEvent("node.updated", nowMillis(), nil))
 					}
-				}
-			}()
+				}()
+			}
+		} else {
+			// No DB nodes: Scan filesystem directly so the FIRST request returns actual photos immediately!
+			scanned, err := a.scanAndCacheMediaNodes(r, cacheKey, userID, opts.Filter, userRoots, hasFullRoot)
+			if err == nil && len(scanned) > 0 {
+				mediaNodes = scanned
+				setCachedMediaList(cacheKey, mediaNodes)
+			} else {
+				// Don't poison cache with empty result for long
+				setCachedMediaList(cacheKey, []nodeDTO{})
+			}
 		}
 	}
 
@@ -1507,9 +1515,12 @@ func (a *API) scanAndCacheMediaNodes(r *http.Request, cacheKey, userID, filter s
 
 		candidateRoots := []string{
 			"/DATA/KiyoVN",
+			"/mnt/zfs-recovery/DATA/KiyoVN",
 			"/mnt/DATA/KiyoVN",
 			"/DATA",
+			"/mnt/zfs-recovery/DATA",
 			"/mnt/DATA",
+			"/mnt/zfs-recovery",
 			"/mnt/DỮ LIỆU/KiyoVN",
 			"/mnt/DỮ LIỆU",
 		}
@@ -1913,8 +1924,8 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 
 	isStandardImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".gif" || ext == ".svg" || ext == ".ico"
 
-	// For standard web images under 2MB, serve immediately with long client cache
-	if isStandardImage && info.Size() <= 2*1024*1024 {
+	// For standard web images under 8MB, serve immediately with client cache
+	if isStandardImage && info.Size() <= 8*1024*1024 {
 		if mimeType != "" {
 			w.Header().Set("Content-Type", mimeType)
 		}
@@ -2011,8 +2022,8 @@ func (a *API) serveDatasetThumbnail(w http.ResponseWriter, r *http.Request, clea
 		}
 	}
 
-	// 5. Graceful fallback for standard images: serve directly if <= 8MB rather than leaving a blank tile!
-	if cat == models.CategoryImage && isStandardImage && info.Size() <= 8*1024*1024 {
+	// 5. Graceful fallback for standard images: serve directly if <= 25MB rather than leaving a blank tile!
+	if cat == models.CategoryImage && isStandardImage && info.Size() <= 25*1024*1024 {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		http.ServeFile(w, r, cleanTarget)
 		return

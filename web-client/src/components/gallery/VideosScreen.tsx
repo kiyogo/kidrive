@@ -150,6 +150,18 @@ export function VideosScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMod
     };
   }, [load]);
 
+  // If initially empty, auto-retry after 1.5s and 3.5s in case media scanning was indexing
+  useEffect(() => {
+    if (!loading && nodes !== null && nodes.length === 0) {
+      const t1 = setTimeout(() => void load(), 1500);
+      const t2 = setTimeout(() => void load(), 3500);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    }
+  }, [loading, nodes?.length, load]);
+
   const toggleSelect = (id: string) => {
     setSelection((prev) => {
       const next = new Set(prev);
@@ -595,6 +607,7 @@ function VideoCard({
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [isVisible, setIsVisible] = useState(false);
+  const [thumbError, setThumbError] = useState(false);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -660,7 +673,7 @@ function VideoCard({
         }}
       >
         {/* Video Thumbnail */}
-        {node.has_thumbnail && isVisible ? (
+        {isVisible && !thumbError ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             ref={imgRef}
@@ -668,6 +681,7 @@ function VideoCard({
             alt={node.name}
             loading="lazy"
             decoding="async"
+            onError={() => setThumbError(true)}
             onLoad={(e) => {
               const img = e.currentTarget;
               if (img.naturalWidth && img.naturalHeight) {

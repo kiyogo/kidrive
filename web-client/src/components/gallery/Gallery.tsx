@@ -116,6 +116,18 @@ export function GalleryScreen({ onOpen }: { onOpen: (n: NodeModel, list?: NodeMo
     };
   }, [load]);
 
+  // If initially empty, auto-retry once after 1.5s and 3.5s in case media scanning was indexing
+  useEffect(() => {
+    if (!loading && nodes !== null && nodes.length === 0) {
+      const t1 = setTimeout(() => void load(), 1500);
+      const t2 = setTimeout(() => void load(), 3500);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    }
+  }, [loading, nodes?.length, load]);
+
   const count = nodes?.length ?? 0;
 
   const sortLabel = (() => {
@@ -335,6 +347,7 @@ function LazyGalleryTile({
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [usingFallback, setUsingFallback] = useState(false);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -365,7 +378,7 @@ function LazyGalleryTile({
 
   const isHeic = /\.(heic|heif)$/i.test(node.name);
   const thumbUrl = api.media(Api.thumbnail(node.id));
-  const canFallback = !isHeic && (node.size_bytes || 0) <= 1024 * 1024;
+  const canFallback = !isHeic && (node.size_bytes || 0) <= 25 * 1024 * 1024;
   const fallbackUrl = canFallback ? api.media(Api.download(node.id)) : "";
 
   return (
@@ -388,7 +401,7 @@ function LazyGalleryTile({
       }}
     >
       {isVisible ? (
-        imgError && !canFallback ? (
+        imgError ? (
           <span
             style={{
               display: "grid",
@@ -403,12 +416,16 @@ function LazyGalleryTile({
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={imgError && canFallback ? fallbackUrl : thumbUrl}
+            src={usingFallback && canFallback ? fallbackUrl : thumbUrl}
             alt={node.name}
             loading="lazy"
             decoding="async"
             onError={() => {
-              setImgError(true);
+              if (!usingFallback && canFallback) {
+                setUsingFallback(true);
+              } else {
+                setImgError(true);
+              }
             }}
             style={{
               width: "100%",

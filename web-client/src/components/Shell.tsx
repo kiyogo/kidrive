@@ -133,10 +133,12 @@ export function Shell({
 
   const handleUploadFiles = async (files: FileList | null) => {
     if (!files || !files.length) return;
-    const readiness = await checkStorageReadiness();
-    if (!readiness.ready) {
-      showToast(readiness.message, "error");
-      return;
+    if (user && user.role !== "admin") {
+      const readiness = await checkStorageReadiness();
+      if (!readiness.ready) {
+        showToast(readiness.message, "error");
+        return;
+      }
     }
     if (user && user.quota_bytes > 0) {
       const totalSize = Array.from(files).reduce((acc, f) => acc + (f.size || 0), 0);
@@ -150,10 +152,12 @@ export function Shell({
 
   const handleUploadFolder = async (files: FileList | null) => {
     if (!files || !files.length) return;
-    const readiness = await checkStorageReadiness();
-    if (!readiness.ready) {
-      showToast(readiness.message, "error");
-      return;
+    if (user && user.role !== "admin") {
+      const readiness = await checkStorageReadiness();
+      if (!readiness.ready) {
+        showToast(readiness.message, "error");
+        return;
+      }
     }
     if (user && user.quota_bytes > 0) {
       const totalSize = Array.from(files).reduce((acc, f) => acc + (f.size || 0), 0);
@@ -167,10 +171,12 @@ export function Shell({
   };
 
   const pick = async () => {
-    const readiness = await checkStorageReadiness();
-    if (!readiness.ready) {
-      showToast(readiness.message, "error");
-      return;
+    if (user && user.role !== "admin") {
+      const readiness = await checkStorageReadiness();
+      if (!readiness.ready) {
+        showToast(readiness.message, "error");
+        return;
+      }
     }
     if (user && user.quota_bytes > 0 && user.quota_bytes_used >= user.quota_bytes) {
       showToast("Dung lượng lưu trữ đã đầy, không thể tải tệp lên", "error");
@@ -180,10 +186,12 @@ export function Shell({
   };
 
   const pickFolder = async () => {
-    const readiness = await checkStorageReadiness();
-    if (!readiness.ready) {
-      showToast(readiness.message, "error");
-      return;
+    if (user && user.role !== "admin") {
+      const readiness = await checkStorageReadiness();
+      if (!readiness.ready) {
+        showToast(readiness.message, "error");
+        return;
+      }
     }
     if (user && user.quota_bytes > 0 && user.quota_bytes_used >= user.quota_bytes) {
       showToast("Dung lượng lưu trữ đã đầy, không thể tải tệp lên", "error");

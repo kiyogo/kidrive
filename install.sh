@@ -103,9 +103,9 @@ main() {
   for URL in "${URLS[@]}"; do
     echo -e "${BLUE}Thử tải từ: ${URL}...${NC}"
     if command -v curl >/dev/null 2>&1; then
-      curl -fsSL -o "$TMP_BIN" "$URL" 2>/dev/null || true
+      curl -fsSL --connect-timeout 8 --max-time 60 -o "$TMP_BIN" "$URL" 2>/dev/null || true
     elif command -v wget >/dev/null 2>&1; then
-      wget -qO "$TMP_BIN" "$URL" 2>/dev/null || true
+      wget -q -T 60 -O "$TMP_BIN" "$URL" 2>/dev/null || true
     fi
 
     if [ -f "$TMP_BIN" ]; then
@@ -202,26 +202,8 @@ main() {
     echo -e "${BLUE}Kiểm tra và mở khóa toàn diện quyền ghi trên các mảng ZFS...${NC}"
     zpool import -f -a 2>/dev/null || true
     zpool import -f -R /mnt/zfs-recovery DATA 2>/dev/null || true
-    if zpool get -H -o value readonly DATA 2>/dev/null | grep -q 'on'; then
-      echo -e "${YELLOW}Phát hiện mảng DATA bị khóa readonly ở cấp Pool, đang thử chuyển sang read-write...${NC}"
-      zpool set readonly=off DATA 2>/dev/null || true
-      zfs set -r readonly=off DATA 2>/dev/null || true
-      if zpool get -H -o value readonly DATA 2>/dev/null | grep -q 'on'; then
-        systemctl stop smbd nmbd localdrive 2>/dev/null || true
-        for bm in $(awk '{print $2}' /proc/mounts 2>/dev/null | grep -E '^/DATA|^/mnt/DATA|^/mnt/zfs-recovery' | awk '{ print length, $0 }' | sort -rn | cut -d" " -f2-); do
-          umount -l "$bm" 2>/dev/null || true
-        done
-        zfs unmount -f -a 2>/dev/null || true
-        if zpool export -f DATA 2>/dev/null; then
-          echo -e "${GREEN}✓ Đã export mảng DATA thành công, đang re-import read-write...${NC}"
-          zpool import -f -o readonly=off -R /mnt/zfs-recovery DATA 2>/dev/null || \
-            zpool import -f -d /dev -o readonly=off -R /mnt/zfs-recovery DATA 2>/dev/null || \
-            zpool import -f -o readonly=on -R /mnt/zfs-recovery DATA 2>/dev/null || true
-        else
-          echo -e "${YELLOW}Mảng DATA đang bận, sẽ dùng OverlayFS để đảm bảo quyền ghi trực tiếp.${NC}"
-        fi
-      fi
-    fi
+    zpool set readonly=off DATA 2>/dev/null || true
+    zfs set -r readonly=off DATA 2>/dev/null || true
     for p in $(zpool list -H -o name 2>/dev/null); do
       zpool set readonly=off "$p" 2>/dev/null || true
       zfs set -r readonly=off "$p" 2>/dev/null || true
@@ -339,15 +321,15 @@ main() {
       done
     fi
 
-    # 3. Quét sâu bằng find nếu cần
+    # 3. Quét nhanh nếu cần
     if [ -z "$SRC" ]; then
-      SRC=$(find /mnt/zfs-recovery /DATA /mnt /srv /var /home -maxdepth 5 -type d -name "$ds" 2>/dev/null | grep -v "/DATA/KiyoVN/$ds" | grep -v "/DATA/$ds" | head -n 1)
+      SRC=$(find /mnt/zfs-recovery /DATA /mnt -maxdepth 3 -type d -name "$ds" 2>/dev/null | grep -v "/DATA/KiyoVN/$ds" | grep -v "/DATA/$ds" | head -n 1)
     fi
 
     if [ -n "$SRC" ]; then
       echo -e "${GREEN}✓ Đã nhận diện tập dữ liệu $ds -> $SRC${NC}"
       mkdir -p "/DATA/KiyoVN/$ds" "/DATA/$ds" 2>/dev/null || true
-      chmod -R 777 "/DATA/KiyoVN/$ds" "/DATA/$ds" 2>/dev/null || true
+      chmod 777 "/DATA/KiyoVN/$ds" "/DATA/$ds" 2>/dev/null || true
 
       # Bind mount trực tiếp vào /DATA/KiyoVN/$ds
       if [ "$SRC" != "/DATA/KiyoVN/$ds" ] && ! mount | grep -q "/DATA/KiyoVN/$ds "; then

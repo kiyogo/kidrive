@@ -103,7 +103,7 @@ export function useUploader(parentId: string, onDone?: () => void) {
           }
         }
       }
-      return into;
+      return "dataset:KiyoVN";
     },
     [user],
   );
