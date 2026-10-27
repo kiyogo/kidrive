@@ -986,29 +986,6 @@ export function FilesBrowser({
   return (
     <div
       style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", position: "relative" }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setDragging(true);
-      }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setDragging(false);
-        if (!hasAssignedCategory) {
-          toast("Tài khoản chưa được chỉ định danh mục lưu trữ. Vui lòng liên hệ quản trị viên!", "error");
-          return;
-        }
-        if (isReadOnly) {
-          toast("Bạn chỉ có quyền xem (Chỉ đọc) trên bộ dữ liệu này, không thể tải lên!", "error");
-          return;
-        }
-        if (user && user.quota_bytes > 0 && user.quota_bytes_used >= user.quota_bytes) {
-          toast("Dung lượng lưu trữ đã đầy, không thể tải tệp lên", "error");
-          return;
-        }
-        void dropDataTransfer(e.dataTransfer, folderId);
-      }}
       // clearing on a click into nothing belongs to the marquee, which knows
       // whether the press became a drag. A second handler here fired after
       // every rubber band and wiped what it had just selected.
@@ -1669,36 +1646,7 @@ export function FilesBrowser({
 
       {band && <div style={bandStyle(band)} />}
 
-      {/* drop overlay: the whole surface, so "let go anywhere" needs no reading */}
-      {dragging && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            zIndex: 400,
-            background: wash("#4C8DFF", 0.1),
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            pointerEvents: "none",
-          }}
-        >
-          <div
-            style={{
-              padding: "32px 40px",
-              background: "var(--bg-elevated)",
-              border: "2px solid var(--accent)",
-              borderRadius: "var(--r-card)",
-              textAlign: "center",
-            }}
-          >
-            <Icon glyph="upload" size={44} color="var(--accent)" />
-            <div className="t-title-md" style={{ marginTop: 16 }}>
-              Drop to upload
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* what the phone folds away, rather than cramming into the row */}
       <Menu

@@ -589,7 +589,7 @@ export function TransfersScreen() {
                             ? (item.isTask ? "Hoàn thành" : bytes(item.size))
                             : item.isTask
                               ? `Đang xử lý (${pct}%)`
-                              : `${bytes(item.sent)} of ${bytes(item.size)}`}
+                              : `${bytes(item.sent)} / ${bytes(item.size)}${item.speed && item.speed > 0 ? ` • ${bytes(item.speed)}/s` : ""}`}
                       </span>
                     </span>
                     {item.state === "uploading" && (

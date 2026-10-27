@@ -38,6 +38,7 @@ export interface Transfer {
   state: TransferState;
   error?: string;
   isTask?: boolean;
+  speed?: number;
 }
 
 type Listener = (list: Transfer[]) => void;
@@ -190,14 +191,25 @@ class Transfers {
         if (token) {
           xhr.setRequestHeader("Authorization", `Bearer ${token}`);
         }
+        let lastTime = Date.now();
+        let lastLoaded = initialSent;
+        let currentSpeed = 0;
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
-            this.patch(id, { sent: Math.max(initialSent, Math.min(file.size, e.loaded)) });
+            const now = Date.now();
+            const elapsed = (now - lastTime) / 1000;
+            const currentLoaded = Math.max(initialSent, Math.min(file.size, e.loaded));
+            if (elapsed >= 0.35) {
+              currentSpeed = Math.max(0, Math.round((currentLoaded - lastLoaded) / elapsed));
+              lastTime = now;
+              lastLoaded = currentLoaded;
+            }
+            this.patch(id, { sent: currentLoaded, speed: currentSpeed });
           }
         };
         xhr.onload = () => {
           if (xhr.status >= 200 && xhr.status < 300) {
-            this.patch(id, { sent: file.size });
+            this.patch(id, { sent: file.size, speed: 0 });
             if (typeof window !== "undefined") {
               window.dispatchEvent(new CustomEvent("ld_nodes_changed"));
             }
@@ -259,6 +271,7 @@ class Transfers {
     // 2. the bytes, in chunks, so progress is real and a failure is partial
     let offset = 0;
     while (offset < file.size) {
+      const chunkStart = Date.now();
       const end = Math.min(offset + CHUNK, file.size);
       const slice = file.slice(offset, end);
       const res = await fetch(target, {
@@ -277,9 +290,11 @@ class Transfers {
         }
         throw new Error(say().transferFailed);
       }
+      const chunkElapsed = (Date.now() - chunkStart) / 1000;
+      const speed = chunkElapsed > 0 ? Math.round(slice.size / chunkElapsed) : 0;
       const next = Number(res.headers.get("Upload-Offset") ?? end);
       offset = Number.isFinite(next) && next > offset ? next : end;
-      this.patch(id, { sent: offset });
+      this.patch(id, { sent: offset, speed });
     }
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("ld_nodes_changed"));

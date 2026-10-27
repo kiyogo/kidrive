@@ -49,6 +49,7 @@ export function FloatingTransfersTray({ onOpenTransfers }: { onOpenTransfers: ()
 
   const totalBytes = items.reduce((acc, x) => acc + (x.size || 0), 0);
   const sentBytes = items.reduce((acc, x) => acc + (x.sent || 0), 0);
+  const currentSpeed = active.reduce((acc, x) => acc + (x.speed || 0), 0);
   const pct = isDoneAll
     ? 100
     : totalBytes > 0
@@ -72,17 +73,17 @@ export function FloatingTransfersTray({ onOpenTransfers }: { onOpenTransfers: ()
         borderRadius: "var(--r-card, 14px)",
         boxShadow: "0 10px 36px rgba(0,0,0,0.45)",
         padding: "14px 18px",
-        minWidth: isDesktop ? 310 : "auto",
-        maxWidth: isDesktop ? 390 : "100%",
+        minWidth: isDesktop ? 320 : "auto",
+        maxWidth: isDesktop ? 420 : "100%",
         cursor: "pointer",
         display: "flex",
         flexDirection: "column",
-        gap: 10,
+        gap: 8,
         transition: "all 200ms ease",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-        <div style={{ display: "flex", alignItems: "center", overflow: "hidden", minWidth: 0, flex: 1, textAlign: "left" }}>
+        <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1, textAlign: "left" }}>
           <span
             className="t-body-sm"
             style={{
@@ -95,6 +96,22 @@ export function FloatingTransfersTray({ onOpenTransfers }: { onOpenTransfers: ()
           >
             Trạng thái
           </span>
+          <span
+            style={{
+              fontSize: 12,
+              color: "var(--fg-secondary)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              marginTop: 2,
+            }}
+          >
+            {isDoneAll
+              ? `${completed} mục đã xong • ${bytes(totalBytes)}`
+              : isFailed
+                ? `${failedItems.length} mục lỗi`
+                : `${bytes(sentBytes)} / ${bytes(totalBytes)}${currentSpeed > 0 ? ` • ${bytes(currentSpeed)}/s` : ""}`}
+          </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: 10, flexShrink: 0 }}>
           <span
@@ -102,6 +119,7 @@ export function FloatingTransfersTray({ onOpenTransfers }: { onOpenTransfers: ()
             style={{
               color: barColor,
               fontWeight: 700,
+              fontSize: 14,
             }}
           >
             {isFailed ? "Lỗi" : `${pct}%`}

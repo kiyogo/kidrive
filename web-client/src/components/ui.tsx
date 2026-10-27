@@ -475,8 +475,6 @@ export function TextField({
         </div>
       )}
       <div
-        onMouseDown={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
         style={{
           display: "flex",
           alignItems: "center",
@@ -498,8 +496,6 @@ export function TextField({
           autoFocus={autoFocus && !disabled}
           disabled={disabled}
           placeholder={hint}
-          onMouseDown={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
           onFocus={() => !disabled && setFocused(true)}
           onBlur={() => setFocused(false)}
           onChange={(e) => !disabled && onChange(e.target.value)}
@@ -1170,8 +1166,6 @@ export function Sheet({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        onMouseDown={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
         className="ld-enter"
         style={{
           width: "min(520px, 100%)",
@@ -1247,8 +1241,6 @@ export function Dialog({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        onMouseDown={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
         className="ld-enter"
         style={{
           width: `min(${maxWidth}px, 100%)`,

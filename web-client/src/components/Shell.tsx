@@ -131,9 +131,14 @@ export function Shell({
   const dragCounter = useRef(0);
 
   useEffect(() => {
-    const isFileInputTarget = (e: DragEvent | PointerEvent) => {
+    const isFileInputTarget = (e: DragEvent | MouseEvent | PointerEvent) => {
       const target = e.target as HTMLElement | null;
-      return target && target.closest("input, textarea, [contenteditable='true'], [role='dialog'], .ld-dialog");
+      return target && target.closest("input, textarea, select, [contenteditable='true'], [role='dialog'], .ld-dialog");
+    };
+
+    const resetDrag = () => {
+      dragCounter.current = 0;
+      setIsWindowDragging(false);
     };
 
     const handleDragEnter = (e: DragEvent) => {
@@ -149,20 +154,28 @@ export function Shell({
       if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes("Files")) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "copy";
+      if (!isWindowDragging) {
+        setIsWindowDragging(true);
+      }
     };
 
     const handleDragLeave = (e: DragEvent) => {
       if (isFileInputTarget(e)) return;
       dragCounter.current--;
-      if (dragCounter.current <= 0) {
-        dragCounter.current = 0;
-        setIsWindowDragging(false);
+      if (
+        dragCounter.current <= 0 ||
+        e.clientX <= 0 ||
+        e.clientY <= 0 ||
+        e.clientX >= window.innerWidth ||
+        e.clientY >= window.innerHeight ||
+        !e.relatedTarget
+      ) {
+        resetDrag();
       }
     };
 
     const handleDrop = (e: DragEvent) => {
-      dragCounter.current = 0;
-      setIsWindowDragging(false);
+      resetDrag();
       if (isFileInputTarget(e)) return;
       if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes("Files")) return;
       e.preventDefault();
@@ -171,27 +184,32 @@ export function Shell({
       }
     };
 
-    const handlePointerDown = () => {
-      if (dragCounter.current > 0 || isWindowDragging) {
-        dragCounter.current = 0;
-        setIsWindowDragging(false);
-      }
-    };
-
-    window.addEventListener("dragenter", handleDragEnter);
-    window.addEventListener("dragover", handleDragOver);
-    window.addEventListener("dragleave", handleDragLeave);
-    window.addEventListener("drop", handleDrop);
-    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("dragenter", handleDragEnter, true);
+    window.addEventListener("dragover", handleDragOver, true);
+    window.addEventListener("dragleave", handleDragLeave, true);
+    window.addEventListener("drop", handleDrop, true);
+    window.addEventListener("dragend", resetDrag, true);
+    window.addEventListener("pointerdown", resetDrag, true);
+    window.addEventListener("mousedown", resetDrag, true);
+    window.addEventListener("mouseup", resetDrag, true);
+    window.addEventListener("mouseleave", resetDrag, true);
+    document.addEventListener("mouseleave", resetDrag, true);
+    document.addEventListener("visibilitychange", resetDrag, true);
 
     return () => {
-      window.removeEventListener("dragenter", handleDragEnter);
-      window.removeEventListener("dragover", handleDragOver);
-      window.removeEventListener("dragleave", handleDragLeave);
-      window.removeEventListener("drop", handleDrop);
-      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("dragenter", handleDragEnter, true);
+      window.removeEventListener("dragover", handleDragOver, true);
+      window.removeEventListener("dragleave", handleDragLeave, true);
+      window.removeEventListener("drop", handleDrop, true);
+      window.removeEventListener("dragend", resetDrag, true);
+      window.removeEventListener("pointerdown", resetDrag, true);
+      window.removeEventListener("mousedown", resetDrag, true);
+      window.removeEventListener("mouseup", resetDrag, true);
+      window.removeEventListener("mouseleave", resetDrag, true);
+      document.removeEventListener("mouseleave", resetDrag, true);
+      document.removeEventListener("visibilitychange", resetDrag, true);
     };
-  }, [onDropDataTransfer]);
+  }, [onDropDataTransfer, isWindowDragging]);
 
   const dragOverlay = isWindowDragging ? (
     <div
@@ -199,8 +217,7 @@ export function Shell({
         position: "fixed",
         inset: 0,
         zIndex: 999999,
-        background: "rgba(0, 0, 0, 0.65)",
-        backdropFilter: "blur(4px)",
+        background: "rgba(0, 0, 0, 0.4)",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -210,10 +227,12 @@ export function Shell({
         gap: 16,
       }}
     >
-      <Icon glyph="upload" size={54} color="var(--accent, #3b82f6)" />
-      <span style={{ color: "#ffffff", fontSize: 20, fontWeight: 700, pointerEvents: "none" }}>
-        Thả tệp vào đây để tải lên
-      </span>
+      <div style={{ pointerEvents: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+        <Icon glyph="upload" size={54} color="var(--accent, #3b82f6)" />
+        <span style={{ color: "#ffffff", fontSize: 20, fontWeight: 700, pointerEvents: "none" }}>
+          Thả tệp vào đây để tải lên
+        </span>
+      </div>
     </div>
   ) : null;
 
